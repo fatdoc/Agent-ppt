@@ -683,10 +683,10 @@ def generate_from_description(project_id):
         
         if len(pages_data) != len(page_descriptions):
             logger.warning(f"页面数量不匹配: 大纲 {len(pages_data)} 页, 描述 {len(page_descriptions)} 页")
-            # 取较小的数量，避免索引错误
-            min_count = min(len(pages_data), len(page_descriptions))
-            pages_data = pages_data[:min_count]
-            page_descriptions = page_descriptions[:min_count]
+            raise ValueError(
+                f"Outline/page description count mismatch: "
+                f"outline={len(pages_data)}, descriptions={len(page_descriptions)}"
+            )
         
         # Step 4: Delete existing pages (using ORM session to trigger cascades)
         old_pages = Page.query.filter_by(project_id=project_id).all()

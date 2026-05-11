@@ -29,6 +29,12 @@ def _make_b64_png() -> str:
     return base64.b64encode(buf.getvalue()).decode()
 
 
+def _make_chat_image_response():
+    data_url = f'data:image/png;base64,{_make_b64_png()}'
+    message = SimpleNamespace(images=[{'image_url': {'url': data_url}}], content=None)
+    return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+
 def _mock_requests_get(png_bytes):
     """Create a mock for requests.get that works as a context manager."""
     mock_resp = MagicMock()
@@ -139,3 +145,27 @@ class TestExtractFromImagesResult:
         provider = _make_provider()
         with pytest.raises(ValueError, match="Unexpected images API response type"):
             provider._extract_from_images_result(12345)
+
+
+class TestOpenAICompatibleGatewayFallback:
+    """Test compatibility with LiteLLM-style gateways that require provider prefixes."""
+
+    def test_gemini_image_model_retries_with_provider_prefix_on_unknown_provider(self):
+        with patch('services.ai_providers.image.openai_provider.OpenAI') as mock_openai:
+            mock_client = mock_openai.return_value
+            mock_client.chat.completions.create.side_effect = [
+                Exception("unknown provider for model gemini-3-pro-image-preview"),
+                _make_chat_image_response(),
+            ]
+            provider = OpenAIImageProvider(
+                api_key='test',
+                api_base='http://test',
+                model='gemini-3-pro-image-preview',
+            )
+
+            result = provider.generate_image("draw a banana")
+
+        assert isinstance(result, Image.Image)
+        calls = mock_client.chat.completions.create.call_args_list
+        assert calls[0].kwargs["model"] == "gemini-3-pro-image-preview"
+        assert calls[1].kwargs["model"] == "gemini/gemini-3-pro-image-preview"

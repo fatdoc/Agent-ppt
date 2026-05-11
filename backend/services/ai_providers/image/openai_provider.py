@@ -174,6 +174,36 @@ class OpenAIImageProvider(ImageProvider):
         
         return extra_body
 
+    def _provider_prefixed_model(self) -> Optional[str]:
+        """Return a provider-prefixed model name for gateways that require it."""
+        model = self.model.strip()
+        if "/" in model:
+            return None
+        if model.startswith("gemini-"):
+            return f"gemini/{model}"
+        return None
+
+    def _is_unknown_provider_error(self, error: Exception) -> bool:
+        return "unknown provider" in str(error).lower()
+
+    def _create_chat_completion_with_provider_fallback(self, **kwargs):
+        """Retry Gemini models with an explicit provider prefix for LiteLLM-style gateways."""
+        try:
+            return self.client.chat.completions.create(**kwargs)
+        except Exception as error:
+            fallback_model = self._provider_prefixed_model()
+            if not fallback_model or not self._is_unknown_provider_error(error):
+                raise
+
+            logger.warning(
+                "OpenAI-compatible image gateway did not infer provider for model %s; retrying as %s",
+                self.model,
+                fallback_model,
+            )
+            retry_kwargs = dict(kwargs)
+            retry_kwargs["model"] = fallback_model
+            return self.client.chat.completions.create(**retry_kwargs)
+
     def _is_native_images_api_model(self) -> bool:
         """Return True when the model should use images.generate / images.edit."""
         return self.model.lower() in _NATIVE_IMAGES_API_MODELS
@@ -383,7 +413,7 @@ class OpenAIImageProvider(ImageProvider):
             logger.debug(f"Using extra_body: {extra_body}")
 
             # Use both system message (for basic providers) and extra_body (for advanced providers)
-            response = self.client.chat.completions.create(
+            response = self._create_chat_completion_with_provider_fallback(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": f"aspect_ratio={aspect_ratio}, resolution={resolution}"},

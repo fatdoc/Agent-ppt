@@ -497,11 +497,31 @@ class AIService:
         Flatten outline structure to page list
         Based on demo.py flatten_outline()
         """
+        if not isinstance(outline, list):
+            raise ValueError(f"Expected outline to be a list, got {type(outline).__name__}")
+
         pages = []
-        for item in outline:
+        for item_index, item in enumerate(outline):
+            if not isinstance(item, dict):
+                raise ValueError(
+                    f"Invalid outline item at index {item_index}: "
+                    f"expected object, got {type(item).__name__}"
+                )
+
             if "part" in item and "pages" in item:
+                if not isinstance(item["pages"], list):
+                    raise ValueError(
+                        f"Invalid outline part at index {item_index}: "
+                        f"pages must be a list, got {type(item['pages']).__name__}"
+                    )
+
                 # This is a part, expand its pages
-                for page in item["pages"]:
+                for page_index, page in enumerate(item["pages"]):
+                    if not isinstance(page, dict):
+                        raise ValueError(
+                            f"Invalid outline page at part index {item_index}, page index {page_index}: "
+                            f"expected object, got {type(page).__name__}"
+                        )
                     page_with_part = page.copy()
                     page_with_part["part"] = item["part"]
                     pages.append(page_with_part)
@@ -938,6 +958,11 @@ class AIService:
         )
         return self.generate_image(edit_instruction, current_image_path, aspect_ratio, resolution, additional_ref_images)
     
+    @retry(
+        stop=stop_after_attempt(3),
+        retry=retry_if_exception_type((json.JSONDecodeError, ValueError)),
+        reraise=True
+    )
     def parse_description_to_outline(self, project_context: ProjectContext, language='zh') -> List[Dict]:
         """
         从描述文本解析出大纲结构
@@ -950,8 +975,16 @@ class AIService:
         """
         parse_prompt = get_description_to_outline_prompt(project_context, language)
         outline = self.generate_json(parse_prompt, thinking_budget=1000)
+        pages = self.flatten_outline(outline)
+        if not pages:
+            raise ValueError("Expected outline to contain at least one page")
         return outline
     
+    @retry(
+        stop=stop_after_attempt(3),
+        retry=retry_if_exception_type((json.JSONDecodeError, ValueError)),
+        reraise=True
+    )
     def parse_description_to_page_descriptions(self, project_context: ProjectContext, 
                                                outline: List[Dict],
                                                language='zh') -> List[str]:
@@ -969,10 +1002,16 @@ class AIService:
         descriptions = self.generate_json(split_prompt, thinking_budget=1000)
         
         # 确保返回的是字符串列表
-        if isinstance(descriptions, list):
-            return [str(desc) for desc in descriptions]
-        else:
+        if not isinstance(descriptions, list):
             raise ValueError("Expected a list of page descriptions, but got: " + str(type(descriptions)))
+
+        expected_count = len(self.flatten_outline(outline))
+        if len(descriptions) != expected_count:
+            raise ValueError(
+                f"Expected {expected_count} page descriptions to match outline, got {len(descriptions)}"
+            )
+
+        return [str(desc) for desc in descriptions]
     
     def refine_outline(self, current_outline: List[Dict], user_requirement: str,
                       project_context: ProjectContext,
@@ -1087,4 +1126,3 @@ class AIService:
     def extract_style_description(self, image_path: str) -> str:
         """从图片中提取风格描述"""
         return self._generate_text_from_image(get_style_extraction_prompt(), image_path)
-

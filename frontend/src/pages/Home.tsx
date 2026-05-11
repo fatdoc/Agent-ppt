@@ -835,9 +835,9 @@ export const Home: React.FC = () => {
               )}
             </div>
             {/* 分隔线 */}
-            <div className="h-5 w-px bg-gray-300 dark:bg-border-primary mx-1" />
+            {/*<div className="h-5 w-px bg-gray-300 dark:bg-border-primary mx-1" />*/}
             {/* GitHub 仓库卡片 */}
-            <GithubRepoCard />
+            {/*<GithubRepoCard />*/}
             {/* 分隔线 */}
           </div>
         </div>
