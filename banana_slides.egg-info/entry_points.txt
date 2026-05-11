@@ -1,0 +1,2 @@
+[console_scripts]
+banana-cli = cli.banana_cli.__main__:main
