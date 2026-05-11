@@ -43,6 +43,9 @@
 !.github/**/*.md
 *.pyc
 .env
+.DS_Store
+.idea/
+*.egg-info/
 
 # GCP service-account key (sensitive — never commit)
 gcp-service-account.json
