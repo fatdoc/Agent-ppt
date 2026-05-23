@@ -1395,6 +1395,112 @@ def process_ppt_renovation_task(task_id: str, project_id: str, ai_service,
             db.session.commit()
 
 
+def process_ppt_to_ppt_task(
+    task_id: str,
+    project_id: str,
+    reference_file_path: str,
+    renderer,
+    blueprint_service,
+    generation_service,
+    options_payload: dict,
+    app=None,
+):
+    """Background task for PPT to PPT: reference deck -> blueprint -> user-content pages."""
+    if app is None:
+        raise ValueError("Flask app instance must be provided")
+
+    from models import Project
+    from services.ppt_to_ppt.data_models import PptToPptOptions
+
+    with app.app_context():
+        task = Task.query.get(task_id)
+        project = Project.query.get(project_id)
+        if not task or not project:
+            return
+
+        try:
+            task.status = "PROCESSING"
+            task.set_progress({
+                "total": 5,
+                "completed": 0,
+                "failed": 0,
+                "current_step": "rendering_reference",
+            })
+            db.session.commit()
+
+            rendered = renderer.prepare_reference_deck_from_path(reference_file_path, project_id)
+            task.update_progress(completed=1)
+            task.set_progress({
+                **task.get_progress(),
+                "current_step": "analyzing_blueprint",
+            })
+            db.session.commit()
+
+            options = PptToPptOptions.from_form(options_payload)
+            page_texts = ["" for _ in rendered.page_images]
+            blueprint = blueprint_service.extract_blueprint(rendered.page_images, page_texts, options)
+            project.set_ppt_to_ppt_blueprint(blueprint.to_dict())
+            project.template_style = str(blueprint.style_profile)
+            project.image_aspect_ratio = rendered.aspect_ratio
+            task.update_progress(completed=2)
+            task.set_progress({
+                **task.get_progress(),
+                "current_step": "mapping_content",
+            })
+            db.session.commit()
+
+            result = generation_service.generate(project.idea_prompt or "", blueprint, options)
+            old_pages = Page.query.filter_by(project_id=project_id).all()
+            for old_page in old_pages:
+                db.session.delete(old_page)
+            db.session.flush()
+
+            for index, generated in enumerate(result.pages):
+                page = Page(
+                    project_id=project_id,
+                    order_index=index,
+                    status="DESCRIPTION_GENERATED",
+                )
+                page.set_outline_content({
+                    "title": generated.title,
+                    "points": generated.points,
+                })
+                page.set_description_content({
+                    "text": generated.description,
+                    "generated_at": datetime.utcnow().isoformat(),
+                    "ppt_to_ppt_reference": {
+                        "page_index": generated.reference_page_index,
+                        "page_role": generated.reference_page_role,
+                    },
+                })
+                db.session.add(page)
+
+            project.outline_text = result.outline_text
+            project.description_text = result.description_text
+            project.status = "DESCRIPTIONS_GENERATED"
+            project.updated_at = datetime.utcnow()
+            task.status = "COMPLETED"
+            task.completed_at = datetime.utcnow()
+            task.set_progress({
+                "total": 5,
+                "completed": 5,
+                "failed": 0,
+                "current_step": "done",
+            })
+            db.session.commit()
+        except Exception as exc:
+            db.session.rollback()
+            task = Task.query.get(task_id)
+            project = Project.query.get(project_id)
+            if task:
+                task.status = "FAILED"
+                task.error_message = str(exc)
+                task.completed_at = datetime.utcnow()
+            if project:
+                project.status = "DRAFT"
+            db.session.commit()
+
+
 def export_editable_pptx_with_recursive_analysis_task(
     task_id: str,
     project_id: str,
