@@ -147,7 +147,7 @@ Included reference page blocks: {included_pages}
         captions: list[str] = []
         for index, image_path in enumerate(page_images[:MAX_PAGE_BLOCKS]):
             try:
-                captions.append(str(caption_method(image_path) or ""))
+                captions.append(str(caption_method(str(image_path)) or ""))
             except Exception as exc:
                 logger.warning(
                     "PPT-to-PPT layout caption failed; continuing with text-only "

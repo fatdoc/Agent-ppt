@@ -1,5 +1,6 @@
 import json
 import logging
+from pathlib import Path
 
 from services.ppt_to_ppt.blueprint_service import BlueprintService
 from services.ppt_to_ppt.data_models import PptToPptOptions
@@ -72,8 +73,13 @@ def test_extract_blueprint_fallback_when_ai_json_is_invalid(tmp_path):
 
 def test_layout_captions_are_included_in_prompt(tmp_path):
     class CaptionAI(FakeAIService):
+        def __init__(self):
+            super().__init__()
+            self.caption_path = None
+
         def generate_layout_caption(self, image_path):
-            return f"layout caption for {image_path.name}"
+            self.caption_path = image_path
+            return f"layout caption for {Path(image_path).name}"
 
     page_image = tmp_path / "page.png"
     page_image.write_bytes(b"png")
@@ -87,6 +93,7 @@ def test_layout_captions_are_included_in_prompt(tmp_path):
 
     assert "Layout/style notes:" in ai_service.prompt
     assert "layout caption for page.png" in ai_service.prompt
+    assert isinstance(ai_service.caption_path, str)
 
 
 def test_extract_blueprint_parses_fenced_json(tmp_path):
