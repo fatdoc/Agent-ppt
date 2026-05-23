@@ -1,3 +1,4 @@
+from .blueprint_service import BlueprintService
 from .data_models import (
     GeneratedPptToPptPage,
     MatchStrength,
@@ -8,6 +9,7 @@ from .data_models import (
 from .reference_renderer import ReferenceRenderer, RenderedReferenceDeck
 
 __all__ = [
+    "BlueprintService",
     "GeneratedPptToPptPage",
     "MatchStrength",
     "PagePattern",
