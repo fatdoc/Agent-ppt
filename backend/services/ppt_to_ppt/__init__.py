@@ -5,6 +5,7 @@ from .data_models import (
     PptToPptBlueprint,
     PptToPptOptions,
 )
+from .reference_renderer import ReferenceRenderer, RenderedReferenceDeck
 
 __all__ = [
     "GeneratedPptToPptPage",
@@ -12,4 +13,6 @@ __all__ = [
     "PagePattern",
     "PptToPptBlueprint",
     "PptToPptOptions",
+    "ReferenceRenderer",
+    "RenderedReferenceDeck",
 ]
