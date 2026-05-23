@@ -6,6 +6,7 @@ from .data_models import (
     PptToPptBlueprint,
     PptToPptOptions,
 )
+from .generation_service import PptToPptGenerationResult, PptToPptGenerationService
 from .reference_renderer import ReferenceRenderer, RenderedReferenceDeck
 
 __all__ = [
@@ -14,6 +15,8 @@ __all__ = [
     "MatchStrength",
     "PagePattern",
     "PptToPptBlueprint",
+    "PptToPptGenerationResult",
+    "PptToPptGenerationService",
     "PptToPptOptions",
     "ReferenceRenderer",
     "RenderedReferenceDeck",
