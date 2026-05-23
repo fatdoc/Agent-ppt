@@ -3,7 +3,20 @@ import json
 import pytest
 
 from services.ppt_to_ppt.data_models import PagePattern, PptToPptBlueprint, PptToPptOptions
-from services.ppt_to_ppt.generation_service import PptToPptGenerationService
+from services.ppt_to_ppt.generation_service import (
+    PptToPptGenerationResult,
+    PptToPptGenerationService,
+)
+
+
+def test_generation_service_symbols_are_exported_from_package():
+    from services.ppt_to_ppt import (
+        PptToPptGenerationResult as PackageGenerationResult,
+        PptToPptGenerationService as PackageGenerationService,
+    )
+
+    assert PackageGenerationResult is PptToPptGenerationResult
+    assert PackageGenerationService is PptToPptGenerationService
 
 
 def _blueprint(patterns=None):
