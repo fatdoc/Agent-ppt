@@ -1428,6 +1428,7 @@ def process_ppt_to_ppt_task(
             })
             db.session.commit()
 
+            options = PptToPptOptions.from_form(options_payload)
             rendered = renderer.prepare_reference_deck_from_path(reference_file_path, project_id)
             task.update_progress(completed=1)
             task.set_progress({
@@ -1436,7 +1437,6 @@ def process_ppt_to_ppt_task(
             })
             db.session.commit()
 
-            options = PptToPptOptions.from_form(options_payload)
             page_texts = ["" for _ in rendered.page_images]
             blueprint = blueprint_service.extract_blueprint(rendered.page_images, page_texts, options)
             project.set_ppt_to_ppt_blueprint(blueprint.to_dict())
@@ -1450,6 +1450,9 @@ def process_ppt_to_ppt_task(
             db.session.commit()
 
             result = generation_service.generate(project.idea_prompt or "", blueprint, options)
+            if not getattr(result, "pages", None):
+                raise ValueError("PPT to PPT generated no pages")
+
             old_pages = Page.query.filter_by(project_id=project_id).all()
             for old_page in old_pages:
                 db.session.delete(old_page)
@@ -1496,6 +1499,11 @@ def process_ppt_to_ppt_task(
                 task.status = "FAILED"
                 task.error_message = str(exc)
                 task.completed_at = datetime.utcnow()
+                task.set_progress({
+                    **task.get_progress(),
+                    "failed": 1,
+                    "current_step": "failed",
+                })
             if project:
                 project.status = "DRAFT"
             db.session.commit()

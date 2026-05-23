@@ -56,6 +56,15 @@ class FakeGenerationService:
         )
 
 
+class EmptyGenerationService:
+    def generate(self, user_content, blueprint, options):
+        return PptToPptGenerationResult(
+            outline_text="",
+            description_text="",
+            pages=[],
+        )
+
+
 def test_process_ppt_to_ppt_task_creates_generated_pages(app, client):
     with app.app_context():
         project = Project(creation_type="ppt_to_ppt", idea_prompt="银行智能客服")
@@ -113,3 +122,85 @@ def test_process_ppt_to_ppt_task_creates_generated_pages(app, client):
             "page_index": 1,
             "page_role": "cover",
         }
+
+
+def test_process_ppt_to_ppt_task_empty_generation_fails_and_preserves_pages(app, client):
+    with app.app_context():
+        project = Project(creation_type="ppt_to_ppt", idea_prompt="银行智能客服")
+        db.session.add(project)
+        db.session.flush()
+        old_page = Page(project_id=project.id, order_index=0, status="DRAFT")
+        old_page.set_outline_content({"title": "旧页面", "points": ["保留"]})
+        db.session.add(old_page)
+        task = Task(project_id=project.id, task_type="PPT_TO_PPT_ANALYSIS", status="PENDING")
+        db.session.add(task)
+        db.session.commit()
+
+        rendered = SimpleNamespace(
+            page_images=[Path("/tmp/page1.png")],
+            page_count=1,
+            aspect_ratio="16:9",
+        )
+
+        process_ppt_to_ppt_task(
+            task.id,
+            project.id,
+            reference_file_path="/tmp/reference.pdf",
+            renderer=FakeRenderer(rendered),
+            blueprint_service=FakeBlueprintService(),
+            generation_service=EmptyGenerationService(),
+            options_payload={"language": "zh"},
+            app=app,
+        )
+
+        db.session.expire_all()
+        refreshed_project = Project.query.get(project.id)
+        refreshed_task = Task.query.get(task.id)
+        pages = Page.query.filter_by(project_id=project.id).order_by(Page.order_index).all()
+
+        assert refreshed_project.status == "DRAFT"
+        assert refreshed_task.status == "FAILED"
+        assert refreshed_task.error_message == "PPT to PPT generated no pages"
+        assert refreshed_task.get_progress()["current_step"] == "failed"
+        assert refreshed_task.get_progress()["failed"] == 1
+        assert len(pages) == 1
+        assert pages[0].id == old_page.id
+        assert pages[0].get_outline_content() == {"title": "旧页面", "points": ["保留"]}
+
+
+def test_process_ppt_to_ppt_task_invalid_options_fail_before_rendering(app, client):
+    with app.app_context():
+        project = Project(creation_type="ppt_to_ppt", idea_prompt="银行智能客服")
+        db.session.add(project)
+        db.session.flush()
+        task = Task(project_id=project.id, task_type="PPT_TO_PPT_ANALYSIS", status="PENDING")
+        db.session.add(task)
+        db.session.commit()
+
+        rendered = SimpleNamespace(
+            page_images=[Path("/tmp/page1.png")],
+            page_count=1,
+            aspect_ratio="16:9",
+        )
+        renderer = FakeRenderer(rendered)
+
+        process_ppt_to_ppt_task(
+            task.id,
+            project.id,
+            reference_file_path="/tmp/reference.pdf",
+            renderer=renderer,
+            blueprint_service=FakeBlueprintService(),
+            generation_service=FakeGenerationService(),
+            options_payload={"page_count": "0"},
+            app=app,
+        )
+
+        db.session.expire_all()
+        refreshed_project = Project.query.get(project.id)
+        refreshed_task = Task.query.get(task.id)
+
+        assert renderer.calls == []
+        assert refreshed_project.status == "DRAFT"
+        assert refreshed_task.status == "FAILED"
+        assert "page_count" in refreshed_task.error_message
+        assert refreshed_task.get_progress()["current_step"] == "failed"
