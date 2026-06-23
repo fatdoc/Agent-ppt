@@ -19,6 +19,8 @@ import requests as http_requests
 from PIL import Image
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
 
+from services.prompt_registry import prompt_registry
+
 from .base import ImageProvider
 from .openai_provider import _compute_gpt_image_size
 
@@ -90,7 +92,7 @@ class CodexImageProvider(ImageProvider):
 
         return {
             "model": "gpt-5.4",
-            "instructions": "You are a helpful assistant that generates images.",
+            "instructions": prompt_registry.render("codex.instructions.image_generation").strip(),
             "input": [{"role": "user", "content": content}],
             "tools": [
                 {

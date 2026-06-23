@@ -18,7 +18,7 @@ import { CSS } from '@dnd-kit/utilities';
 // 组件内翻译
 const detailI18n = {
   zh: {
-    home: { title: '蕉幻' },
+    home: { title: '启发' },
     detail: {
       title: "编辑页面描述", pageCount: "共 {{count}} 页", generateImages: "生成图片",
       generating: "生成中...", page: "第 {{num}} 页", titleLabel: "标题",
@@ -29,6 +29,9 @@ const detailI18n = {
       aiPlaceholderShort: "例如：让描述更详细... · Ctrl+Enter",
       renovationProcessing: "正在解析页面内容...",
       renovationProgress: "{{completed}}/{{total}} 页",
+      pptToPptProcessing: "正在借鉴参考 PPT 生成页面描述...",
+      pptToPptProgress: "{{completed}}/{{total}} 步",
+      pptToPptReferencePages: "已识别参考 PDF {{count}} 页",
       renovationFailed: "PDF 解析失败，请返回重试",
       renovationPollFailed: "与服务器通信失败，请检查网络后刷新页面重试",
       disabledNextTip: "还有 {{count}} 页缺少描述，请先完成所有页面的描述",
@@ -80,6 +83,9 @@ const detailI18n = {
       aiPlaceholderShort: "e.g., Make descriptions more detailed... · Ctrl+Enter",
       renovationProcessing: "Parsing page content...",
       renovationProgress: "{{completed}}/{{total}} pages",
+      pptToPptProcessing: "Generating descriptions from the reference deck...",
+      pptToPptProgress: "{{completed}}/{{total}} steps",
+      pptToPptReferencePages: "Detected {{count}} reference PDF pages",
       renovationFailed: "PDF parsing failed, please go back and retry",
       renovationPollFailed: "Lost connection to server. Please check your network and refresh the page.",
       disabledNextTip: "{{count}} page(s) are missing descriptions. Please complete all page descriptions first",
@@ -218,7 +224,14 @@ export const DetailEditor: React.FC = () => {
   const [isAiRefining, setIsAiRefining] = React.useState(false);
   const [previewFileId, setPreviewFileId] = useState<string | null>(null);
   const [isRenovationProcessing, setIsRenovationProcessing] = useState(false);
-  const [renovationProgress, setRenovationProgress] = useState<{ total: number; completed: number } | null>(null);
+  const [renovationProgress, setRenovationProgress] = useState<{
+    total: number;
+    completed: number;
+    taskType?: string;
+    currentStep?: string;
+    referencePageCount?: number;
+    targetPageCount?: number;
+  } | null>(null);
   const [detailLevel, setDetailLevel] = useState<string>('default');
   const [generationMode, setGenerationMode] = useState<'streaming' | 'parallel'>('streaming');
   const [extraFieldNames, setExtraFieldNames] = useState<string[]>(['视觉元素', '视觉焦点', '排版布局', '演讲者备注']);
@@ -346,6 +359,10 @@ export const DetailEditor: React.FC = () => {
           setRenovationProgress({
             total: task.progress.total || 0,
             completed: task.progress.completed || 0,
+            taskType: task.task_type,
+            currentStep: task.progress.current_step,
+            referencePageCount: task.progress.reference_page_count,
+            targetPageCount: task.progress.target_page_count,
           });
         }
 
@@ -581,11 +598,19 @@ export const DetailEditor: React.FC = () => {
     (p) => p.description_content
   );
   const missingDescCount = currentProject.pages.filter(p => !p.description_content).length;
+  const isPptToPptProcessing =
+    isRenovationProcessing &&
+    (renovationProgress?.taskType === 'PPT_TO_PPT_ANALYSIS' ||
+      currentProject.creation_type === 'ppt_to_ppt');
+  const placeholderPageCount =
+    isPptToPptProcessing
+      ? renovationProgress?.targetPageCount || 6
+      : renovationProgress?.total || 6;
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-background-primary flex flex-col">
+    <div className="app-surface min-h-screen dark:bg-background-primary flex flex-col">
       {/* 顶栏 */}
-      <header className="bg-white dark:bg-background-secondary shadow-sm dark:shadow-background-primary/30 border-b border-gray-200 dark:border-border-primary px-3 md:px-6 py-2 md:py-3 flex-shrink-0">
+      <header className="app-chrome border-b px-3 md:px-6 py-2 md:py-3 flex-shrink-0">
         <div className="flex items-center justify-between gap-2 md:gap-4">
           {/* 左侧：Logo 和标题 */}
           <div className="flex items-center gap-2 md:gap-4 flex-shrink-0">
@@ -606,8 +631,8 @@ export const DetailEditor: React.FC = () => {
               <span className="hidden sm:inline">{t('common.back')}</span>
             </Button>
             <div className="flex items-center gap-1.5 md:gap-2">
-              <span className="text-xl md:text-2xl">🍌</span>
-              <span className="text-base md:text-xl font-bold">{t('home.title')}</span>
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#121212] text-sm font-black text-[#AFFF00]">启</span>
+              <span className="brand-wordmark text-base md:text-xl font-black">{t('home.title')}</span>
             </div>
             <span className="text-gray-400 hidden lg:inline">|</span>
             <span className="text-sm md:text-lg font-semibold hidden lg:inline">{t('detail.title')}</span>
@@ -670,14 +695,21 @@ export const DetailEditor: React.FC = () => {
           <div className="max-w-xl mx-auto">
             <div className="flex items-center justify-between mb-1.5">
               <span className="text-sm font-medium text-gray-700 dark:text-foreground-secondary">
-                {t('detail.renovationProcessing')}
+                {isPptToPptProcessing ? t('detail.pptToPptProcessing') : t('detail.renovationProcessing')}
               </span>
               {renovationProgress && renovationProgress.total > 0 && (
                 <span className="text-sm font-medium text-banana-600 dark:text-banana">
-                  {t('detail.renovationProgress', { completed: String(renovationProgress.completed), total: String(renovationProgress.total) })}
+                  {isPptToPptProcessing
+                    ? t('detail.pptToPptProgress', { completed: String(renovationProgress.completed), total: String(renovationProgress.total) })
+                    : t('detail.renovationProgress', { completed: String(renovationProgress.completed), total: String(renovationProgress.total) })}
                 </span>
               )}
             </div>
+            {isPptToPptProcessing && renovationProgress?.referencePageCount ? (
+              <div className="mb-2 text-xs text-gray-500 dark:text-foreground-tertiary">
+                {t('detail.pptToPptReferencePages', { count: String(renovationProgress.referencePageCount) })}
+              </div>
+            ) : null}
             <div className="w-full h-2.5 bg-gray-200 dark:bg-background-hover rounded-full overflow-hidden">
               <div
                 className="h-full bg-gradient-to-r from-banana-400 to-banana-500 rounded-full transition-all duration-500 ease-out"
@@ -955,7 +987,7 @@ export const DetailEditor: React.FC = () => {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-6">
               {isRenovationProcessing && currentProject.pages.length === 0 ? (
                 /* Placeholder skeleton cards while renovation creates pages */
-                Array.from({ length: renovationProgress?.total || 6 }).map((_, index) => (
+                Array.from({ length: placeholderPageCount }).map((_, index) => (
                   <DescriptionCard
                     key={`skeleton-${index}`}
                     page={{ id: `skeleton-${index}`, title: '', sort_order: index, status: 'GENERATING_DESCRIPTION' } as any}

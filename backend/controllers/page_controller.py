@@ -5,6 +5,7 @@ import logging
 from flask import Blueprint, request, current_app
 from models import db, Project, Page, PageImageVersion, Task
 from utils import success_response, error_response, not_found, bad_request
+from utils.auth import current_user_id, owned_project_or_404
 from services import FileService, ProjectContext
 from services.ai_service_manager import get_ai_service
 from services.task_manager import task_manager, generate_single_page_image_task, edit_page_image_task
@@ -33,7 +34,7 @@ def create_page(project_id):
     }
     """
     try:
-        project = Project.query.get(project_id)
+        project = owned_project_or_404(project_id)
         
         if not project:
             return not_found('Project')
@@ -99,7 +100,7 @@ def delete_page(project_id, page_id):
         db.session.delete(page)
 
         # Update project
-        project = Project.query.get(project_id)
+        project = owned_project_or_404(project_id)
         if project:
             project.updated_at = datetime.utcnow()
 
@@ -178,7 +179,7 @@ def update_page_outline(project_id, page_id):
         page.updated_at = datetime.utcnow()
         
         # Update project
-        project = Project.query.get(project_id)
+        project = owned_project_or_404(project_id)
         if project:
             project.updated_at = datetime.utcnow()
         
@@ -220,7 +221,7 @@ def update_page_description(project_id, page_id):
         page.updated_at = datetime.utcnow()
         
         # Update project
-        project = Project.query.get(project_id)
+        project = owned_project_or_404(project_id)
         if project:
             project.updated_at = datetime.utcnow()
         
@@ -249,7 +250,7 @@ def generate_page_description(project_id, page_id):
         if not page or page.project_id != project_id:
             return not_found('Page')
         
-        project = Project.query.get(project_id)
+        project = owned_project_or_404(project_id)
         if not project:
             return not_found('Project')
         
@@ -338,7 +339,7 @@ def generate_page_image(project_id, page_id):
         if not page or page.project_id != project_id:
             return not_found('Page')
         
-        project = Project.query.get(project_id)
+        project = owned_project_or_404(project_id)
         if not project:
             return not_found('Project')
         
@@ -446,14 +447,11 @@ def generate_page_image(project_id, page_id):
                 additional_ref_images = image_urls
                 has_material_images = True
         
-        # 合并额外要求和风格描述
-        combined_requirements = project.extra_requirements or ""
-        if project.template_style:
-            style_requirement = f"\n\nppt页面风格描述：\n\n{project.template_style}"
-            combined_requirements = combined_requirements + style_requirement
+        extra_requirements = project.extra_requirements or ""
         
         # Create async task for image generation
         task = Task(
+            user_id=current_user_id(),
             project_id=project_id,
             task_type='GENERATE_PAGE_IMAGE',
             status='PENDING'
@@ -482,7 +480,7 @@ def generate_page_image(project_id, page_id):
             project.image_aspect_ratio,
             current_app.config['DEFAULT_RESOLUTION'],
             app,
-            combined_requirements if combined_requirements.strip() else None,
+            extra_requirements if extra_requirements.strip() else None,
             language
         )
         
@@ -528,7 +526,7 @@ def edit_page_image(project_id, page_id):
         if not page.generated_image_path:
             return bad_request("Page must have generated image first")
         
-        project = Project.query.get(project_id)
+        project = owned_project_or_404(project_id)
         if not project:
             return not_found('Project')
         
@@ -627,6 +625,7 @@ def edit_page_image(project_id, page_id):
         
         # Create async task for image editing
         task = Task(
+            user_id=current_user_id(),
             project_id=project_id,
             task_type='EDIT_PAGE_IMAGE',
             status='PENDING'
@@ -752,7 +751,7 @@ def regenerate_renovation_page(project_id, page_id):
         if not page or page.project_id != project_id:
             return not_found('Page')
 
-        project = Project.query.get(project_id)
+        project = owned_project_or_404(project_id)
         if not project:
             return not_found('Project')
 
@@ -784,7 +783,14 @@ def regenerate_renovation_page(project_id, page_id):
             openai_api_base=current_app.config.get('OPENAI_API_BASE', ''),
             image_caption_model=current_app.config.get('IMAGE_CAPTION_MODEL', 'gemini-3-flash-preview'),
             lazyllm_image_caption_source=current_app.config.get('IMAGE_CAPTION_MODEL_SOURCE', ''),
-            upload_folder=current_app.config.get('UPLOAD_FOLDER', 'uploads')
+            upload_folder=current_app.config.get('UPLOAD_FOLDER', 'uploads'),
+            mineru_provider=current_app.config.get('MINERU_PROVIDER', 'cloud'),
+            local_api_base=current_app.config.get('MINERU_LOCAL_API_BASE', 'http://127.0.0.1:8000'),
+            local_backend=current_app.config.get('MINERU_LOCAL_BACKEND', 'pipeline'),
+            local_parse_method=current_app.config.get('MINERU_LOCAL_PARSE_METHOD', 'auto'),
+            local_return_images=current_app.config.get('MINERU_LOCAL_RETURN_IMAGES', True),
+            local_response_format_zip=current_app.config.get('MINERU_LOCAL_RESPONSE_FORMAT_ZIP', True),
+            local_return_original_file=current_app.config.get('MINERU_LOCAL_RETURN_ORIGINAL_FILE', False),
         )
         file_service = FileService(current_app.config['UPLOAD_FOLDER'])
 
@@ -885,7 +891,7 @@ def update_page_narration(project_id, page_id):
         page.set_narration_text(data['narration_text'])
         page.updated_at = datetime.utcnow()
 
-        project = Project.query.get(project_id)
+        project = owned_project_or_404(project_id)
         if project:
             project.updated_at = datetime.utcnow()
 
@@ -916,7 +922,7 @@ def generate_page_narration(project_id, page_id):
         if not page or page.project_id != project_id:
             return not_found('Page')
 
-        project = Project.query.get(project_id)
+        project = owned_project_or_404(project_id)
         if not project:
             return not_found('Project')
 
@@ -1000,7 +1006,7 @@ def generate_all_narrations(project_id):
     }
     """
     try:
-        project = Project.query.get(project_id)
+        project = owned_project_or_404(project_id)
         if not project:
             return not_found('Project')
 

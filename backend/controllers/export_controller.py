@@ -15,6 +15,7 @@ from utils import (
     error_response, not_found, bad_request, success_response,
     parse_page_ids_from_query, parse_page_ids_from_body, get_filtered_pages
 )
+from utils.auth import current_user_id, owned_project_or_404
 from services import ExportService, FileService
 from services.ai_service_manager import get_ai_service
 from services.prompts import normalize_narration_generation_config
@@ -32,7 +33,7 @@ def list_exports(project_id):
     返回 exports 目录下的文件列表（名称、大小、修改时间、下载链接）。
     """
     try:
-        project = Project.query.get(project_id)
+        project = owned_project_or_404(project_id)
         if not project:
             return not_found('Project')
 
@@ -95,7 +96,7 @@ def export_pptx(project_id):
         }
     """
     try:
-        project = Project.query.get(project_id)
+        project = owned_project_or_404(project_id)
         
         if not project:
             return not_found('Project')
@@ -172,7 +173,7 @@ def export_pdf(project_id):
         }
     """
     try:
-        project = Project.query.get(project_id)
+        project = owned_project_or_404(project_id)
         
         if not project:
             return not_found('Project')
@@ -241,7 +242,7 @@ def export_images(project_id):
         if s_project_id != project_id:
             return bad_request('Invalid project ID')
 
-        project = Project.query.get(s_project_id)
+        project = owned_project_or_404(s_project_id)
         if not project:
             return not_found('Project')
 
@@ -332,7 +333,7 @@ def export_editable_pptx(project_id):
     轮询 /api/projects/{project_id}/tasks/{task_id} 获取进度和下载链接
     """
     try:
-        project = Project.query.get(project_id)
+        project = owned_project_or_404(project_id)
         
         if not project:
             return not_found('Project')
@@ -373,6 +374,7 @@ def export_editable_pptx(project_id):
         
         # Create task record
         task = Task(
+            user_id=current_user_id(),
             project_id=project_id,
             task_type='EXPORT_EDITABLE_PPTX',
             status='PENDING'
@@ -458,7 +460,7 @@ def export_video(project_id):
         JSON with task_id for polling via /api/projects/{project_id}/tasks/{task_id}
     """
     try:
-        project = Project.query.get(project_id)
+        project = owned_project_or_404(project_id)
 
         if not project:
             return not_found('Project')
@@ -509,6 +511,7 @@ def export_video(project_id):
 
         # 创建任务
         task = Task(
+            user_id=current_user_id(),
             project_id=project_id,
             task_type='EXPORT_VIDEO',
             status='PENDING',

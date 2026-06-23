@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Home, Key, Image, Zap, Save, RotateCcw, Globe, FileText, Brain, ArrowUp, HelpCircle, Link2, ChevronDown, Volume2 } from 'lucide-react';
+import { Home, Key, Image, Zap, Save, RotateCcw, Globe, FileText, Brain, ArrowUp, Link2, ChevronDown, Volume2 } from 'lucide-react';
 import { useT } from '@/hooks/useT';
 
 // 组件内翻译
@@ -9,7 +9,7 @@ const settingsI18n = {
     nav: { backToHome: '返回首页' },
     settings: {
       title: "系统设置",
-      subtitle: "配置应用的各项参数",
+      subtitle: "按用途配置模型、解析、生成与导出能力",
       sections: {
         appearance: "外观设置", language: "界面语言", apiConfig: "默认 API 配置",
         apiConfigDesc: "下方模型未单独指定提供商时，将使用此处的配置",
@@ -20,6 +20,20 @@ const settingsI18n = {
         vendorApiKeys: "厂商 API Key 配置",
         advancedSettings: "高级设置",
         elevenlabs: "ElevenLabs 语音合成"
+      },
+      sectionDescriptions: {
+        apiConfig: "设置全局默认提供商与凭证。文本、图像或图片识别模型没有单独配置时，会回退到这里。",
+        modelConfig: "分别指定三个核心模型角色。每个角色都可以单独选择提供商、Base URL 和 API Key。",
+        mineruConfig: "用于解析上传的 PDF、PPTX、Word、Excel 等参考文件，影响素材理解质量。",
+        imageConfig: "控制幻灯片页面图片生成的清晰度。",
+        performanceConfig: "控制并发数量。数值越高速度可能越快，也更容易触发服务限流。",
+        outputLanguage: "控制 AI 默认生成大纲、页面描述和文案时使用的语言。",
+        textReasoning: "控制文本生成是否使用更深的推理预算，适合复杂大纲和长材料。",
+        imageReasoning: "控制图像生成是否使用推理预算，适合更复杂的构图要求。",
+        baiduOcr: "用于可编辑 PPTX 导出时识别原图文字和辅助擦除文字区域。",
+        elevenlabs: "用于视频导出旁白。未配置时系统会使用默认 TTS 能力。",
+        serviceTest: "保存前后都可以运行测试，快速定位是模型、解析还是导出辅助能力不可用。",
+        advancedSettings: "包含账号连接、并发和推理预算等不常改动的配置。"
       },
       openaiOAuth: {
         title: "OpenAI 账号连接",
@@ -62,6 +76,11 @@ const settingsI18n = {
         imageModelDesc: "用于生成页面图片的模型名称",
         imageCaptionModel: "图片识别模型", imageCaptionModelPlaceholder: "留空使用环境变量配置 (如: gemini-3-flash-preview)",
         imageCaptionModelDesc: "用于识别参考文件中的图片并生成描述",
+        imageCaptionVisionWarning: "图片识别模型必须支持视觉输入。Qwen 通常请使用 qwen-vl-max / qwen-vl-plus 这类 VL 模型；qwen3.6-plus 这类文本模型可能会返回空结果。",
+        mineruProvider: "MinerU 使用方式",
+        mineruProviderDesc: "官方云端会调用 MinerU 官网 API；本地服务会调用本机 Gradio MinerU API。",
+        mineruProviderCloud: "官方云端",
+        mineruProviderLocal: "本地服务",
         mineruApiBase: "MinerU API Base", mineruApiBasePlaceholder: "留空使用环境变量配置 (如: https://mineru.net)",
         mineruApiBaseDesc: "MinerU 服务地址，用于解析参考文件",
         mineruToken: "MinerU Token", mineruTokenPlaceholder: "输入新的 MinerU Token",
@@ -103,14 +122,6 @@ const settingsI18n = {
         imageApiProtocolImages: "images.generate",
         imageApiProtocolChat: "chat.completions",
       },
-      apiKeyHelp: {
-        title: "如何获取 API 密钥",
-        step1: "前往 {{link}} 注册账号",
-        step2: "点击顶栏「充值」，根据需要充值一定的额度",
-        step3: "点击顶栏「密钥」",
-        step4: "点击「创建 key」生成新的 API Key",
-      },
-      apiKeyTip: { before: "若需快速配置或稳定高并发生图，可选择 ", after: "" },
       serviceTest: {
         title: "服务测试", description: "提前验证关键服务配置是否可用，避免使用期间异常。",
         tip: "提示：图像生成测试可能需要数分钟（取决于模型），请耐心等待。",
@@ -144,7 +155,7 @@ const settingsI18n = {
     nav: { backToHome: 'Back to Home' },
     settings: {
       title: "Settings",
-      subtitle: "Configure application parameters",
+      subtitle: "Configure models, parsing, generation, and export helpers by purpose",
       sections: {
         appearance: "Appearance", language: "Interface Language", apiConfig: "Default API Configuration",
         apiConfigDesc: "Used as fallback when a model below has no provider specified",
@@ -155,6 +166,20 @@ const settingsI18n = {
         vendorApiKeys: "Vendor API Key Configuration",
         advancedSettings: "Advanced Settings",
         elevenlabs: "ElevenLabs Text-to-Speech"
+      },
+      sectionDescriptions: {
+        apiConfig: "Set the global default provider and credentials. Text, image, and caption models fall back to this when no override is set.",
+        modelConfig: "Configure the three core model roles separately. Each role can use its own provider, Base URL, and API key.",
+        mineruConfig: "Parses uploaded PDF, PPTX, Word, Excel, and other reference files. This affects how well materials are understood.",
+        imageConfig: "Controls the resolution for generated slide images.",
+        performanceConfig: "Controls concurrency. Higher values can be faster but may hit provider rate limits.",
+        outputLanguage: "Controls the default language for generated outlines, slide descriptions, and copy.",
+        textReasoning: "Controls whether text generation uses a deeper reasoning budget for complex outlines and long materials.",
+        imageReasoning: "Controls whether image generation uses a reasoning budget for more complex compositions.",
+        baiduOcr: "Used by editable PPTX export to recognize existing text and assist text-area cleanup.",
+        elevenlabs: "Used for video narration export. Without it, the system uses the default TTS capability.",
+        serviceTest: "Run tests before or after saving to quickly identify whether model, parsing, or export helper services are unavailable.",
+        advancedSettings: "Contains account connection, concurrency, and reasoning budget settings that are changed less often."
       },
       openaiOAuth: {
         title: "OpenAI Account",
@@ -197,6 +222,11 @@ const settingsI18n = {
         imageModelDesc: "Model name for generating page images",
         imageCaptionModel: "Image Caption Model", imageCaptionModelPlaceholder: "Leave empty to use env config (e.g., gemini-3-flash-preview)",
         imageCaptionModelDesc: "Model for recognizing images in reference files and generating descriptions",
+        imageCaptionVisionWarning: "The image caption model must support vision input. For Qwen, use a VL model such as qwen-vl-max / qwen-vl-plus; text models such as qwen3.6-plus may return empty results.",
+        mineruProvider: "MinerU Mode",
+        mineruProviderDesc: "Cloud calls the official MinerU API; local calls the local Gradio MinerU API.",
+        mineruProviderCloud: "Official Cloud",
+        mineruProviderLocal: "Local Service",
         mineruApiBase: "MinerU API Base", mineruApiBasePlaceholder: "Leave empty to use env config (e.g., https://mineru.net)",
         mineruApiBaseDesc: "MinerU service address for parsing reference files",
         mineruToken: "MinerU Token", mineruTokenPlaceholder: "Enter new MinerU Token",
@@ -238,14 +268,6 @@ const settingsI18n = {
         imageApiProtocolImages: "images.generate",
         imageApiProtocolChat: "chat.completions",
       },
-      apiKeyHelp: {
-        title: "How to get an API key",
-        step1: "Register at {{link}}",
-        step2: "Click \"Recharge\" in the top navigation bar and add credits as needed",
-        step3: "Click \"Keys\" in the top navigation bar",
-        step4: "Click \"Create Key\" to generate a new API Key",
-      },
-      apiKeyTip: { before: "For quick setup or stable high-concurrency image generation, get an API key from ", after: "" },
       serviceTest: {
         title: "Service Test", description: "Verify key service configurations before use to avoid issues.",
         tip: "Tip: Image generation tests may take several minutes depending on the model, please be patient.",
@@ -301,11 +323,14 @@ interface FieldConfig {
 
 interface SectionConfig {
   title: string;
+  description?: string;
+  tone?: SectionTone;
   icon: React.ReactNode;
   fields: FieldConfig[];
 }
 
 type TestStatus = 'idle' | 'loading' | 'success' | 'error';
+type SectionTone = 'lime' | 'sky' | 'amber' | 'violet' | 'cyan' | 'rose' | 'orange' | 'slate' | 'green';
 
 interface ServiceTestState {
   status: TestStatus;
@@ -348,6 +373,7 @@ const initialFormData = {
   text_model: '',
   image_model: '',
   image_caption_model: '',
+  mineru_provider: 'cloud' as 'cloud' | 'local',
   mineru_api_base: '',
   mineru_token: '',
   image_resolution: '2K',
@@ -379,6 +405,93 @@ const initialFormData = {
 
 const isLazyllmVendor = (vendor: string) =>
   LAZYLLM_VENDOR_SET.has(vendor) && vendor !== 'openai';
+
+const SECTION_TONES: Record<SectionTone, { panel: string; icon: string; accent: string; soft: string }> = {
+  lime: {
+    panel: 'border-lime-200 bg-lime-50/55 dark:border-lime-900/50 dark:bg-lime-950/10',
+    icon: 'bg-lime-100 text-lime-700 dark:bg-lime-900/30 dark:text-lime-300',
+    accent: 'border-lime-300 dark:border-lime-700',
+    soft: 'bg-lime-50/80 dark:bg-lime-950/10',
+  },
+  sky: {
+    panel: 'border-sky-200 bg-sky-50/55 dark:border-sky-900/50 dark:bg-sky-950/10',
+    icon: 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300',
+    accent: 'border-sky-300 dark:border-sky-700',
+    soft: 'bg-sky-50/80 dark:bg-sky-950/10',
+  },
+  amber: {
+    panel: 'border-amber-200 bg-amber-50/55 dark:border-amber-900/50 dark:bg-amber-950/10',
+    icon: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300',
+    accent: 'border-amber-300 dark:border-amber-700',
+    soft: 'bg-amber-50/80 dark:bg-amber-950/10',
+  },
+  violet: {
+    panel: 'border-violet-200 bg-violet-50/50 dark:border-violet-900/50 dark:bg-violet-950/10',
+    icon: 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300',
+    accent: 'border-violet-300 dark:border-violet-700',
+    soft: 'bg-violet-50/75 dark:bg-violet-950/10',
+  },
+  cyan: {
+    panel: 'border-cyan-200 bg-cyan-50/50 dark:border-cyan-900/50 dark:bg-cyan-950/10',
+    icon: 'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-300',
+    accent: 'border-cyan-300 dark:border-cyan-700',
+    soft: 'bg-cyan-50/75 dark:bg-cyan-950/10',
+  },
+  rose: {
+    panel: 'border-rose-200 bg-rose-50/45 dark:border-rose-900/50 dark:bg-rose-950/10',
+    icon: 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300',
+    accent: 'border-rose-300 dark:border-rose-700',
+    soft: 'bg-rose-50/70 dark:bg-rose-950/10',
+  },
+  orange: {
+    panel: 'border-orange-200 bg-orange-50/50 dark:border-orange-900/50 dark:bg-orange-950/10',
+    icon: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300',
+    accent: 'border-orange-300 dark:border-orange-700',
+    soft: 'bg-orange-50/75 dark:bg-orange-950/10',
+  },
+  slate: {
+    panel: 'border-slate-200 bg-slate-50/65 dark:border-slate-800 dark:bg-slate-950/10',
+    icon: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
+    accent: 'border-slate-300 dark:border-slate-700',
+    soft: 'bg-slate-50/80 dark:bg-background-primary/60',
+  },
+  green: {
+    panel: 'border-emerald-200 bg-emerald-50/50 dark:border-emerald-900/50 dark:bg-emerald-950/10',
+    icon: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300',
+    accent: 'border-emerald-300 dark:border-emerald-700',
+    soft: 'bg-emerald-50/75 dark:bg-emerald-950/10',
+  },
+};
+
+const SectionPanel: React.FC<{
+  title: string;
+  description?: string;
+  icon: React.ReactNode;
+  children: React.ReactNode;
+  className?: string;
+  tone?: SectionTone;
+} & React.HTMLAttributes<HTMLElement>> = ({ title, description, icon, children, className = '', tone = 'slate', ...sectionProps }) => {
+  const toneClass = SECTION_TONES[tone];
+  return (
+    <section
+      {...sectionProps}
+      className={`rounded-xl border p-5 shadow-sm md:p-6 ${toneClass.panel} ${className}`}
+    >
+      <div className={`mb-5 flex items-start gap-3 border-l-4 pl-3 ${toneClass.accent}`}>
+        <div className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${toneClass.icon}`}>
+          {icon}
+        </div>
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-foreground-primary">{title}</h2>
+          {description && (
+            <p className="mt-1 text-sm leading-relaxed text-gray-500 dark:text-foreground-tertiary">{description}</p>
+          )}
+        </div>
+      </div>
+      {children}
+    </section>
+  );
+};
 
 // When backend returns "lazyllm", infer specific vendor from configured keys
 const resolveLazyllmVendor = (format: string, keysInfo?: Record<string, number>): string => {
@@ -428,6 +541,7 @@ const formDataFromSettings = (data: SettingsType): typeof initialFormData => ({
   max_image_workers: data.max_image_workers || 8,
   text_model: data.text_model || '',
   image_model: data.image_model || '',
+  mineru_provider: data.mineru_provider || 'cloud',
   mineru_api_base: data.mineru_api_base || '',
   mineru_token: '',
   image_caption_model: data.image_caption_model || '',
@@ -456,22 +570,6 @@ export const Settings: React.FC = () => {
   const t = useT(settingsI18n);
   const { show, ToastContainer } = useToast();
   const { confirm, ConfirmDialog } = useConfirm();
-
-  const copyToClipboard = (text: string) => {
-    if (navigator.clipboard) {
-      navigator.clipboard.writeText(text);
-    } else {
-      const textarea = document.createElement('textarea');
-      textarea.value = text;
-      textarea.style.position = 'fixed';
-      textarea.style.opacity = '0';
-      document.body.appendChild(textarea);
-      textarea.select();
-      document.execCommand('copy');
-      document.body.removeChild(textarea);
-    }
-    show({ message: '链接已复制到剪贴板', type: 'success' });
-  };
 
   const [settings, setSettings] = useState<SettingsType | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -571,8 +669,20 @@ export const Settings: React.FC = () => {
     // Global API config & Model config are rendered separately above
     {
       title: t('settings.sections.mineruConfig'),
+      description: t('settings.sectionDescriptions.mineruConfig'),
+      tone: 'amber',
       icon: <FileText size={20} />,
       fields: [
+        {
+          key: 'mineru_provider',
+          label: t('settings.fields.mineruProvider'),
+          type: 'buttons',
+          description: t('settings.fields.mineruProviderDesc'),
+          options: [
+            { value: 'cloud', label: t('settings.fields.mineruProviderCloud') },
+            { value: 'local', label: t('settings.fields.mineruProviderLocal') },
+          ],
+        },
         {
           key: 'mineru_api_base',
           label: t('settings.fields.mineruApiBase'),
@@ -594,6 +704,8 @@ export const Settings: React.FC = () => {
     },
     {
       title: t('settings.sections.imageConfig'),
+      description: t('settings.sectionDescriptions.imageConfig'),
+      tone: 'violet',
       icon: <Image size={20} />,
       fields: [
         {
@@ -611,6 +723,8 @@ export const Settings: React.FC = () => {
     },
     {
       title: t('settings.sections.performanceConfig'),
+      description: t('settings.sectionDescriptions.performanceConfig'),
+      tone: 'slate',
       icon: <Zap size={20} />,
       fields: [
         {
@@ -633,6 +747,8 @@ export const Settings: React.FC = () => {
     },
     {
       title: t('settings.sections.outputLanguage'),
+      description: t('settings.sectionDescriptions.outputLanguage'),
+      tone: 'cyan',
       icon: <Globe size={20} />,
       fields: [
         {
@@ -646,6 +762,8 @@ export const Settings: React.FC = () => {
     },
     {
       title: t('settings.sections.textReasoning'),
+      description: t('settings.sectionDescriptions.textReasoning'),
+      tone: 'sky',
       icon: <Brain size={20} />,
       fields: [
         {
@@ -666,6 +784,8 @@ export const Settings: React.FC = () => {
     },
     {
       title: t('settings.sections.imageReasoning'),
+      description: t('settings.sectionDescriptions.imageReasoning'),
+      tone: 'violet',
       icon: <Brain size={20} />,
       fields: [
         {
@@ -686,6 +806,8 @@ export const Settings: React.FC = () => {
     },
     {
       title: t('settings.sections.baiduOcr'),
+      description: t('settings.sectionDescriptions.baiduOcr'),
+      tone: 'rose',
       icon: <FileText size={20} />,
       fields: [
         {
@@ -702,6 +824,8 @@ export const Settings: React.FC = () => {
     },
     {
       title: t('settings.sections.elevenlabs'),
+      description: t('settings.sectionDescriptions.elevenlabs'),
+      tone: 'orange',
       icon: <Volume2 size={20} />,
       fields: [
         {
@@ -855,6 +979,7 @@ export const Settings: React.FC = () => {
       if (formData.text_model) testSettings.text_model = formData.text_model;
       if (formData.image_model) testSettings.image_model = formData.image_model;
       if (formData.image_caption_model) testSettings.image_caption_model = formData.image_caption_model;
+      if (formData.mineru_provider) testSettings.mineru_provider = formData.mineru_provider;
       if (formData.mineru_api_base) testSettings.mineru_api_base = formData.mineru_api_base;
       if (formData.mineru_token) testSettings.mineru_token = formData.mineru_token;
       if (formData.baidu_api_key) testSettings.baidu_api_key = formData.baidu_api_key;
@@ -1085,6 +1210,7 @@ export const Settings: React.FC = () => {
       placeholder: t('settings.fields.textModelPlaceholder'),
       description: t('settings.fields.textModelDesc'),
       sourceLabel: t('settings.fields.textModelSource'),
+      tone: 'sky' as SectionTone,
     },
     {
       modelKey: 'image_model' as keyof typeof initialFormData,
@@ -1096,6 +1222,7 @@ export const Settings: React.FC = () => {
       placeholder: t('settings.fields.imageModelPlaceholder'),
       description: t('settings.fields.imageModelDesc'),
       sourceLabel: t('settings.fields.imageModelSource'),
+      tone: 'violet' as SectionTone,
     },
     {
       modelKey: 'image_caption_model' as keyof typeof initialFormData,
@@ -1107,29 +1234,45 @@ export const Settings: React.FC = () => {
       placeholder: t('settings.fields.imageCaptionModelPlaceholder'),
       description: t('settings.fields.imageCaptionModelDesc'),
       sourceLabel: t('settings.fields.imageCaptionModelSource'),
+      tone: 'cyan' as SectionTone,
     },
   ];
 
   // 渲染单个模型配置组（模型名 + 提供商选择 + 条件凭证）
   const renderModelConfigGroup = (item: typeof modelConfigItems[0]) => {
     const sourceValue = formData[item.sourceKey] as string;
+    const modelValue = String(formData[item.modelKey] || '').trim().toLowerCase();
     const isApiKeyProvider = API_KEY_PROVIDERS.has(sourceValue);
     const isLazyllm = sourceValue && isLazyllmVendor(sourceValue);
+    const shouldWarnVisionModel =
+      item.modelKey === 'image_caption_model' &&
+      sourceValue === 'qwen' &&
+      modelValue.length > 0 &&
+      !modelValue.includes('vl');
     // 'openai' in source dropdown means OpenAI format (API key provider), not lazyllm openai vendor
     // lazyllm openai vendor is handled separately
 
     return (
-      <div key={item.modelKey} className="pb-6 border-b border-gray-200 dark:border-border-primary last:border-b-0 last:pb-0 space-y-3">
+      <div key={item.modelKey} className={`rounded-lg border p-4 ${SECTION_TONES[item.tone].soft} ${SECTION_TONES[item.tone].accent}`}>
+        <div className="mb-4">
+          <div className="text-base font-semibold text-gray-900 dark:text-foreground-primary">{item.label}</div>
+          {item.description && (
+            <p className="mt-1 text-sm leading-relaxed text-gray-500 dark:text-foreground-tertiary">{item.description}</p>
+          )}
+        </div>
+        <div className="space-y-3">
         {/* 模型名称 */}
         <Input
-          label={item.label}
+          label={`${item.label} ID`}
           type="text"
           placeholder={item.placeholder}
           value={formData[item.modelKey] as string}
           onChange={(e) => handleFieldChange(item.modelKey, e.target.value)}
         />
-        {item.description && (
-          <p className="-mt-1 text-sm text-gray-500 dark:text-foreground-tertiary">{item.description}</p>
+        {shouldWarnVisionModel && (
+          <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm leading-relaxed text-amber-900 dark:border-amber-700 dark:bg-amber-950/35 dark:text-amber-100">
+            {t('settings.fields.imageCaptionVisionWarning')}
+          </div>
         )}
 
         {/* 提供商选择 */}
@@ -1235,6 +1378,7 @@ export const Settings: React.FC = () => {
             </div>
           );
         })()}
+        </div>
       </div>
     );
   };
@@ -1251,14 +1395,15 @@ export const Settings: React.FC = () => {
     <>
       <ToastContainer />
       {ConfirmDialog}
-      <div className="space-y-8">
+      <div className="space-y-6">
         {/* 默认 API 配置区块 */}
-        <div data-testid="global-api-config-section">
-          <h2 className="text-xl font-semibold text-gray-900 dark:text-foreground-primary mb-1 flex items-center">
-            <Key size={20} />
-            <span className="ml-2">{t('settings.sections.apiConfig')}</span>
-          </h2>
-          <p className="text-sm text-gray-500 dark:text-foreground-tertiary mb-4">{t('settings.sections.apiConfigDesc')}</p>
+        <SectionPanel
+          title={t('settings.sections.apiConfig')}
+          description={t('settings.sectionDescriptions.apiConfig')}
+          icon={<Key size={20} />}
+          tone="lime"
+          data-testid="global-api-config-section"
+        >
           <div className="space-y-3">
             {/* 提供商下拉 */}
             <div>
@@ -1316,102 +1461,74 @@ export const Settings: React.FC = () => {
               <GlobalVendorKeyInput vendor={formData.ai_provider_format} formData={formData} setFormData={setFormData} settings={settings} t={t} />
             )}
           </div>
-
-          {/* AIHubmix 提示 */}
-          <div className="mt-3 pl-4 border-l-4 border-blue-300 dark:border-blue-600">
-            <p className="text-sm text-gray-700 dark:text-foreground-secondary">
-              {t('settings.apiKeyTip.before')}
-              <a href={['https://', 'aihubmix', '.com/?', 'aff=17EC'].join('')} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 underline font-medium">AIHubmix 申请 API key</a>
-            </p>
-          </div>
-
-          {/* API Key 获取指南 */}
-          <div className="mt-2 pl-4 border-l-4 border-blue-300 dark:border-blue-600">
-            <p className="text-sm font-medium text-gray-800 dark:text-foreground-primary flex items-center gap-1.5 mb-2">
-              <HelpCircle size={15} className="text-blue-500" />
-              {t('settings.apiKeyHelp.title')}
-            </p>
-            <ol className="text-sm text-gray-700 dark:text-foreground-secondary space-y-1 list-decimal list-inside ml-1">
-              <li>
-                {t('settings.apiKeyHelp.step1', { link: '{{link}}' }).split('{{link}}')[0]}
-                <span className="inline-flex items-center gap-2">
-                  <a
-                    href={['https://', 'aihubmix', '.com/?', 'aff=17EC'].join('')}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-blue-600 hover:text-blue-800 underline font-medium"
-                  >
-                    点击此处访问 AIHubmix →
-                  </a>
-                  <button
-                    onClick={() => copyToClipboard('https://aihubmix.com/?aff=17EC')}
-                    className="text-xs px-2 py-0.5 bg-blue-100 hover:bg-blue-200 dark:bg-blue-900/30 dark:hover:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded transition-colors"
-                  >
-                    复制链接
-                  </button>
-                </span>
-                {t('settings.apiKeyHelp.step1', { link: '{{link}}' }).split('{{link}}')[1]}
-              </li>
-              <li>{t('settings.apiKeyHelp.step2')}</li>
-              <li>{t('settings.apiKeyHelp.step3')}</li>
-              <li>{t('settings.apiKeyHelp.step4')}</li>
-            </ol>
-          </div>
-        </div>
+        </SectionPanel>
 
         {/* 模型配置区块 */}
-        <div>
-          <h2 className="text-xl font-semibold text-gray-900 dark:text-foreground-primary mb-4 flex items-center">
-            <FileText size={20} />
-            <span className="ml-2">{t('settings.sections.modelConfig')}</span>
-          </h2>
+        <SectionPanel
+          title={t('settings.sections.modelConfig')}
+          description={t('settings.sectionDescriptions.modelConfig')}
+          icon={<FileText size={20} />}
+          tone="sky"
+        >
           <div className="space-y-4">
             {modelConfigItems.map(renderModelConfigGroup)}
           </div>
-        </div>
+        </SectionPanel>
 
         {/* 其余配置区块（配置驱动，排除性能配置和推理模式） */}
-        <div className="space-y-8">
+        <div className="space-y-6">
           {settingsSections.filter((section) =>
             section.title !== t('settings.sections.performanceConfig') &&
             section.title !== t('settings.sections.textReasoning') &&
             section.title !== t('settings.sections.imageReasoning')
           ).map((section) => (
-            <div key={section.title}>
-              <h2 className="text-xl font-semibold text-gray-900 dark:text-foreground-primary mb-4 flex items-center">
-                {section.icon}
-                <span className="ml-2">{section.title}</span>
-              </h2>
+            <SectionPanel
+              key={section.title}
+              title={section.title}
+              description={section.description}
+              icon={section.icon}
+              tone={section.tone}
+            >
               <div className="space-y-4">
                 {section.fields.map((field) => renderField(field))}
               </div>
-            </div>
+            </SectionPanel>
           ))}
         </div>
 
         {/* 高级设置（折叠区域） */}
-        <div className="border-t border-gray-200 dark:border-border-primary pt-2">
+        <section className={`rounded-xl border p-5 shadow-sm md:p-6 ${SECTION_TONES.slate.panel}`}>
           <button
             type="button"
             onClick={() => setAdvancedOpen(!advancedOpen)}
-            className="w-full flex items-center justify-between px-0 py-3 text-left hover:opacity-80 transition-opacity"
+            className="w-full flex items-start justify-between gap-4 text-left hover:opacity-80 transition-opacity"
           >
-            <span className="text-lg font-semibold text-gray-900 dark:text-foreground-primary">
-              {t('settings.sections.advancedSettings')}
+            <span className="flex items-start gap-3">
+              <span className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${SECTION_TONES.slate.icon}`}>
+                <Zap size={20} />
+              </span>
+              <span>
+                <span className="block text-lg font-semibold text-gray-900 dark:text-foreground-primary">
+                  {t('settings.sections.advancedSettings')}
+                </span>
+                <span className="mt-1 block text-sm leading-relaxed text-gray-500 dark:text-foreground-tertiary">
+                  {t('settings.sectionDescriptions.advancedSettings')}
+                </span>
+              </span>
             </span>
             <ChevronDown
               size={20}
-              className={`text-gray-500 dark:text-foreground-tertiary transition-transform duration-200 ${advancedOpen ? 'rotate-180' : ''}`}
+              className={`mt-2 shrink-0 text-gray-500 dark:text-foreground-tertiary transition-transform duration-200 ${advancedOpen ? 'rotate-180' : ''}`}
             />
           </button>
           {advancedOpen && (
-            <div className="pb-4 space-y-8">
+            <div className="mt-6 space-y-6 border-t border-gray-200 pt-6 dark:border-border-primary">
               {/* OpenAI OAuth 连接区块 */}
-              <div>
-                <h2 className="text-xl font-semibold text-gray-900 dark:text-foreground-primary mb-1 flex items-center">
-                  <Link2 size={20} />
-                  <span className="ml-2">{t('settings.openaiOAuth.title')}</span>
-                </h2>
+              <div className={`rounded-lg border p-4 ${SECTION_TONES.green.soft} ${SECTION_TONES.green.accent}`}>
+                <h3 className="text-base font-semibold text-gray-900 dark:text-foreground-primary flex items-center gap-2">
+                  <Link2 size={18} />
+                  {t('settings.openaiOAuth.title')}
+                </h3>
                 <p className="text-sm text-gray-500 dark:text-foreground-tertiary mb-4">{t('settings.openaiOAuth.description')}</p>
                 <div className="p-4 border border-gray-200 dark:border-border-primary rounded-lg">
                   <div className="flex items-center justify-between">
@@ -1488,11 +1605,14 @@ export const Settings: React.FC = () => {
                 section.title === t('settings.sections.textReasoning') ||
                 section.title === t('settings.sections.imageReasoning')
               ).map((section) => (
-                <div key={section.title}>
-                  <h2 className="text-xl font-semibold text-gray-900 dark:text-foreground-primary mb-4 flex items-center">
+                <div key={section.title} className={`rounded-lg border p-4 ${SECTION_TONES[section.tone || 'slate'].soft} ${SECTION_TONES[section.tone || 'slate'].accent}`}>
+                  <h3 className="text-base font-semibold text-gray-900 dark:text-foreground-primary flex items-center gap-2">
                     {section.icon}
-                    <span className="ml-2">{section.title}</span>
-                  </h2>
+                    {section.title}
+                  </h3>
+                  {section.description && (
+                    <p className="mb-4 mt-1 text-sm leading-relaxed text-gray-500 dark:text-foreground-tertiary">{section.description}</p>
+                  )}
                   <div className="space-y-4">
                     {section.fields.map((field) => renderField(field))}
                   </div>
@@ -1500,23 +1620,21 @@ export const Settings: React.FC = () => {
               ))}
             </div>
           )}
-        </div>
+        </section>
 
         {/* 服务测试区 */}
-        <div className="space-y-4">
-          <h2 className="text-xl font-semibold text-gray-900 dark:text-foreground-primary mb-2 flex items-center">
-            <FileText size={20} />
-            <span className="ml-2">{t('settings.serviceTest.title')}</span>
-          </h2>
-          <p className="text-sm text-gray-500 dark:text-foreground-tertiary">
-            {t('settings.serviceTest.description')}
-          </p>
+        <SectionPanel
+          title={t('settings.serviceTest.title')}
+          description={t('settings.sectionDescriptions.serviceTest')}
+          icon={<FileText size={20} />}
+          tone="green"
+        >
           <div className="pl-4 border-l-4 border-yellow-300 dark:border-yellow-600">
             <p className="text-sm text-gray-700 dark:text-foreground-secondary">
               💡 {t('settings.serviceTest.tip')}
             </p>
           </div>
-          <div className="space-y-4">
+          <div className="mt-4 space-y-4">
             {[
               {
                 key: 'baidu-ocr',
@@ -1602,7 +1720,7 @@ export const Settings: React.FC = () => {
               );
             })}
           </div>
-        </div>
+        </SectionPanel>
 
         {/* 操作按钮 */}
         <div className="flex items-center justify-between pt-4 border-t border-gray-200 dark:border-border-primary">
@@ -1646,7 +1764,7 @@ export const SettingsPage: React.FC = () => {
       navigate(-1);
       return;
     }
-    navigate('/');
+    navigate('/app');
   };
 
   useEffect(() => {
@@ -1656,7 +1774,7 @@ export const SettingsPage: React.FC = () => {
   }, []);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-banana-50 dark:from-background-primary to-yellow-50 dark:to-background-primary">
+    <div className="app-surface min-h-screen dark:bg-background-primary">
       <div className="container mx-auto px-4 py-8 max-w-4xl">
         <Card className="p-6 md:p-8">
           <div className="space-y-8">

@@ -39,6 +39,7 @@ dependencies = [
     "opencv-python-headless>=4.13.0.92",
     "elevenlabs>=2.45.0",
     "onnxruntime>=1.18.0",
+    "gradio-client>=1.13.3",
 ]
 
 [project.optional-dependencies]

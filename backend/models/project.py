@@ -1,6 +1,7 @@
 """
 Project model
 """
+import json
 import uuid
 from datetime import datetime
 from . import db
@@ -13,6 +14,7 @@ class Project(db.Model):
     __tablename__ = 'projects'
     
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = db.Column(db.String(36), db.ForeignKey('users.id'), nullable=True, index=True)
     project_title = db.Column(db.String(255), nullable=True)
     idea_prompt = db.Column(db.Text, nullable=True)
     outline_text = db.Column(db.Text, nullable=True)  # 用户输入的大纲文本（用于outline类型）
@@ -23,6 +25,7 @@ class Project(db.Model):
     creation_type = db.Column(db.String(20), nullable=False, default='idea')  # idea|outline|descriptions
     template_image_path = db.Column(db.String(500), nullable=True)
     template_style = db.Column(db.Text, nullable=True)  # 风格描述文本（无模板图模式）
+    ppt_to_ppt_blueprint = db.Column(db.Text, nullable=True)
     # 导出设置
     export_extractor_method = db.Column(db.String(50), nullable=True, default='hybrid')  # 组件提取方法: mineru, hybrid
     export_inpaint_method = db.Column(db.String(50), nullable=True, default='hybrid')  # 背景图获取方法: generative, baidu, hybrid
@@ -41,6 +44,7 @@ class Project(db.Model):
                            cascade='all, delete-orphan')
     materials = db.relationship('Material', back_populates='project', lazy='select',
                            cascade='all, delete-orphan')
+    user = db.relationship('User', back_populates='projects')
     
     def to_dict(self, include_pages=False):
         """Convert to dictionary"""
@@ -55,6 +59,7 @@ class Project(db.Model):
         
         data = {
             'project_id': self.id,
+            'user_id': self.user_id,
             'project_title': self.project_title,
             'idea_prompt': self.idea_prompt,
             'outline_text': self.outline_text,
@@ -65,6 +70,7 @@ class Project(db.Model):
             'creation_type': self.creation_type,
             'template_image_url': f'/files/{self.id}/template/{self.template_image_path.split("/")[-1]}' if self.template_image_path else None,
             'template_style': self.template_style,
+            'ppt_to_ppt_blueprint': self.get_ppt_to_ppt_blueprint(),
             'export_extractor_method': self.export_extractor_method or 'hybrid',
             'export_inpaint_method': self.export_inpaint_method or 'hybrid',
             'export_allow_partial': self.export_allow_partial or False,
@@ -80,6 +86,22 @@ class Project(db.Model):
             data['pages'] = [page.to_dict() for page in self.pages]
         
         return data
+
+    def get_ppt_to_ppt_blueprint(self):
+        """Parse PPT-to-PPT blueprint JSON."""
+        if self.ppt_to_ppt_blueprint:
+            try:
+                return json.loads(self.ppt_to_ppt_blueprint)
+            except json.JSONDecodeError:
+                return None
+        return None
+
+    def set_ppt_to_ppt_blueprint(self, data):
+        """Store PPT-to-PPT blueprint as JSON text."""
+        if data:
+            self.ppt_to_ppt_blueprint = json.dumps(data, ensure_ascii=False)
+        else:
+            self.ppt_to_ppt_blueprint = None
     
     def __repr__(self):
         return f'<Project {self.id}: {self.status}>'

@@ -1,6 +1,6 @@
-# 蕉幻 (Banana Slides) 前端
+# 启发 (Banana Slides) 前端
 
-这是蕉幻 AI PPT 生成器的前端应用。
+这是启发 AI PPT 生成器的前端应用。
 
 ## 技术栈
 

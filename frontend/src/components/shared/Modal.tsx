@@ -101,11 +101,11 @@ export const Modal: React.FC<ModalProps> = ({
             'relative w-full flex flex-col',
             size === 'full' ? 'max-h-[calc(100vh-2rem)] sm:max-h-[calc(100vh-3rem)]' : 'max-h-[85vh]',
             // 背景和边框
-            'bg-white/95 dark:bg-[#1a1a24]/95',
+          'bg-[#FFFFFA]/95 dark:bg-[#1a1a24]/95',
             'backdrop-blur-xl',
-            'border border-white/20 dark:border-white/10',
+            'border border-[#121212]/10 dark:border-white/10',
             // 圆角 + 裁剪滚动条
-            'rounded-3xl overflow-hidden',
+            'rounded-2xl overflow-hidden',
             // 阴影 - 多层次
             'shadow-[0_0_0_1px_rgba(0,0,0,0.03),0_2px_4px_rgba(0,0,0,0.05),0_12px_24px_rgba(0,0,0,0.09)]',
             'dark:shadow-[0_0_0_1px_rgba(255,255,255,0.05),0_2px_4px_rgba(0,0,0,0.2),0_12px_24px_rgba(0,0,0,0.4)]',
@@ -119,13 +119,7 @@ export const Modal: React.FC<ModalProps> = ({
           onClick={(e) => e.stopPropagation()}
         >
           {/* 顶部光晕效果 */}
-          <div className="absolute -top-px left-8 right-8 h-px bg-gradient-to-r from-transparent via-banana-400/50 to-transparent" />
-
-          {/* 内部光晕 */}
-          <div className="absolute inset-0 rounded-3xl overflow-hidden pointer-events-none">
-            <div className="absolute -top-32 -left-32 w-64 h-64 bg-banana-400/10 dark:bg-banana-400/5 rounded-full blur-3xl" />
-            <div className="absolute -bottom-32 -right-32 w-64 h-64 bg-banana-300/10 dark:bg-banana-300/5 rounded-full blur-3xl" />
-          </div>
+          <div className="absolute -top-px left-8 right-8 h-px bg-gradient-to-r from-transparent via-banana-400/70 to-transparent" />
 
           {/* 标题栏 */}
           {title && (

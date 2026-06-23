@@ -15,6 +15,7 @@ import threading
 
 from models import db, ReferenceFile, Project
 from utils.response import success_response, error_response, bad_request, not_found
+from utils.auth import current_user_id, owned_project_or_404
 from services.file_parser_service import FileParserService
 
 logger = logging.getLogger(__name__)
@@ -67,6 +68,13 @@ def _parse_file_async(file_id: str, file_path: str, filename: str, app):
                 image_caption_model=current_app.config['IMAGE_CAPTION_MODEL'],
                 provider_format=current_app.config.get('AI_PROVIDER_FORMAT', 'gemini'),
                 lazyllm_image_caption_source=current_app.config.get('IMAGE_CAPTION_MODEL_SOURCE', 'doubao'),
+                mineru_provider=current_app.config.get('MINERU_PROVIDER', 'cloud'),
+                local_api_base=current_app.config.get('MINERU_LOCAL_API_BASE', 'http://127.0.0.1:8000'),
+                local_backend=current_app.config.get('MINERU_LOCAL_BACKEND', 'pipeline'),
+                local_parse_method=current_app.config.get('MINERU_LOCAL_PARSE_METHOD', 'auto'),
+                local_return_images=current_app.config.get('MINERU_LOCAL_RETURN_IMAGES', True),
+                local_response_format_zip=current_app.config.get('MINERU_LOCAL_RESPONSE_FORMAT_ZIP', True),
+                local_return_original_file=current_app.config.get('MINERU_LOCAL_RETURN_ORIGINAL_FILE', False),
             )
             
             # Parse file
@@ -154,7 +162,7 @@ def upload_reference_file():
             project_id = None
         else:
             # Verify project exists
-            project = Project.query.get(project_id)
+            project = owned_project_or_404(project_id)
             if not project:
                 return not_found('Project')
         
@@ -188,6 +196,7 @@ def upload_reference_file():
         
         # Create database record
         reference_file = ReferenceFile(
+            user_id=current_user_id(),
             project_id=project_id,
             filename=original_filename,
             file_path=str(file_path.relative_to(upload_folder)),
@@ -220,7 +229,11 @@ def get_reference_file(file_id):
         Reference file information including parse status
     """
     try:
-        reference_file = ReferenceFile.query.get(file_id)
+        query = ReferenceFile.query.filter(ReferenceFile.id == file_id)
+        user_id = current_user_id()
+        if user_id:
+            query = query.filter(ReferenceFile.user_id == user_id)
+        reference_file = query.first()
         if not reference_file:
             return not_found('Reference file')
         
@@ -241,7 +254,11 @@ def delete_reference_file(file_id):
         Success message
     """
     try:
-        reference_file = ReferenceFile.query.get(file_id)
+        query = ReferenceFile.query.filter(ReferenceFile.id == file_id)
+        user_id = current_user_id()
+        if user_id:
+            query = query.filter(ReferenceFile.user_id == user_id)
+        reference_file = query.first()
         if not reference_file:
             return not_found('Reference file')
         
@@ -284,17 +301,29 @@ def list_project_reference_files(project_id):
     try:
         # Special case: 'all' means list all files
         if project_id == 'all':
-            reference_files = ReferenceFile.query.all()
+            query = ReferenceFile.query
+            user_id = current_user_id()
+            if user_id:
+                query = query.filter(ReferenceFile.user_id == user_id)
+            reference_files = query.all()
         # Special case: 'global' or 'none' means list global files (not associated with any project)
         elif project_id in ['global', 'none']:
-            reference_files = ReferenceFile.query.filter_by(project_id=None).all()
+            query = ReferenceFile.query.filter_by(project_id=None)
+            user_id = current_user_id()
+            if user_id:
+                query = query.filter(ReferenceFile.user_id == user_id)
+            reference_files = query.all()
         else:
             # Verify project exists
-            project = Project.query.get(project_id)
+            project = owned_project_or_404(project_id)
             if not project:
                 return not_found('Project')
             
-            reference_files = ReferenceFile.query.filter_by(project_id=project_id).all()
+            query = ReferenceFile.query.filter_by(project_id=project_id)
+            user_id = current_user_id()
+            if user_id:
+                query = query.filter(ReferenceFile.user_id == user_id)
+            reference_files = query.all()
         
         # 列表查询时不包含 markdown_content 和失败计数，加快响应速度
         return success_response({
@@ -315,7 +344,11 @@ def trigger_file_parse(file_id):
         Updated reference file information
     """
     try:
-        reference_file = ReferenceFile.query.get(file_id)
+        query = ReferenceFile.query.filter(ReferenceFile.id == file_id)
+        user_id = current_user_id()
+        if user_id:
+            query = query.filter(ReferenceFile.user_id == user_id)
+        reference_file = query.first()
         if not reference_file:
             return not_found('Reference file')
         
@@ -376,7 +409,11 @@ def associate_file_to_project(file_id):
         Updated reference file information
     """
     try:
-        reference_file = ReferenceFile.query.get(file_id)
+        query = ReferenceFile.query.filter(ReferenceFile.id == file_id)
+        user_id = current_user_id()
+        if user_id:
+            query = query.filter(ReferenceFile.user_id == user_id)
+        reference_file = query.first()
         if not reference_file:
             return not_found('Reference file')
         
@@ -387,7 +424,7 @@ def associate_file_to_project(file_id):
             return bad_request("project_id is required")
         
         # Verify project exists
-        project = Project.query.get(project_id)
+        project = owned_project_or_404(project_id)
         if not project:
             return not_found('Project')
         
@@ -417,7 +454,11 @@ def dissociate_file_from_project(file_id):
         Updated reference file information
     """
     try:
-        reference_file = ReferenceFile.query.get(file_id)
+        query = ReferenceFile.query.filter(ReferenceFile.id == file_id)
+        user_id = current_user_id()
+        if user_id:
+            query = query.filter(ReferenceFile.user_id == user_id)
+        reference_file = query.first()
         if not reference_file:
             return not_found('Reference file')
         
@@ -433,4 +474,3 @@ def dissociate_file_from_project(file_id):
     except Exception as e:
         logger.error(f"Error dissociating reference file: {str(e)}", exc_info=True)
         return error_response('SERVER_ERROR', str(e), 500)
-

@@ -49,6 +49,42 @@ interface TemplateSelectorProps {
   projectId?: string | null;
 }
 
+interface TemplateThumbnailProps {
+  src?: string;
+  alt: string;
+  className?: string;
+}
+
+const TemplateThumbnail: React.FC<TemplateThumbnailProps> = ({ src, alt, className = '' }) => {
+  const [hasImageError, setHasImageError] = useState(false);
+
+  if (!src || hasImageError) {
+    return (
+      <div className={`absolute inset-0 overflow-hidden bg-gradient-to-br from-banana-50 via-white to-orange-50 dark:from-background-elevated dark:via-background-secondary dark:to-background-tertiary ${className}`}>
+        <div className="absolute inset-x-4 top-5 h-2 rounded-full bg-banana-300/80 dark:bg-banana/60" />
+        <div className="absolute left-4 top-12 h-20 w-1/2 rounded-lg bg-white/80 shadow-sm dark:bg-background-hover" />
+        <div className="absolute bottom-5 right-5 h-14 w-24 rounded-full bg-orange-200/80 blur-sm dark:bg-banana/20" />
+        <div className="absolute bottom-4 left-4 right-4 flex items-center justify-between gap-3">
+          <span className="truncate rounded-full bg-white/85 px-2.5 py-1 text-xs font-medium text-gray-700 shadow-sm dark:bg-background-elevated dark:text-foreground-secondary">
+            {alt}
+          </span>
+          <ImagePlus size={16} className="shrink-0 text-banana-600 dark:text-banana" />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={src}
+      alt={alt}
+      loading="lazy"
+      onError={() => setHasImageError(true)}
+      className={`absolute inset-0 h-full w-full object-cover ${className}`}
+    />
+  );
+};
+
 export const TemplateSelector: React.FC<TemplateSelectorProps> = ({
   onSelect,
   selectedTemplateId,
@@ -190,10 +226,9 @@ export const TemplateSelector: React.FC<TemplateSelectorProps> = ({
                       : 'border-gray-200 dark:border-border-primary hover:border-banana-300'
                   }`}
                 >
-                  <img
+                  <TemplateThumbnail
                     src={getImageUrl(template.thumb_url || template.template_image_url)}
                     alt={template.name || 'Template'}
-                    className="absolute inset-0 w-full h-full object-cover"
                   />
                   {selectedTemplateId !== template.template_id && (
                     <button
@@ -234,10 +269,9 @@ export const TemplateSelector: React.FC<TemplateSelectorProps> = ({
               >
                 {template.preview ? (
                   <>
-                    <img
+                    <TemplateThumbnail
                       src={template.thumb || template.preview}
                       alt={t(template.nameKey)}
-                      className="absolute inset-0 w-full h-full object-cover"
                     />
                     {selectedPresetTemplateId === template.id && (
                       <div className="absolute inset-0 bg-banana-500 bg-opacity-20 flex items-center justify-center pointer-events-none">

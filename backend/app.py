@@ -25,7 +25,9 @@ from config import Config
 from controllers.material_controller import material_bp, material_global_bp
 from controllers.reference_file_controller import reference_file_bp
 from controllers.settings_controller import settings_bp
+from controllers.auth_controller import auth_bp
 from controllers.openai_oauth_controller import openai_oauth_bp
+from controllers.ppt_to_ppt_controller import ppt_to_ppt_bp
 from controllers import project_bp, page_bp, template_bp, user_template_bp, user_style_template_bp, export_bp, file_bp, style_bp
 
 
@@ -104,6 +106,7 @@ def create_app():
     
     # Register blueprints
     app.register_blueprint(project_bp)
+    app.register_blueprint(ppt_to_ppt_bp)
     app.register_blueprint(page_bp)
     app.register_blueprint(template_bp)
     app.register_blueprint(user_template_bp)
@@ -114,12 +117,32 @@ def create_app():
     app.register_blueprint(material_global_bp)
     app.register_blueprint(reference_file_bp, url_prefix='/api/reference-files')
     app.register_blueprint(settings_bp)
+    app.register_blueprint(auth_bp)
     app.register_blueprint(openai_oauth_bp)
     app.register_blueprint(style_bp)
 
     with app.app_context():
         # Load settings from database and sync to app.config
         _load_settings_to_config(app)
+
+    @app.before_request
+    def _authenticate_user():
+        from flask import g, request
+        from utils.auth import authenticate_request
+        if request.path in ('/', '/health'):
+            return
+        if request.path in ('/api/auth/config', '/api/auth/login', '/api/auth/register'):
+            return
+        if request.path.startswith('/api/access-code/'):
+            return
+        if not (request.path.startswith('/api/') or request.path.startswith('/files/')):
+            return
+        auth_error = authenticate_request()
+        if auth_error:
+            return auth_error
+        user = getattr(g, 'current_user', None)
+        if user:
+            _load_settings_to_config(app, user.id)
 
     # Access code enforcement on all /api/ routes
     @app.before_request
@@ -132,6 +155,8 @@ def create_app():
             return  # non-API routes (health, static, etc.)
         if request.path.startswith('/api/access-code/'):
             return  # allow check/verify endpoints
+        if request.path in ('/api/auth/config', '/api/auth/login', '/api/auth/register'):
+            return  # allow login/register endpoints
         code = request.headers.get('X-Access-Code', '')
         if hmac.compare_digest(code, expected):
             return
@@ -193,11 +218,11 @@ def create_app():
     return app
 
 
-def _load_settings_to_config(app):
+def _load_settings_to_config(app, user_id=None):
     """Load settings from database and apply to app.config on startup"""
     from models import Settings
     try:
-        settings = Settings.get_settings()
+        settings = Settings.get_settings(user_id=user_id)
         
         # Load AI provider format (always sync, has default value)
         if settings.ai_provider_format:
@@ -249,9 +274,17 @@ def _load_settings_to_config(app):
             logging.info(f"Loaded IMAGE_MODEL from settings: {settings.image_model}")
         
         # Load MinerU settings
+        mineru_api_base = settings.mineru_api_base or Config.MINERU_API_BASE
+        app.config['MINERU_PROVIDER'] = settings.mineru_provider or Config.MINERU_PROVIDER
+        app.config['MINERU_LOCAL_API_BASE'] = Config.MINERU_LOCAL_API_BASE
+        app.config['MINERU_LOCAL_BACKEND'] = Config.MINERU_LOCAL_BACKEND
+        app.config['MINERU_LOCAL_PARSE_METHOD'] = Config.MINERU_LOCAL_PARSE_METHOD
+        app.config['MINERU_LOCAL_RETURN_IMAGES'] = Config.MINERU_LOCAL_RETURN_IMAGES
+        app.config['MINERU_LOCAL_RESPONSE_FORMAT_ZIP'] = Config.MINERU_LOCAL_RESPONSE_FORMAT_ZIP
+        app.config['MINERU_LOCAL_RETURN_ORIGINAL_FILE'] = Config.MINERU_LOCAL_RETURN_ORIGINAL_FILE
         if settings.mineru_api_base:
-            app.config['MINERU_API_BASE'] = settings.mineru_api_base
-            logging.info(f"Loaded MINERU_API_BASE from settings: {settings.mineru_api_base}")
+            app.config['MINERU_API_BASE'] = mineru_api_base
+            logging.info(f"Loaded MINERU_API_BASE from settings: {mineru_api_base}")
         
         if settings.mineru_token:
             app.config['MINERU_TOKEN'] = settings.mineru_token

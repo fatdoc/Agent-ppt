@@ -2,6 +2,7 @@
 Task Manager - handles background tasks using ThreadPoolExecutor
 No need for Celery or Redis, uses in-memory task tracking
 """
+import json
 import logging
 import os
 import shutil
@@ -15,6 +16,7 @@ from sqlalchemy import func
 from sqlalchemy.exc import OperationalError
 from PIL import Image, ImageDraw, ImageFilter
 from models import db, Task, Page, Material, PageImageVersion
+from services.visual_guidance_service import VisualGuidanceService
 from utils import get_filtered_pages
 from utils.image_utils import check_image_resolution
 
@@ -41,6 +43,41 @@ def _append_extra_fields(desc_text: str, desc_content: dict) -> str:
     for name, value in extra_fields.items():
         if value and (allowed is None or name in allowed):
             parts.append(f"\n{name}：{value}")
+    return ''.join(parts)
+
+
+def _append_ppt_to_ppt_reference_guidance(desc_text: str, desc_content: dict) -> str:
+    """将 PPT-to-PPT 参考结构作为隐藏视觉提示加入图片 prompt，不写回页面描述。"""
+    if not isinstance(desc_content, dict):
+        return desc_text
+    reference = desc_content.get('ppt_to_ppt_reference')
+    if not isinstance(reference, dict):
+        return desc_text
+    guidance = reference.get('visual_guidance')
+    if not isinstance(guidance, dict):
+        return desc_text
+
+    parts = [
+        desc_text.rstrip(),
+        "\n\n[隐藏视觉参考：以下信息只用于构图、版式和风格匹配，"
+        "不要作为页面文字渲染，不要显示这些标签]",
+    ]
+    fields = [
+        ("参考页模式", guidance.get("page_pattern")),
+        ("参考页序号", guidance.get("page_index")),
+        ("版式结构", guidance.get("layout")),
+        ("内容结构", guidance.get("content_pattern")),
+        ("视觉元素", guidance.get("visual_elements")),
+    ]
+    for label, value in fields:
+        if value not in (None, ""):
+            parts.append(f"\n{label}：{value}")
+
+    style_guidance = guidance.get("style_guidance")
+    if style_guidance:
+        if isinstance(style_guidance, (dict, list)):
+            style_guidance = json.dumps(style_guidance, ensure_ascii=False)
+        parts.append(f"\n风格指导：{style_guidance}")
     return ''.join(parts)
 from pathlib import Path
 from services.pdf_service import split_pdf_to_pages
@@ -521,6 +558,7 @@ def generate_images_task(task_id: str, project_id: str, ai_service, file_service
 
                         # 将 extra_fields 拼入描述文本供图片生成使用
                         desc_text = _append_extra_fields(desc_text, desc_content)
+                        desc_text = _append_ppt_to_ppt_reference_guidance(desc_text, desc_content)
 
                         logger.debug(f"Got description text for page {page_id}: {desc_text[:100]}...")
                         
@@ -542,6 +580,15 @@ def generate_images_task(task_id: str, project_id: str, ai_service, file_service
                             page_ref_image_path = file_service.get_template_path(project_id)
                             # 注意：如果有风格描述，即使没有模板图片也允许生成
                             # 这个检查已经在 controller 层完成，这里不再检查
+
+                        from models import Project
+                        project = Project.query.get(project_id)
+                        visual_guidance = VisualGuidanceService().build_visual_guidance(
+                            project=project,
+                            page_desc=desc_text,
+                            has_template_image=bool(page_ref_image_path),
+                            has_blueprint_page=False,
+                        )
                         
                         # Generate image prompt
                         prompt = ai_service.generate_image_prompt(
@@ -550,7 +597,8 @@ def generate_images_task(task_id: str, project_id: str, ai_service, file_service
                             extra_requirements=extra_requirements,
                             language=language,
                             has_template=use_template,
-                            aspect_ratio=aspect_ratio
+                            aspect_ratio=aspect_ratio,
+                            visual_guidance=visual_guidance,
                         )
                         logger.debug(f"Generated image prompt for page {page_id}")
                         
@@ -707,6 +755,7 @@ def generate_single_page_image_task(task_id: str, project_id: str, page_id: str,
 
             # 将 extra_fields 拼入描述文本供图片生成使用
             desc_text = _append_extra_fields(desc_text, desc_content)
+            desc_text = _append_ppt_to_ppt_reference_guidance(desc_text, desc_content)
 
             # 从描述文本中提取图片 URL
             additional_ref_images = []
@@ -725,6 +774,15 @@ def generate_single_page_image_task(task_id: str, project_id: str, page_id: str,
                 ref_image_path = file_service.get_template_path(project_id)
                 # 注意：如果有风格描述，即使没有模板图片也允许生成
                 # 这个检查已经在 controller 层完成，这里不再检查
+
+            from models import Project
+            project = Project.query.get(project_id)
+            visual_guidance = VisualGuidanceService().build_visual_guidance(
+                project=project,
+                page_desc=desc_text,
+                has_template_image=bool(ref_image_path),
+                has_blueprint_page=False,
+            )
             
             # Generate image prompt
             page_data = page.get_outline_content() or {}
@@ -737,7 +795,8 @@ def generate_single_page_image_task(task_id: str, project_id: str, page_id: str,
                 extra_requirements=extra_requirements,
                 language=language,
                 has_template=use_template,
-                aspect_ratio=aspect_ratio
+                aspect_ratio=aspect_ratio,
+                visual_guidance=visual_guidance,
             )
             
             # Generate image
@@ -900,7 +959,8 @@ def generate_material_image_task(task_id: str, project_id: str, prompt: str,
                                  additional_ref_images: List[str] = None,
                                  aspect_ratio: str = "16:9",
                                  resolution: str = "2K",
-                                 temp_dir: str = None, app=None):
+                                 temp_dir: str = None, app=None,
+                                 user_id: Optional[str] = None):
     """
     Background task for generating a material image
     复用核心的generate_image逻辑，但保存到Material表而不是Page表
@@ -948,6 +1008,7 @@ def generate_material_image_task(task_id: str, project_id: str, prompt: str,
             
             # Save material info to database
             material = Material(
+                user_id=user_id,
                 project_id=actual_project_id,
                 filename=filename,
                 relative_path=relative_path,
@@ -1006,6 +1067,7 @@ def process_material_image_task(
     apply_mode: str = "overlay_selection",
     temp_dir: str = None,
     app=None,
+    user_id: Optional[str] = None,
 ):
     """Unified material processing task for generate/edit/region-edit workflows."""
     if app is None:
@@ -1101,6 +1163,7 @@ def process_material_image_task(
             image_url = file_service.get_file_url(actual_project_id, 'materials', filename)
 
             material = Material(
+                user_id=user_id,
                 project_id=actual_project_id,
                 filename=filename,
                 relative_path=relative_path,
@@ -1392,6 +1455,154 @@ def process_ppt_renovation_task(task_id: str, project_id: str, ai_service,
             if project:
                 project.status = 'DRAFT'
 
+            db.session.commit()
+
+
+def process_ppt_to_ppt_task(
+    task_id: str,
+    project_id: str,
+    reference_file_path: str,
+    renderer,
+    blueprint_service,
+    generation_service,
+    options_payload: dict,
+    app=None,
+):
+    """Background task for PPT to PPT: reference deck -> blueprint -> user-content pages."""
+    if app is None:
+        raise ValueError("Flask app instance must be provided")
+
+    from models import Project
+    from services.ppt_to_ppt.data_models import PptToPptOptions
+
+    with app.app_context():
+        task = Task.query.get(task_id)
+        project = Project.query.get(project_id)
+        if not task or not project:
+            return
+
+        try:
+            task.status = "PROCESSING"
+            task.set_progress({
+                "total": 5,
+                "completed": 0,
+                "failed": 0,
+                "current_step": "rendering_reference",
+                "reference_page_count": task.get_progress().get("reference_page_count"),
+            })
+            db.session.commit()
+
+            options = PptToPptOptions.from_form(options_payload)
+            rendered = renderer.prepare_reference_deck_from_path(reference_file_path, project_id)
+            task.update_progress(completed=1)
+            task.set_progress({
+                **task.get_progress(),
+                "current_step": "analyzing_blueprint",
+                "reference_page_count": rendered.page_count,
+            })
+            db.session.commit()
+
+            page_texts = ["" for _ in rendered.page_images]
+            blueprint = blueprint_service.extract_blueprint(rendered.page_images, page_texts, options)
+            project.set_ppt_to_ppt_blueprint(blueprint.to_dict())
+            if options.style_source == "template":
+                project.template_style = options.template_style or project.template_style
+            else:
+                project.template_style = str(blueprint.style_profile)
+            project.image_aspect_ratio = rendered.aspect_ratio
+            resolve_target_page_count = getattr(
+                generation_service,
+                "resolve_target_page_count",
+                None,
+            )
+            target_page_count = (
+                resolve_target_page_count(project.idea_prompt or "", blueprint, options)
+                if callable(resolve_target_page_count)
+                else options.page_count or rendered.page_count
+            )
+            task.update_progress(completed=2)
+            mapping_progress = {
+                **task.get_progress(),
+                "current_step": "mapping_content",
+            }
+            if target_page_count:
+                mapping_progress["target_page_count"] = target_page_count
+            task.set_progress(mapping_progress)
+            db.session.commit()
+
+            result = generation_service.generate(project.idea_prompt or "", blueprint, options)
+            if not getattr(result, "pages", None):
+                raise ValueError("PPT to PPT generated no pages")
+            if target_page_count and len(result.pages) != target_page_count:
+                raise ValueError(
+                    f"PPT to PPT generated {len(result.pages)} pages, "
+                    f"expected {target_page_count}"
+                )
+
+            old_pages = Page.query.filter_by(project_id=project_id).all()
+            for old_page in old_pages:
+                db.session.delete(old_page)
+            db.session.flush()
+
+            for index, generated in enumerate(result.pages):
+                page = Page(
+                    project_id=project_id,
+                    order_index=index,
+                    status="DESCRIPTION_GENERATED",
+                )
+                page.set_outline_content({
+                    "title": generated.title,
+                    "points": generated.points,
+                })
+                ppt_to_ppt_reference = {
+                    "page_index": generated.reference_page_index,
+                    "page_role": generated.reference_page_role,
+                }
+                reference_visual_guidance = getattr(
+                    generated, "reference_visual_guidance", None
+                )
+                if reference_visual_guidance:
+                    ppt_to_ppt_reference["visual_guidance"] = reference_visual_guidance
+
+                page.set_description_content({
+                    "text": generated.description,
+                    "generated_at": datetime.utcnow().isoformat(),
+                    "ppt_to_ppt_reference": ppt_to_ppt_reference,
+                })
+                db.session.add(page)
+
+            project.outline_text = result.outline_text
+            project.description_text = result.description_text
+            project.status = "DESCRIPTIONS_GENERATED"
+            project.updated_at = datetime.utcnow()
+            task.status = "COMPLETED"
+            task.completed_at = datetime.utcnow()
+            done_progress = {
+                "total": 5,
+                "completed": 5,
+                "failed": 0,
+                "current_step": "done",
+                "reference_page_count": rendered.page_count,
+            }
+            if target_page_count:
+                done_progress["target_page_count"] = target_page_count
+            task.set_progress(done_progress)
+            db.session.commit()
+        except Exception as exc:
+            db.session.rollback()
+            task = Task.query.get(task_id)
+            project = Project.query.get(project_id)
+            if task:
+                task.status = "FAILED"
+                task.error_message = str(exc)
+                task.completed_at = datetime.utcnow()
+                task.set_progress({
+                    **task.get_progress(),
+                    "failed": 1,
+                    "current_step": "failed",
+                })
+            if project:
+                project.status = "DRAFT"
             db.session.commit()
 
 

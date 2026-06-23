@@ -1188,7 +1188,7 @@ class ExportService:
             - pptx_bytes: PPTX 文件字节流（如果 output_file 为 None），否则为 None
             - warnings: ExportWarnings 对象，包含所有警告信息
         """
-        from services.image_editability import ServiceConfig, ImageEditabilityService
+        from services.image_editability import ServiceConfig, ImageEditabilityService, EditableImage
         from utils.pptx_builder import PPTXBuilder
         
         # 初始化警告收集器
@@ -1252,7 +1252,35 @@ class ExportService:
                         report_progress("版面分析", f"已完成第 {completed_count}/{total_pages} 页的版面分析", percent)
                     except Exception as e:
                         logger.error(f"处理图片 {image_paths[idx]} 失败: {e}")
-                        raise
+                        if fail_fast:
+                            raise
+
+                        try:
+                            with Image.open(image_paths[idx]) as fallback_img:
+                                fallback_width, fallback_height = fallback_img.size
+                        except Exception:
+                            fallback_width, fallback_height = slide_width_pixels, slide_height_pixels
+
+                        warnings.add_warning(
+                            f"第 {idx + 1} 页版面分析失败，已作为整页图片导出: {e}"
+                        )
+                        results[idx] = EditableImage(
+                            image_id=f"fallback-{idx + 1}",
+                            image_path=image_paths[idx],
+                            width=fallback_width,
+                            height=fallback_height,
+                            elements=[],
+                            clean_background=None,
+                            depth=0,
+                            parent_id=None,
+                        )
+                        completed_count += 1
+                        percent = 5 + int(35 * completed_count / total_pages)
+                        report_progress(
+                            "版面分析",
+                            f"第 {idx + 1} 页分析失败，已降级为整页图片导出",
+                            percent
+                        )
                 
                 editable_images = results
         

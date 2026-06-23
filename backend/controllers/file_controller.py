@@ -3,6 +3,8 @@ File Controller - handles static file serving
 """
 from flask import Blueprint, send_from_directory, current_app
 from utils import error_response, not_found
+from utils.auth import current_user_id
+from models import Material, Project, UserTemplate
 from utils.path_utils import find_file_with_prefix
 import os
 from pathlib import Path
@@ -23,6 +25,13 @@ def serve_file(project_id, file_type, filename):
     """
     try:
         if file_type not in ['template', 'pages', 'materials', 'exports']:
+            return not_found('File')
+
+        user_id = current_user_id()
+        query = Project.query.filter(Project.id == project_id)
+        if user_id:
+            query = query.filter(Project.user_id == user_id)
+        if not query.first():
             return not_found('File')
         
         # Construct file path
@@ -58,6 +67,13 @@ def serve_user_template(template_id, filename):
         filename: File name
     """
     try:
+        user_id = current_user_id()
+        query = UserTemplate.query.filter(UserTemplate.id == template_id)
+        if user_id:
+            query = query.filter(UserTemplate.user_id == user_id)
+        if not query.first():
+            return not_found('File')
+
         # Construct file path
         file_dir = os.path.join(
             current_app.config['UPLOAD_FOLDER'],
@@ -91,6 +107,16 @@ def serve_global_material(filename):
     """
     try:
         safe_filename = secure_filename(filename)
+        user_id = current_user_id()
+        query = Material.query.filter(
+            Material.project_id.is_(None),
+            Material.filename == safe_filename,
+        )
+        if user_id:
+            query = query.filter(Material.user_id == user_id)
+        if not query.first():
+            return not_found('File')
+
         # Construct file path
         file_dir = os.path.join(
             current_app.config['UPLOAD_FOLDER'],
@@ -159,4 +185,3 @@ def serve_mineru_file(extract_id, filepath):
         return not_found('File')
     except Exception as e:
         return error_response('SERVER_ERROR', str(e), 500)
-

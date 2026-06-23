@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Project } from '@/types';
+import type { NoThinkOptions, Project } from '@/types';
 import * as api from '@/api/endpoints';
 import { debounce, normalizeProject, normalizeErrorMessage } from '@/utils';
 import { devLog } from '@/utils/logger';
@@ -95,7 +95,7 @@ interface ProjectState {
   setError: (error: string | null) => void;
   
   // 项目操作
-  initializeProject: (type: 'idea' | 'outline' | 'description', content: string, templateImage?: File, templateStyle?: string, referenceFileIds?: string[], aspectRatio?: string) => Promise<void>;
+  initializeProject: (type: 'idea' | 'outline' | 'description' | 'no_think', content: string, templateImage?: File, templateStyle?: string, referenceFileIds?: string[], aspectRatio?: string, noThinkOptions?: NoThinkOptions, pageDescriptions?: string, generateDescriptionsFromOutline?: boolean) => Promise<void>;
   syncProject: (projectId?: string) => Promise<void>;
   
   // 页面操作
@@ -197,17 +197,26 @@ const debouncedUpdatePage = debounce(
   setError: (error) => set({ error }),
 
   // 初始化项目
-  initializeProject: async (type, content, templateImage, templateStyle, referenceFileIds, aspectRatio) => {
+  initializeProject: async (type, content, templateImage, templateStyle, referenceFileIds, aspectRatio, noThinkOptions, pageDescriptions, generateDescriptionsFromOutline = false) => {
     set({ isGlobalLoading: true, error: null });
     try {
       const request: any = {};
+      const trimmedPageDescriptions = pageDescriptions?.trim();
 
       if (type === 'idea') {
         request.idea_prompt = content;
       } else if (type === 'outline') {
         request.outline_text = content;
+        if (trimmedPageDescriptions) {
+          request.creation_type = 'descriptions';
+          request.description_text = trimmedPageDescriptions;
+        }
       } else if (type === 'description') {
         request.description_text = content;
+      } else if (type === 'no_think') {
+        request.creation_type = 'no_think';
+        request.idea_prompt = content;
+        request.no_think_options = noThinkOptions;
       }
 
       // 添加风格描述（如果有）
@@ -262,8 +271,13 @@ const debouncedUpdatePage = debounce(
         }
       };
 
-      if (type === 'outline') {
+      if (type === 'outline' && trimmedPageDescriptions) {
+        await generateWithRollback(() => api.generateFromDescription(projectId, trimmedPageDescriptions), '从描述生成大纲和页面描述');
+      } else if (type === 'outline' || type === 'no_think') {
         await generateWithRollback(() => api.generateOutline(projectId), '生成大纲');
+        if (type === 'outline' && generateDescriptionsFromOutline) {
+          await generateWithRollback(() => api.generateDescriptions(projectId), '生成描述');
+        }
       } else if (type === 'description') {
         await generateWithRollback(() => api.generateFromDescription(projectId, content), '从描述生成大纲和页面描述');
       }

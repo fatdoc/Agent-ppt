@@ -4,16 +4,16 @@
 
 :root {
   /* 主色 - 黄色系 */
-  --banana-yellow: #FFD700;
-  --banana-yellow-light: #FFE44D;
-  --banana-yellow-dark: #FFC700;
-  --banana-yellow-pale: #FFF9E6;
+  --banana-yellow: #AFFF00;
+  --banana-yellow-light: #D7FF5A;
+  --banana-yellow-dark: #84CC16;
+  --banana-yellow-pale: #F3FFE1;
 
   /* 中性色 - 黑白灰 */
-  --black: #1A1A1A;
-  --black-80: #4A4A4A;
-  --black-60: #757575;
-  --black-10: #F5F5F5;
+  --black: #121212;
+  --black-80: #3A3A3A;
+  --black-60: #6D6D6D;
+  --black-10: #F4F6EF;
   --white: #FFFFFF;
 
   /* 功能色 */
@@ -28,11 +28,11 @@
   --transition-slow: 350ms ease-in-out;
 
   /* 背景色 */
-  --bg-primary: #FFFFFF;
-  --bg-secondary: #F5F5F5;
-  --bg-tertiary: #FAFAFA;
+  --bg-primary: #FFFFFA;
+  --bg-secondary: #F5F8EE;
+  --bg-tertiary: #FAFCF5;
   --bg-elevated: #FFFFFF;
-  --bg-hover: #F5F5F5;
+  --bg-hover: #EEF6DF;
 
   /* 文字色 */
   --text-primary: #1A1A1A;
@@ -40,17 +40,17 @@
   --text-tertiary: #757575;
 
   /* 边框色 */
-  --border-primary: #E5E5E5;
-  --border-secondary: #F0F0F0;
-  --border-hover: #D4D4D4;
+  --border-primary: #E4E7DE;
+  --border-secondary: #EEF0E9;
+  --border-hover: #C9D7B4;
 }
 
 .dark {
   /* 主色 - 黄色系（深色模式下稍微调亮） */
-  --banana-yellow: #F5A623;
-  --banana-yellow-light: #FFD700;
-  --banana-yellow-dark: #E6930E;
-  --banana-yellow-pale: #2A2520;
+  --banana-yellow: #AFFF00;
+  --banana-yellow-light: #D7FF5A;
+  --banana-yellow-dark: #84CC16;
+  --banana-yellow-pale: #202D12;
 
   /* 中性色 - 深色模式 */
   --black: #F5F5F5;
@@ -84,7 +84,7 @@
 }
 
 body {
-  font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-family: Inter, 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   /* 移动端优化 */
@@ -93,6 +93,36 @@ body {
   background-color: var(--bg-primary);
   color: var(--text-primary);
   transition: background-color 0.2s ease-in-out, color 0.2s ease-in-out;
+}
+
+::selection {
+  background: rgba(175, 255, 0, 0.45);
+  color: #121212;
+}
+
+.app-surface {
+  background:
+    radial-gradient(circle at 12% 8%, rgba(175, 255, 0, 0.12), transparent 24rem),
+    linear-gradient(135deg, #fffffa 0%, #f7fceb 52%, #ffffff 100%);
+}
+
+.dark .app-surface {
+  background: #13131a;
+}
+
+.app-chrome {
+  background: rgba(255, 255, 250, 0.84);
+  backdrop-filter: blur(18px);
+  border-color: rgba(18, 18, 18, 0.08);
+}
+
+.dark .app-chrome {
+  background: rgba(19, 19, 26, 0.92);
+  border-color: var(--border-primary);
+}
+
+.brand-wordmark {
+  letter-spacing: 0;
 }
 
 #root {
@@ -165,8 +195,261 @@ body {
   }
 }
 
+@keyframes home-mode-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.992);
+    filter: blur(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+.home-mode-panel {
+  animation: home-mode-panel-in 260ms cubic-bezier(0.22, 1, 0.36, 1);
+  transform-origin: top center;
+}
+
+.home-mode-tab {
+  will-change: transform, background-color, box-shadow;
+}
+
+.home-mode-tab:active {
+  transform: scale(0.985);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home-mode-panel {
+    animation: none;
+  }
+
+  .home-mode-tab {
+    transition: none;
+  }
+}
+
 /* Markdown 内容样式 - 仅保留基础容器样式，具体样式由 Markdown.tsx 组件内的 Tailwind 类处理 */
 .markdown-content {
   line-height: 1.6;
 }
 
+/* Migrated marketing homepage */
+.landing-page {
+  font-family: Inter, 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+}
+
+.landing-nav-link,
+.landing-rise,
+.landing-section-title,
+.landing-formula-card,
+.landing-reference,
+.landing-scenario {
+  animation: landing-rise 700ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.landing-hero-line {
+  animation: landing-hero-left 900ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.landing-hero-line-alt {
+  animation-name: landing-hero-right;
+  animation-delay: 90ms;
+}
+
+.landing-float {
+  animation: landing-float 6s ease-in-out infinite;
+}
+
+.landing-orbit {
+  position: absolute;
+  border-radius: 9999px;
+  background: rgba(175, 255, 0, 0.16);
+  filter: blur(42px);
+  pointer-events: none;
+}
+
+.landing-orbit-a {
+  width: 6rem;
+  height: 6rem;
+  top: 5rem;
+  left: 2.5rem;
+  animation: landing-drift-a 8s ease-in-out infinite;
+}
+
+.landing-orbit-b {
+  width: 8rem;
+  height: 8rem;
+  right: 5rem;
+  bottom: 10rem;
+  opacity: 0.7;
+  animation: landing-drift-b 10s ease-in-out infinite;
+}
+
+.landing-glow {
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 0 24px rgba(175, 255, 0, 0.28);
+}
+
+.landing-glow::after,
+.landing-shine::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-130%);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.34), transparent);
+}
+
+.landing-glow:hover::after,
+.landing-shine:hover::after {
+  animation: landing-shine 650ms ease-out;
+}
+
+.landing-shine {
+  position: relative;
+  overflow: hidden;
+}
+
+.landing-formula-card::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  opacity: 0;
+  background: linear-gradient(135deg, rgba(175, 255, 0, 0.2), transparent, rgba(0, 212, 255, 0.16));
+  transition: opacity 250ms ease;
+}
+
+.landing-formula-card:hover::before {
+  opacity: 1;
+}
+
+.landing-formula-card > * {
+  position: relative;
+  z-index: 1;
+}
+
+.noise-overlay::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0.03;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+  animation: landing-grain 8s steps(10) infinite;
+}
+
+@keyframes landing-rise {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes landing-hero-left {
+  from {
+    opacity: 0;
+    transform: translateX(-46px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes landing-hero-right {
+  from {
+    opacity: 0;
+    transform: translateX(46px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes landing-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-12px);
+  }
+}
+
+@keyframes landing-drift-a {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(30px, -20px) scale(1.1);
+  }
+}
+
+@keyframes landing-drift-b {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(-40px, 30px) scale(1.2);
+  }
+}
+
+@keyframes landing-shine {
+  from {
+    transform: translateX(-130%);
+  }
+  to {
+    transform: translateX(130%);
+  }
+}
+
+@keyframes landing-grain {
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  10% {
+    transform: translate(-5%, -10%);
+  }
+  30% {
+    transform: translate(3%, -15%);
+  }
+  50% {
+    transform: translate(12%, 9%);
+  }
+  70% {
+    transform: translate(9%, 4%);
+  }
+  90% {
+    transform: translate(-1%, 7%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-page *,
+  .landing-page *::before,
+  .landing-page *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 1ms !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .landing-hero-line,
+  .landing-hero-line-alt {
+    animation-name: landing-rise;
+  }
+}

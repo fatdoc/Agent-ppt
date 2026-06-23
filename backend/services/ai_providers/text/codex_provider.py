@@ -14,6 +14,8 @@ from typing import Generator
 import requests as http_requests
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
 
+from services.prompt_registry import prompt_registry
+
 from .base import TextProvider, strip_think_tags
 
 logger = logging.getLogger(__name__)
@@ -67,7 +69,7 @@ class CodexTextProvider(TextProvider):
         """Build a Responses API request body. Stream is always true (required by Codex)."""
         return {
             "model": self.model,
-            "instructions": "You are a helpful assistant.",
+            "instructions": prompt_registry.render("codex.instructions.default").strip(),
             "input": [{"role": "user", "content": prompt}],
             "store": False,
             "stream": True,
@@ -124,7 +126,7 @@ class CodexTextProvider(TextProvider):
 
         payload = {
             "model": self.model,
-            "instructions": "You are a helpful assistant.",
+            "instructions": prompt_registry.render("codex.instructions.default").strip(),
             "input": [
                 {
                     "role": "user",

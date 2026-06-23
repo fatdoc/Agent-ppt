@@ -91,8 +91,15 @@ class Config:
     IMAGE_MODEL = os.getenv('IMAGE_MODEL', 'gemini-3-pro-image-preview')
 
     # MinerU 文件解析服务配置
+    MINERU_PROVIDER = os.getenv('MINERU_PROVIDER', 'cloud')  # cloud | local
     MINERU_TOKEN = os.getenv('MINERU_TOKEN', '')
     MINERU_API_BASE = os.getenv('MINERU_API_BASE', 'https://mineru.net')
+    MINERU_LOCAL_API_BASE = os.getenv('MINERU_LOCAL_API_BASE', 'http://127.0.0.1:7860')
+    MINERU_LOCAL_BACKEND = os.getenv('MINERU_LOCAL_BACKEND', 'pipeline')
+    MINERU_LOCAL_PARSE_METHOD = os.getenv('MINERU_LOCAL_PARSE_METHOD', 'auto')
+    MINERU_LOCAL_RETURN_IMAGES = os.getenv('MINERU_LOCAL_RETURN_IMAGES', 'true').lower() in {'1', 'true', 'yes', 'on'}
+    MINERU_LOCAL_RESPONSE_FORMAT_ZIP = os.getenv('MINERU_LOCAL_RESPONSE_FORMAT_ZIP', 'true').lower() in {'1', 'true', 'yes', 'on'}
+    MINERU_LOCAL_RETURN_ORIGINAL_FILE = os.getenv('MINERU_LOCAL_RETURN_ORIGINAL_FILE', 'false').lower() in {'1', 'true', 'yes', 'on'}
     
     # 图片识别模型配置
     IMAGE_CAPTION_MODEL = os.getenv('IMAGE_CAPTION_MODEL', 'gemini-3-flash-preview')

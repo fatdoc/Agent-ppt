@@ -9,11 +9,14 @@ import zipfile
 import io
 import requests
 import tempfile
+import uuid
 from typing import Optional, List
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 from PIL import Image
 from markitdown import MarkItDown
 from services.ai_providers.text import strip_think_tags
+from services.prompt_registry import prompt_registry
 
 logger = logging.getLogger(__name__)
 
@@ -50,14 +53,28 @@ def _get_ai_provider_format(provider_format: str = None) -> str:
 
 class FileParserService:
     """Service for parsing files using MinerU and enhancing with image captions"""
+
+    _MINERU_ENDPOINT_SUFFIXES = (
+        "/api/v4/extract/task",
+        "/api/v4/file-urls/batch",
+        "/api/v4/extract-results/batch",
+    )
     
-    def __init__(self, mineru_token: str, mineru_api_base: str = "https://mineru.net",
+    def __init__(self, mineru_token: str = "", mineru_api_base: str = "",
                  google_api_key: str = "", google_api_base: str = "",
                  openai_api_key: str = "", openai_api_base: str = "",
                  image_caption_model: str = "gemini-3-flash-preview",
                  lazyllm_image_caption_source: str = "", 
                  provider_format: str = None,
                  mineru_model_version: str = "vlm",
+                 mineru_provider: str = None,
+                 local_api_base: str = None,
+                 local_backend: str = None,
+                 local_parse_method: str = None,
+                 local_return_images: bool = None,
+                 local_response_format_zip: bool = None,
+                 local_return_original_file: bool = None,
+                 **_ignored_kwargs,
                  ):
         """
         Initialize the file parser service
@@ -75,14 +92,43 @@ class FileParserService:
             mineru_model_version: MinerU model version ('vlm' or 'pipeline'). Default is 'vlm'.
         """
         self.mineru_token = mineru_token
-        self.mineru_api_base = mineru_api_base
+        explicit_mineru_api_base = bool((mineru_api_base or "").strip())
+        self.mineru_api_base = self.normalize_mineru_api_base(mineru_api_base or "https://mineru.net")
         self.mineru_model_version = mineru_model_version
-        self.get_upload_url_api = f"{mineru_api_base}/api/v4/file-urls/batch"
-        self.get_result_api_template = f"{mineru_api_base}/api/v4/extract-results/batch/{{}}"
+        self.mineru_provider = (mineru_provider or os.getenv("MINERU_PROVIDER", "cloud")).lower()
+        local_base = local_api_base or os.getenv("MINERU_LOCAL_API_BASE", "http://127.0.0.1:7860")
+        if self.mineru_provider == "local" and explicit_mineru_api_base:
+            local_base = self.mineru_api_base
+        self.local_api_base = self.normalize_mineru_api_base(local_base)
+        self.local_backend = local_backend or os.getenv("MINERU_LOCAL_BACKEND", "pipeline")
+        self.local_parse_method = local_parse_method or os.getenv("MINERU_LOCAL_PARSE_METHOD", "auto")
+        self.local_return_images = self._coerce_bool(local_return_images, "MINERU_LOCAL_RETURN_IMAGES", True)
+        self.local_response_format_zip = self._coerce_bool(local_response_format_zip, "MINERU_LOCAL_RESPONSE_FORMAT_ZIP", True)
+        self.local_return_original_file = self._coerce_bool(local_return_original_file, "MINERU_LOCAL_RETURN_ORIGINAL_FILE", False)
+        self.get_upload_url_api = f"{self.mineru_api_base}/api/v4/file-urls/batch"
+        self.get_result_api_template = f"{self.mineru_api_base}/api/v4/extract-results/batch/{{}}"
         
         self._image_caption_model = image_caption_model
         self._provider_format = _get_ai_provider_format(provider_format)
         self._caption_provider = None
+
+    @staticmethod
+    def normalize_mineru_api_base(value: str | None) -> str:
+        base = (value or "").strip().rstrip("/")
+        for suffix in FileParserService._MINERU_ENDPOINT_SUFFIXES:
+            if base.endswith(suffix):
+                return base[: -len(suffix)] or base
+        return base
+
+    @staticmethod
+    def _coerce_bool(value, env_name: str, default: bool) -> bool:
+        if value is None:
+            value = os.getenv(env_name)
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() in {"1", "true", "yes", "on"}
     
     def _get_caption_provider(self):
         """Lazily initialize caption provider via the provider factory"""
@@ -122,10 +168,25 @@ class FileParserService:
                 logger.info(f"File {filename} is a plain text file, reading directly...")
                 return self._parse_text_file(file_path, filename)
             
-            # Check if it's a spreadsheet file (xlsx, csv) - use markitdown
-            if file_ext in ['xlsx', 'xls', 'csv']:
+            # Keep legacy/non-local formats on markitdown instead of forcing them through local MinerU.
+            if file_ext in ['xls', 'csv'] or (self.mineru_provider != 'local' and file_ext == 'xlsx'):
                 logger.info(f"File {filename} is a spreadsheet file, using markitdown...")
                 return self._parse_spreadsheet_file(file_path, filename)
+
+            if self.mineru_provider == 'local':
+                if file_ext in ['doc', 'ppt']:
+                    logger.info(f"File {filename} uses a legacy Office format, using markitdown...")
+                    return self._parse_spreadsheet_file(file_path, filename)
+                logger.info(f"File {filename} requires local MinerU parsing...")
+                batch_id, markdown_content, extract_id, error, failed_count = self._parse_file_with_local_mineru(file_path, filename)
+                if error or not markdown_content:
+                    return batch_id, markdown_content, extract_id, error, failed_count
+
+                if self._can_generate_captions():
+                    enhanced_content, failed_count = self._enhance_markdown_with_captions(markdown_content)
+                    return batch_id, enhanced_content, extract_id, None, failed_count
+
+                return batch_id, markdown_content, extract_id, None, failed_count
             
             # For other file types, use MinerU service
             logger.info(f"File {filename} requires MinerU parsing...")
@@ -171,6 +232,77 @@ class FileParserService:
             error_msg = f"Unexpected error during file parsing: {str(e)}"
             logger.error(error_msg, exc_info=True)
             return None, None, None, error_msg, 0
+
+    def _parse_file_with_local_mineru(self, file_path: str, filename: str) -> tuple[Optional[str], Optional[str], Optional[str], Optional[str], int]:
+        """Parse a file through the local MinerU Gradio API."""
+        try:
+            result = self._call_local_mineru_gradio(file_path)
+            markdown_content, extract_id, error = self._extract_local_mineru_gradio_result(result)
+            return None, markdown_content, extract_id, error, 0
+        except ImportError as e:
+            error_msg = f"Local MinerU Gradio client is not installed: {str(e)}"
+            logger.error(error_msg)
+            return None, None, None, error_msg, 0
+        except Exception as e:
+            error_msg = f"Local MinerU request failed: {str(e)}"
+            logger.error(error_msg)
+            return None, None, None, error_msg, 0
+
+    def _call_local_mineru_gradio(self, file_path: str):
+        """Call MinerU's Gradio convert_to_markdown_stream endpoint."""
+        from gradio_client import Client, handle_file
+
+        client = Client(self.local_api_base)
+        return client.predict(
+            file_path=handle_file(file_path),
+            end_pages=int(os.getenv("MINERU_LOCAL_END_PAGES", "1000")),
+            is_ocr=self._coerce_bool(None, "MINERU_LOCAL_IS_OCR", False),
+            formula_enable=self._coerce_bool(None, "MINERU_LOCAL_FORMULA_ENABLE", True),
+            table_enable=self._coerce_bool(None, "MINERU_LOCAL_TABLE_ENABLE", True),
+            image_analysis=self._coerce_bool(None, "MINERU_LOCAL_IMAGE_ANALYSIS", True),
+            language=os.getenv("MINERU_LOCAL_LANGUAGE", "ch (Chinese, English, Chinese Traditional)"),
+            backend=self.local_backend,
+            url=os.getenv("MINERU_LOCAL_VLM_URL", "http://localhost:30000"),
+            api_name="/convert_to_markdown_stream",
+        )
+
+    def _extract_local_mineru_gradio_result(self, result) -> tuple[Optional[str], Optional[str], Optional[str]]:
+        """Extract markdown from MinerU Gradio tuple output."""
+        if not isinstance(result, (list, tuple)):
+            return None, None, f"Unexpected local MinerU response format: {type(result).__name__}"
+
+        output_file = result[1] if len(result) > 1 else None
+        md_text = result[3] if len(result) > 3 else None
+        output_path = self._get_gradio_file_path(output_file)
+
+        if output_path and output_path.exists() and output_path.is_file():
+            try:
+                return self._extract_markdown_zip(output_path.read_bytes())
+            except OSError as e:
+                logger.warning(f"Failed to read local MinerU output file {output_path}: {e}")
+
+        if md_text:
+            extract_id = str(uuid.uuid4())[:8]
+            current_file = Path(__file__).resolve()
+            project_root = current_file.parent.parent.parent
+            mineru_storage = project_root / 'uploads' / 'mineru_files' / extract_id
+            mineru_storage.mkdir(parents=True, exist_ok=True)
+            markdown_file_path = 'result.md'
+            (mineru_storage / markdown_file_path).write_text(str(md_text), encoding='utf-8')
+            markdown_content = self._replace_image_paths(str(md_text), markdown_file_path, extract_id)
+            return markdown_content, extract_id, None
+
+        status = result[0] if result else ""
+        return None, None, f"Local MinerU returned no markdown content. Status: {status}"
+
+    @staticmethod
+    def _get_gradio_file_path(value) -> Optional[Path]:
+        if isinstance(value, (str, os.PathLike)):
+            return Path(value)
+        if isinstance(value, dict):
+            path = value.get("path") or value.get("name")
+            return Path(path) if path else None
+        return None
     
     def _parse_text_file(self, file_path: str, filename: str) -> tuple[Optional[str], Optional[str], Optional[str], Optional[str], int]:
         """
@@ -365,72 +497,120 @@ class FileParserService:
                 logger.warning(f"Network error while polling result: {str(e)}, retrying...")
                 time.sleep(2)
     
-    def _download_markdown(self, zip_url: str) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    def _download_markdown(
+        self,
+        zip_url: str,
+        max_attempts: int = 4,
+        retry_delay: float = 2.0,
+    ) -> tuple[Optional[str], Optional[str], Optional[str]]:
         """Download and extract markdown from result zip, save images to local server
         
         Returns:
             Tuple of (markdown_content, extract_id, error_message)
         """
+        last_error = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                response = requests.get(zip_url, timeout=120)
+                response.raise_for_status()
+                markdown_content, extract_id, error = self._extract_markdown_zip(response.content)
+                if error and "valid ZIP" in error and attempt < max_attempts:
+                    last_error = error
+                    logger.warning(
+                        "Downloaded MinerU result is not a valid ZIP (attempt %s/%s), retrying...",
+                        attempt,
+                        max_attempts,
+                    )
+                    time.sleep(retry_delay * attempt)
+                    continue
+                return markdown_content, extract_id, error
+            except requests.exceptions.RequestException as e:
+                last_error = e
+                if attempt < max_attempts:
+                    logger.warning(
+                        "Failed to download MinerU result zip (attempt %s/%s): %s",
+                        attempt,
+                        max_attempts,
+                        str(e),
+                    )
+                    time.sleep(retry_delay * attempt)
+                    continue
+
+                error_msg = f"Failed to download result after {max_attempts} attempts: {str(e)}"
+                logger.error(error_msg)
+                return None, None, error_msg
+            except zipfile.BadZipFile as e:
+                last_error = e
+                if attempt < max_attempts:
+                    logger.warning(
+                        "Downloaded MinerU result is not a valid ZIP (attempt %s/%s), retrying...",
+                        attempt,
+                        max_attempts,
+                    )
+                    time.sleep(retry_delay * attempt)
+                    continue
+
+                error_msg = "Downloaded file is not a valid ZIP archive after retrying"
+                logger.error(error_msg)
+                return None, None, error_msg
+            except Exception as e:
+                error_msg = f"Failed to process ZIP file: {str(e)}"
+                logger.error(error_msg)
+                return None, None, error_msg
+
+        error_msg = f"Failed to download result after {max_attempts} attempts: {str(last_error)}"
+        logger.error(error_msg)
+        return None, None, error_msg
+
+    def _extract_markdown_zip(self, zip_content: bytes) -> tuple[Optional[str], Optional[str], Optional[str]]:
+        """Extract a MinerU ZIP response and return rewritten markdown plus extract id."""
         try:
-            response = requests.get(zip_url, timeout=60)
-            response.raise_for_status()
-            
-            # Generate unique directory name for this extraction
-            import uuid
             extract_id = str(uuid.uuid4())[:8]
-            
-            # Get upload folder from Flask config (we'll need to pass this)
-            # For now, use a hardcoded path relative to project root
-            import os
-            from pathlib import Path
-            
-            # Navigate to project root (assuming this file is in backend/services/)
             current_file = Path(__file__).resolve()
-            backend_dir = current_file.parent.parent
-            project_root = backend_dir.parent
-            
-            # Create directory for mineru extracts
+            project_root = current_file.parent.parent.parent
             mineru_storage = project_root / 'uploads' / 'mineru_files' / extract_id
             mineru_storage.mkdir(parents=True, exist_ok=True)
-            
+
             logger.info(f"Extracting ZIP to: {mineru_storage}")
-            
+
             markdown_content = None
             markdown_file_path = None
-            
-            with zipfile.ZipFile(io.BytesIO(response.content)) as z:
-                # Extract all files
-                z.extractall(mineru_storage)
+
+            with zipfile.ZipFile(io.BytesIO(zip_content)) as z:
+                for member in z.infolist():
+                    member_path = Path(member.filename)
+                    if member_path.is_absolute() or '..' in member_path.parts:
+                        logger.warning(f"Skipping unsafe ZIP member path: {member.filename}")
+                        continue
+                    z.extract(member, mineru_storage)
+
                 logger.info(f"Extracted {len(z.namelist())} files from ZIP")
-                
-                # Find markdown file (usually full.md or similar)
+
                 for name in z.namelist():
-                    if name.endswith('.md') or name.endswith('.MD'):
+                    if name.endswith(('.md', '.MD')):
+                        member_path = Path(name)
+                        if member_path.is_absolute() or '..' in member_path.parts:
+                            continue
                         markdown_file_path = name
                         md_full_path = mineru_storage / name
                         with open(md_full_path, 'r', encoding='utf-8') as f:
                             markdown_content = f.read()
                         logger.info(f"Found markdown file: {name}")
                         break
-                
-                if not markdown_content:
-                    error_msg = "No markdown file found in result zip"
-                    logger.error(error_msg)
-                    return None, None, error_msg
-            
-            # Replace relative image paths with local server URLs
+
+            if markdown_content is None or not markdown_file_path:
+                error_msg = "No markdown file found in result zip"
+                logger.error(error_msg)
+                return None, None, error_msg
+
+            self._promote_markdown_sibling_assets(mineru_storage, markdown_file_path)
             markdown_content = self._replace_image_paths(
-                markdown_content, 
+                markdown_content,
                 markdown_file_path,
                 extract_id
             )
-            
+
             return markdown_content, extract_id, None
-                
-        except requests.exceptions.RequestException as e:
-            error_msg = f"Failed to download result: {str(e)}"
-            logger.error(error_msg)
-            return None, None, error_msg
         except zipfile.BadZipFile:
             error_msg = "Downloaded file is not a valid ZIP archive"
             logger.error(error_msg)
@@ -439,6 +619,31 @@ class FileParserService:
             error_msg = f"Failed to process ZIP file: {str(e)}"
             logger.error(error_msg)
             return None, None, error_msg
+
+    def _promote_markdown_sibling_assets(self, mineru_storage: Path, markdown_file_path: str) -> None:
+        """Expose files next to the markdown at extract root so /files/mineru/{id}/images works."""
+        md_dir = Path(markdown_file_path).parent
+        if str(md_dir) == '.':
+            return
+
+        source_dir = mineru_storage / md_dir
+        if not source_dir.exists() or not source_dir.is_dir():
+            return
+
+        for child in source_dir.iterdir():
+            if child.name.lower().endswith('.md'):
+                continue
+
+            target = mineru_storage / child.name
+            if target.exists():
+                continue
+
+            if child.is_dir():
+                import shutil
+                shutil.copytree(child, target)
+            elif child.is_file():
+                import shutil
+                shutil.copy2(child, target)
     
     @staticmethod
     def extract_header_footer_from_layout(extract_id: str) -> str:
@@ -520,9 +725,8 @@ class FileParserService:
                 else:
                     rel_path = img_path.replace('\\', '/')
             
-            # Construct the local server URL
-            # The files are served at /files/mineru/{extract_id}/{rel_path}
-            new_url = f"/files/mineru/{extract_id}/{rel_path[:15]}.{rel_path.split('.')[-1]}" # "images/...(8)"
+            rel_path = self._normalize_mineru_asset_path(rel_path)
+            new_url = f"/files/mineru/{extract_id}/{rel_path}"
             
             logger.debug(f"Replacing image path: {img_path} -> {new_url}")
             return f"![{alt_text}]({new_url})"
@@ -532,6 +736,17 @@ class FileParserService:
         replaced_content = re.sub(pattern, replace_link, markdown_content)
         
         return replaced_content
+
+    @staticmethod
+    def _normalize_mineru_asset_path(rel_path: str) -> str:
+        """Normalize MinerU image paths to the extract root URL layout."""
+        normalized = rel_path.replace('\\', '/').lstrip('/')
+        marker = '/images/'
+        if marker in normalized:
+            return 'images/' + normalized.split(marker, 1)[1]
+        if normalized.startswith('images/'):
+            return normalized
+        return normalized
     
     def _enhance_markdown_with_captions(self, markdown_content: str) -> tuple[str, int]:
         """
@@ -646,12 +861,14 @@ class FileParserService:
         
         return captions, failed_count
     
-    def _generate_single_caption(self, image_url: str) -> str:
+    def _generate_single_caption(self, image_url: str, *, raise_on_error: bool = False) -> str:
         """
         Generate caption for a single image (supports both HTTP URLs and local paths)
         
         Args:
             image_url: URL or local path of the image
+            raise_on_error: Raise the underlying provider error instead of returning
+                an empty caption. This is useful for settings diagnostics.
             
         Returns:
             Generated caption
@@ -681,7 +898,7 @@ class FileParserService:
                 return ""
             
             # Generate caption via provider factory
-            prompt = "请用一句简短的中文描述这张图片的主要内容。只返回描述文字，不要其他解释。"
+            prompt = prompt_registry.render("caption.image.zh").strip()
 
             with tempfile.NamedTemporaryFile(prefix='caption_', suffix='.jpg', delete=False) as tmp:
                 temp_path = tmp.name
@@ -706,4 +923,6 @@ class FileParserService:
             
         except Exception as e:
             logger.warning(f"Failed to generate caption for {image_url}: {str(e)}")
+            if raise_on_error:
+                raise RuntimeError(f"图片识别模型调用失败: {str(e)}") from e
             return ""  # Return empty string on failure

@@ -48,7 +48,7 @@ test.describe('UI-driven E2E test: From user interface to PPT export', () => {
     await page.goto('http://localhost:3000')
 
     // Verify page loaded
-    await expect(page).toHaveTitle(/蕉幻|Banana/i)
+    await expect(page).toHaveTitle(/启发|Banana/i)
     console.log('✓ Homepage loaded successfully\n')
     
     // ====================================

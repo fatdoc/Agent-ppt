@@ -17,7 +17,14 @@ from werkzeug.exceptions import BadRequest
 from werkzeug.utils import secure_filename
 
 from models import db, Project, Page, Task, ReferenceFile
-from services import ProjectContext, FileService
+from services import (
+    FileService,
+    InputGenerationOptions,
+    InputGenerationService,
+    NoThinkOptions,
+    NoThinkService,
+    ProjectContext,
+)
 from services.ai_service_manager import get_ai_service
 from services.task_manager import (
     task_manager,
@@ -27,8 +34,9 @@ from services.task_manager import (
 )
 from utils import (
     success_response, error_response, not_found, bad_request,
-    parse_page_ids_from_body, get_filtered_pages
+    parse_page_ids_from_body, get_filtered_pages, allowed_file
 )
+from utils.auth import current_user_id, owned_project_or_404
 
 logger = logging.getLogger(__name__)
 
@@ -45,10 +53,14 @@ def _get_project_reference_files_content(project_id: str) -> list:
     Returns:
         List of dicts with 'filename' and 'content' keys
     """
-    reference_files = ReferenceFile.query.filter_by(
+    query = ReferenceFile.query.filter_by(
         project_id=project_id,
         parse_status='completed'
-    ).all()
+    )
+    user_id = current_user_id()
+    if user_id:
+        query = query.filter(ReferenceFile.user_id == user_id)
+    reference_files = query.all()
     
     files_content = []
     for ref_file in reference_files:
@@ -172,9 +184,14 @@ def list_projects():
         offset = max(0, offset)  # Non-negative
 
         # Get total count for pagination
-        total = Project.query.count()
+        user_id = current_user_id()
+        base_query = Project.query
+        if user_id:
+            base_query = base_query.filter(Project.user_id == user_id)
 
-        projects = Project.query\
+        total = base_query.count()
+
+        projects = base_query\
             .options(joinedload(Project.pages))\
             .order_by(desc(Project.updated_at))\
             .limit(limit)\
@@ -219,7 +236,7 @@ def create_project():
         
         creation_type = data.get('creation_type')
         
-        if creation_type not in ['idea', 'outline', 'descriptions']:
+        if creation_type not in ['idea', 'outline', 'descriptions', 'no_think', 'ppt_renovation', 'ppt_to_ppt']:
             return bad_request("Invalid creation_type")
         
         # Validate and set aspect ratio if provided
@@ -230,10 +247,16 @@ def create_project():
             except ValueError as e:
                 return bad_request(str(e))
 
+        idea_prompt = data.get('idea_prompt')
+        if creation_type == 'no_think':
+            options = NoThinkOptions.from_dict(data.get('no_think_options'))
+            idea_prompt = NoThinkService().normalize_prompt(idea_prompt, options)
+
         # Create project
         project = Project(
+            user_id=current_user_id(),
             creation_type=creation_type,
-            idea_prompt=data.get('idea_prompt'),
+            idea_prompt=idea_prompt,
             outline_text=data.get('outline_text'),
             description_text=data.get('description_text'),
             template_style=data.get('template_style'),
@@ -270,10 +293,11 @@ def get_project(project_id):
     """
     try:
         # Use eager loading to load project and related pages
-        project = Project.query\
-            .options(joinedload(Project.pages))\
-            .filter(Project.id == project_id)\
-            .first()
+        query = Project.query.options(joinedload(Project.pages)).filter(Project.id == project_id)
+        user_id = current_user_id()
+        if user_id:
+            query = query.filter(Project.user_id == user_id)
+        project = query.first()
         
         if not project:
             return not_found('Project')
@@ -298,10 +322,11 @@ def update_project(project_id):
     """
     try:
         # Use eager loading to load project and pages (for page order updates)
-        project = Project.query\
-            .options(joinedload(Project.pages))\
-            .filter(Project.id == project_id)\
-            .first()
+        query = Project.query.options(joinedload(Project.pages)).filter(Project.id == project_id)
+        user_id = current_user_id()
+        if user_id:
+            query = query.filter(Project.user_id == user_id)
+        project = query.first()
         
         if not project:
             return not_found('Project')
@@ -389,7 +414,7 @@ def delete_project(project_id):
     DELETE /api/projects/{project_id} - Delete project
     """
     try:
-        project = Project.query.get(project_id)
+        project = owned_project_or_404(project_id)
         
         if not project:
             return not_found('Project')
@@ -427,7 +452,7 @@ def generate_outline(project_id):
     }
     """
     try:
-        project = Project.query.get(project_id)
+        project = owned_project_or_404(project_id)
         
         if not project:
             return not_found('Project')
@@ -448,46 +473,42 @@ def generate_outline(project_id):
         else:
             logger.info(f"No reference files found for project {project_id}")
         
-        # 根据项目类型选择不同的处理方式
         if project.creation_type == 'outline':
-            # 从大纲生成：解析用户输入的大纲文本
             if not project.outline_text:
                 return bad_request("outline_text is required for outline type project")
-            
-            # Create project context and parse outline text into structured format
-            project_context = ProjectContext(project, reference_files_content)
-            outline = ai_service.parse_outline_text(project_context, language=language)
+            input_kind = 'outline'
         elif project.creation_type == 'descriptions':
-            # 从描述生成：从 description_text 提取大纲结构（仅大纲，不含页面描述）
             if not project.description_text:
                 return bad_request("description_text is required for descriptions type project")
-
-            project_context = ProjectContext(project, reference_files_content)
-            outline = ai_service.parse_description_to_outline(project_context, language=language)
+            input_kind = 'description'
+        elif project.creation_type == 'no_think':
+            if not project.idea_prompt:
+                return bad_request("idea_prompt is required for no_think type project")
+            input_kind = 'no_think'
         else:
-            # 一句话生成：从idea生成大纲
             idea_prompt = data.get('idea_prompt') or project.idea_prompt
-            
+
             if not idea_prompt:
                 return bad_request("idea_prompt is required")
-            
-            project.idea_prompt = idea_prompt
-            
-            # Create project context and generate outline from idea
-            project_context = ProjectContext(project, reference_files_content)
-            outline = ai_service.generate_outline(project_context, language=language)
-        
-        # Flatten outline to pages and smart merge with existing
-        pages_data = ai_service.flatten_outline(outline)
-        pages_list = _smart_merge_pages(project_id, pages_data)
 
-        # Update project status (don't downgrade if all pages already have content)
-        if all(p.description_content for p in pages_list) and pages_list:
-            project.status = 'DESCRIPTIONS_GENERATED'
-        else:
-            project.status = 'OUTLINE_GENERATED'
-        project.updated_at = datetime.utcnow()
-        
+            project.idea_prompt = idea_prompt
+            input_kind = 'idea'
+
+        project_context = ProjectContext(project, reference_files_content)
+        generation_service = InputGenerationService(ai_service)
+        generation_service.generate(
+            project,
+            project_context,
+            InputGenerationOptions(
+                input_kind=input_kind,
+                target_depth='outline_and_descriptions' if input_kind == 'no_think' else 'outline_only',
+                language=language,
+                detail_level=data.get('detail_level'),
+            ),
+            save_mode='merge_by_index',
+        )
+        pages_list = Page.query.filter_by(project_id=project_id).order_by(Page.order_index).all()
+
         db.session.commit()
         
         logger.info(f"大纲生成完成: 项目 {project_id}, 创建了 {len(pages_list)} 个页面")
@@ -517,7 +538,7 @@ def generate_outline_stream(project_id):
       event: error   — error occurred {message}
     """
     # Validate project exists before entering the generator
-    project = Project.query.get(project_id)
+    project = owned_project_or_404(project_id)
     if not project:
         return not_found('Project')
 
@@ -641,7 +662,7 @@ def generate_from_description(project_id):
     """
     
     try:
-        project = Project.query.get(project_id)
+        project = owned_project_or_404(project_id)
         
         if not project:
             return not_found('Project')
@@ -667,62 +688,21 @@ def generate_from_description(project_id):
         project_context = ProjectContext(project, reference_files_content)
         
         logger.info(f"开始从描述生成大纲和页面描述: 项目 {project_id}")
-        
-        # Step 1: Parse description to outline
-        logger.info("Step 1: 解析描述文本到大纲结构...")
-        outline = ai_service.parse_description_to_outline(project_context, language=language)
-        logger.info(f"大纲解析完成，共 {len(ai_service.flatten_outline(outline))} 页")
-        
-        # Step 2: Split description into page descriptions
-        logger.info("Step 2: 切分描述文本到每页描述...")
-        page_descriptions = ai_service.parse_description_to_page_descriptions(project_context, outline, language=language)
-        logger.info(f"描述切分完成，共 {len(page_descriptions)} 页")
-        
-        # Step 3: Flatten outline to pages
-        pages_data = ai_service.flatten_outline(outline)
-        
-        if len(pages_data) != len(page_descriptions):
-            logger.warning(f"页面数量不匹配: 大纲 {len(pages_data)} 页, 描述 {len(page_descriptions)} 页")
-            raise ValueError(
-                f"Outline/page description count mismatch: "
-                f"outline={len(pages_data)}, descriptions={len(page_descriptions)}"
-            )
-        
-        # Step 4: Delete existing pages (using ORM session to trigger cascades)
-        old_pages = Page.query.filter_by(project_id=project_id).all()
-        for old_page in old_pages:
-            db.session.delete(old_page)
-        
-        # Step 5: Create pages with both outline and description
-        pages_list = []
-        for i, (page_data, page_desc) in enumerate(zip(pages_data, page_descriptions)):
-            page = Page(
-                project_id=project_id,
-                order_index=i,
-                part=page_data.get('part'),
-                status='DESCRIPTION_GENERATED'  # 直接设置为已生成描述
-            )
-            
-            # Set outline content
-            page.set_outline_content({
-                'title': page_data.get('title'),
-                'points': page_data.get('points', [])
-            })
-            
-            # Set description content
-            desc_content = {
-                "text": page_desc,
-                "generated_at": datetime.utcnow().isoformat()
-            }
-            page.set_description_content(desc_content)
-            
-            db.session.add(page)
-            pages_list.append(page)
-        
-        # Update project status
-        project.status = 'DESCRIPTIONS_GENERATED'
-        project.updated_at = datetime.utcnow()
-        
+
+        generation_service = InputGenerationService(ai_service)
+        generation_service.generate(
+            project,
+            project_context,
+            InputGenerationOptions(
+                input_kind='description',
+                target_depth='outline_and_descriptions',
+                language=language,
+                detail_level=data.get('detail_level'),
+            ),
+            save_mode='replace',
+        )
+        pages_list = Page.query.filter_by(project_id=project_id).order_by(Page.order_index).all()
+
         db.session.commit()
         
         logger.info(f"从描述生成完成: 项目 {project_id}, 创建了 {len(pages_list)} 个页面，已填充大纲和描述")
@@ -751,7 +731,7 @@ def generate_descriptions(project_id):
     }
     """
     try:
-        project = Project.query.get(project_id)
+        project = owned_project_or_404(project_id)
         
         if not project:
             return not_found('Project')
@@ -779,6 +759,7 @@ def generate_descriptions(project_id):
         
         # Create task
         task = Task(
+            user_id=current_user_id(),
             project_id=project_id,
             task_type='GENERATE_DESCRIPTIONS',
             status='PENDING'
@@ -844,7 +825,7 @@ def generate_descriptions_stream(project_id):
       event: done        — {total, pages: [...]}
       event: error       — {message}
     """
-    project = Project.query.get(project_id)
+    project = owned_project_or_404(project_id)
     if not project:
         return not_found('Project')
 
@@ -988,7 +969,7 @@ def generate_images(project_id):
     }
     """
     try:
-        project = Project.query.get(project_id)
+        project = owned_project_or_404(project_id)
         
         if not project:
             return not_found('Project')
@@ -1029,6 +1010,7 @@ def generate_images(project_id):
         
         # Create task
         task = Task(
+            user_id=current_user_id(),
             project_id=project_id,
             task_type='GENERATE_IMAGES',
             status='PENDING'
@@ -1045,11 +1027,7 @@ def generate_images(project_id):
         # Get singleton AI service instance
         ai_service = get_ai_service()
         
-        # 合并额外要求和风格描述
-        combined_requirements = project.extra_requirements or ""
-        if project.template_style:
-            style_requirement = f"\n\nppt页面风格描述：\n\n{project.template_style}"
-            combined_requirements = combined_requirements + style_requirement
+        extra_requirements = project.extra_requirements or ""
         
         # Set all target pages to QUEUED before submitting background task
         # This ensures the status is visible to frontend immediately after API returns
@@ -1073,7 +1051,7 @@ def generate_images(project_id):
             project.image_aspect_ratio,
             current_app.config['DEFAULT_RESOLUTION'],
             app,
-            combined_requirements if combined_requirements.strip() else None,
+            extra_requirements if extra_requirements.strip() else None,
             language,
             selected_page_ids if selected_page_ids else None
         )
@@ -1104,6 +1082,14 @@ def get_task_status(project_id, task_id):
         
         if not task or task.project_id != project_id:
             return not_found('Task')
+
+        user_id = current_user_id()
+        if task.user_id and user_id and task.user_id != user_id:
+            return not_found('Task')
+        if project_id not in ('global', 'settings-test'):
+            project = owned_project_or_404(project_id)
+            if not project:
+                return not_found('Task')
         
         return success_response(task.to_dict())
     
@@ -1124,7 +1110,7 @@ def refine_outline(project_id):
     }
     """
     try:
-        project = Project.query.get(project_id)
+        project = owned_project_or_404(project_id)
         
         if not project:
             return not_found('Project')
@@ -1221,7 +1207,7 @@ def refine_descriptions(project_id):
     }
     """
     try:
-        project = Project.query.get(project_id)
+        project = owned_project_or_404(project_id)
         
         if not project:
             return not_found('Project')
@@ -1346,6 +1332,7 @@ def create_ppt_renovation_project():
         file: PDF or PPTX file (required)
         keep_layout: "true"/"false" - whether to preserve layout via caption model (optional, default false)
         template_style: style description text (optional)
+        template_image: style template image (optional)
 
     Returns:
         {project_id, task_id, page_count}
@@ -1367,6 +1354,10 @@ def create_ppt_renovation_project():
         keep_layout = request.form.get('keep_layout', 'false').lower() == 'true'
         template_style = request.form.get('template_style', '').strip() or None
         language = request.form.get('language', current_app.config.get('OUTPUT_LANGUAGE', 'zh'))
+        template_image = request.files.get('template_image')
+        if template_image and template_image.filename:
+            if not allowed_file(template_image.filename, current_app.config['ALLOWED_EXTENSIONS']):
+                return bad_request("Invalid template image type. Allowed types: png, jpg, jpeg, gif, webp")
 
         # Create project
         project = Project(
@@ -1384,6 +1375,11 @@ def create_ppt_renovation_project():
         project_dir = Path(current_app.config['UPLOAD_FOLDER']) / project_id
         template_dir = project_dir / "template"
         template_dir.mkdir(parents=True, exist_ok=True)
+
+        if template_image and template_image.filename:
+            template_image_path = file_service.save_template_image(template_image, project_id)
+            project.template_image_path = template_image_path
+            db.session.commit()
 
         # Save original file with a standardized name to avoid encoding issues
         # (secure_filename strips non-ASCII chars, causing Chinese filenames like
@@ -1516,6 +1512,7 @@ def create_ppt_renovation_project():
 
         # Create async task
         task = Task(
+            user_id=current_user_id(),
             project_id=project_id,
             task_type='PPT_RENOVATION',
             status='PENDING'
@@ -1542,6 +1539,13 @@ def create_ppt_renovation_project():
             image_caption_model=current_app.config['IMAGE_CAPTION_MODEL'],
             provider_format=current_app.config.get('AI_PROVIDER_FORMAT', 'gemini'),
             lazyllm_image_caption_source=current_app.config.get('IMAGE_CAPTION_MODEL_SOURCE', 'doubao'),
+            mineru_provider=current_app.config.get('MINERU_PROVIDER', 'cloud'),
+            local_api_base=current_app.config.get('MINERU_LOCAL_API_BASE', 'http://127.0.0.1:8000'),
+            local_backend=current_app.config.get('MINERU_LOCAL_BACKEND', 'pipeline'),
+            local_parse_method=current_app.config.get('MINERU_LOCAL_PARSE_METHOD', 'auto'),
+            local_return_images=current_app.config.get('MINERU_LOCAL_RETURN_IMAGES', True),
+            local_response_format_zip=current_app.config.get('MINERU_LOCAL_RESPONSE_FORMAT_ZIP', True),
+            local_return_original_file=current_app.config.get('MINERU_LOCAL_RETURN_ORIGINAL_FILE', False),
         )
 
         app = current_app._get_current_object()

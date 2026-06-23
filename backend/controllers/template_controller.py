@@ -5,6 +5,7 @@ import logging
 from flask import Blueprint, request, current_app
 from models import db, Project, UserTemplate, UserStyleTemplate
 from utils import success_response, error_response, not_found, bad_request, allowed_file
+from utils.auth import current_user_id, owned_project_or_404
 from services import FileService
 from datetime import datetime
 
@@ -24,7 +25,7 @@ def upload_template(project_id):
     Form: template_image=@file.png
     """
     try:
-        project = Project.query.get(project_id)
+        project = owned_project_or_404(project_id)
         
         if not project:
             return not_found('Project')
@@ -67,7 +68,7 @@ def delete_template(project_id):
     DELETE /api/projects/{project_id}/template - Delete template
     """
     try:
-        project = Project.query.get(project_id)
+        project = owned_project_or_404(project_id)
         
         if not project:
             return not_found('Project')
@@ -154,6 +155,7 @@ def upload_user_template():
         # Create template record with file_path already set
         template = UserTemplate(
             id=template_id,
+            user_id=current_user_id(),
             name=name,
             file_path=file_path,
             thumb_path=thumb_path,
@@ -182,7 +184,11 @@ def list_user_templates():
     GET /api/user-templates - Get list of user templates
     """
     try:
-        templates = UserTemplate.query.order_by(UserTemplate.created_at.desc()).all()
+        query = UserTemplate.query
+        user_id = current_user_id()
+        if user_id:
+            query = query.filter(UserTemplate.user_id == user_id)
+        templates = query.order_by(UserTemplate.created_at.desc()).all()
         
         return success_response({
             'templates': [template.to_dict() for template in templates]
@@ -198,7 +204,11 @@ def delete_user_template(template_id):
     DELETE /api/user-templates/{template_id} - Delete user template
     """
     try:
-        template = UserTemplate.query.get(template_id)
+        query = UserTemplate.query.filter(UserTemplate.id == template_id)
+        user_id = current_user_id()
+        if user_id:
+            query = query.filter(UserTemplate.user_id == user_id)
+        template = query.first()
         
         if not template:
             return not_found('UserTemplate')
@@ -235,6 +245,7 @@ def create_user_style_template():
         import uuid
         template = UserStyleTemplate(
             id=str(uuid.uuid4()),
+            user_id=current_user_id(),
             name=name,
             description=description,
             color=data.get('color'),
@@ -250,7 +261,11 @@ def create_user_style_template():
 @user_style_template_bp.route('', methods=['GET'])
 def list_user_style_templates():
     try:
-        templates = UserStyleTemplate.query.order_by(UserStyleTemplate.created_at.desc()).all()
+        query = UserStyleTemplate.query
+        user_id = current_user_id()
+        if user_id:
+            query = query.filter(UserStyleTemplate.user_id == user_id)
+        templates = query.order_by(UserStyleTemplate.created_at.desc()).all()
         return success_response({
             'templates': [t.to_dict() for t in templates]
         })
@@ -261,7 +276,11 @@ def list_user_style_templates():
 @user_style_template_bp.route('/<template_id>', methods=['DELETE'])
 def delete_user_style_template(template_id):
     try:
-        template = UserStyleTemplate.query.get(template_id)
+        query = UserStyleTemplate.query.filter(UserStyleTemplate.id == template_id)
+        user_id = current_user_id()
+        if user_id:
+            query = query.filter(UserStyleTemplate.user_id == user_id)
+        template = query.first()
         if not template:
             return not_found('UserStyleTemplate')
         db.session.delete(template)
@@ -270,4 +289,3 @@ def delete_user_style_template(template_id):
     except Exception as e:
         db.session.rollback()
         return error_response('SERVER_ERROR', str(e), 500)
-

@@ -8,7 +8,7 @@ import { devLog } from '@/utils/logger';
 // 组件内翻译
 const previewI18n = {
   zh: {
-    home: { title: '蕉幻' },
+    home: { title: '启发' },
     nav: { home: '主页', materialGenerate: '素材生成' },
     slidePreview: {
       pageGenerating: "该页面正在生成中，请稍候...", generationStarted: "已开始生成图片，请稍候...",
@@ -1453,15 +1453,15 @@ export const SlidePreview: React.FC = () => {
   ].filter(Boolean).join(' / ');
 
   return (
-    <div className="h-screen bg-gray-50 dark:bg-background-primary flex flex-col overflow-hidden">
+    <div className="app-surface h-screen dark:bg-background-primary flex flex-col overflow-hidden">
       {/* 顶栏 */}
-      <header className="h-14 md:h-16 bg-white dark:bg-background-secondary shadow-sm dark:shadow-background-primary/30 border-b border-gray-200 dark:border-border-primary flex items-center justify-between px-3 md:px-6 flex-shrink-0">
+      <header className="relative z-[80] h-14 md:h-16 app-chrome border-b flex items-center justify-between px-3 md:px-6 flex-shrink-0">
         <div className="flex items-center gap-2 md:gap-4 min-w-0 flex-1">
           <Button
             variant="ghost"
             size="sm"
             icon={<Home size={16} className="md:w-[18px] md:h-[18px]" />}
-            onClick={() => navigate('/')}
+            onClick={() => navigate('/app')}
             className="hidden sm:inline-flex flex-shrink-0"
             >
               <span className="hidden md:inline">{t('nav.home')}</span>
@@ -1482,8 +1482,8 @@ export const SlidePreview: React.FC = () => {
               <span className="hidden sm:inline">{t('common.back')}</span>
             </Button>
             <div className="flex items-center gap-1.5 md:gap-2 min-w-0">
-              <span className="text-xl md:text-2xl">🍌</span>
-              <span className="text-base md:text-xl font-bold truncate">{t('home.title')}</span>
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#121212] text-sm font-black text-[#AFFF00]">启</span>
+              <span className="brand-wordmark text-base md:text-xl font-black truncate">{t('home.title')}</span>
             </div>
             <span className="text-gray-400 hidden md:inline">|</span>
             <span className="text-sm md:text-lg font-semibold truncate hidden sm:inline">{t('preview.title')}</span>
@@ -1537,7 +1537,7 @@ export const SlidePreview: React.FC = () => {
             </Button>
           
           {/* 导出任务按钮 — 始终显示，面板内部决定是否有内容 */}
-          <div className="relative">
+          <div className="relative z-[90]">
               <Button
                 variant="ghost"
                 size="sm"
@@ -1559,7 +1559,7 @@ export const SlidePreview: React.FC = () => {
                 )}
               </Button>
               {showExportTasksPanel && (
-                <div className="absolute right-0 mt-2 z-20">
+                <div className="absolute right-0 mt-2 z-[100]">
                   <ExportTasksPanel
                     projectId={projectId}
                     pages={currentProject?.pages || []}
@@ -1569,7 +1569,7 @@ export const SlidePreview: React.FC = () => {
               )}
             </div>
           
-          <div className="relative">
+          <div className="relative z-[90]">
             <Button
               variant="primary"
               size="sm"
@@ -1594,7 +1594,7 @@ export const SlidePreview: React.FC = () => {
               </span>
             </Button>
             {showExportMenu && (
-              <div className="absolute right-0 mt-2 w-56 bg-white dark:bg-background-secondary rounded-lg shadow-lg border border-gray-200 dark:border-border-primary py-2 z-10">
+              <div className="absolute right-0 mt-2 w-56 bg-white dark:bg-background-secondary rounded-lg shadow-lg border border-gray-200 dark:border-border-primary py-2 z-[100]">
                 {isMultiSelectMode && selectedPageIds.size > 0 && (
                   <div className="px-4 py-2 text-xs text-gray-500 dark:text-foreground-tertiary border-b border-gray-100 dark:border-border-primary">
                     {t('preview.exportSelectedPages', { count: selectedPageIds.size })}

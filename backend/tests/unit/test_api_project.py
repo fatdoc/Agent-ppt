@@ -138,3 +138,146 @@ class TestProjectDelete:
         response = client.delete('/api/projects/non-existent-id')
         
         assert response.status_code == 404
+
+
+class TestProjectGenerationEndpoints:
+    """Legacy project generation endpoint tests."""
+
+    def test_generate_outline_idea_uses_existing_api_shape(self, client, monkeypatch):
+        from services.input_generation_service import InputGenerationResult
+
+        created = client.post('/api/projects', json={
+            'creation_type': 'idea',
+            'idea_prompt': '生成 AI 主题 PPT',
+        }).get_json()['data']
+        project_id = created['project_id']
+
+        class FakeInputGenerationService:
+            def __init__(self, ai_service):
+                self.ai_service = ai_service
+
+            def generate(self, project, project_context, options, save_mode='merge_by_index'):
+                from models import Page, db
+                page = Page(project_id=project.id, order_index=0, status='DRAFT')
+                page.set_outline_content({'title': '封面', 'points': ['主题']})
+                db.session.add(page)
+                project.status = 'OUTLINE_GENERATED'
+                return InputGenerationResult(
+                    input_kind=options.input_kind,
+                    outline=[{'title': '封面', 'points': ['主题']}],
+                    page_descriptions=None,
+                    status='OUTLINE_GENERATED',
+                    page_count=1,
+                )
+
+        monkeypatch.setattr('controllers.project_controller.InputGenerationService', FakeInputGenerationService)
+
+        response = client.post(f'/api/projects/{project_id}/generate/outline', json={'language': 'zh'})
+
+        data = assert_success_response(response)
+        assert data['data']['pages'][0]['outline_content']['title'] == '封面'
+
+    def test_generate_from_description_uses_existing_api_shape(self, client, monkeypatch):
+        from services.input_generation_service import InputGenerationResult
+
+        created = client.post('/api/projects', json={
+            'creation_type': 'descriptions',
+            'description_text': '第1页 封面：介绍主题',
+        }).get_json()['data']
+        project_id = created['project_id']
+
+        class FakeInputGenerationService:
+            def __init__(self, ai_service):
+                self.ai_service = ai_service
+
+            def generate(self, project, project_context, options, save_mode='merge_by_index'):
+                from models import Page, db
+                page = Page(project_id=project.id, order_index=0, status='DESCRIPTION_GENERATED')
+                page.set_outline_content({'title': '封面', 'points': ['介绍主题']})
+                page.set_description_content({'text': '封面页描述'})
+                db.session.add(page)
+                project.status = 'DESCRIPTIONS_GENERATED'
+                return InputGenerationResult(
+                    input_kind=options.input_kind,
+                    outline=[{'title': '封面', 'points': ['介绍主题']}],
+                    page_descriptions=[{'text': '封面页描述'}],
+                    status='DESCRIPTIONS_GENERATED',
+                    page_count=1,
+                )
+
+        monkeypatch.setattr('controllers.project_controller.InputGenerationService', FakeInputGenerationService)
+
+        response = client.post(f'/api/projects/{project_id}/generate/from-description', json={'language': 'zh'})
+
+        data = assert_success_response(response)
+        assert data['data']['status'] == 'DESCRIPTIONS_GENERATED'
+        assert data['data']['pages'][0]['description_content']['text'] == '封面页描述'
+
+
+class TestNoThinkProject:
+    """No Think PPT project API tests."""
+
+    def test_create_no_think_project_normalizes_options(self, client):
+        response = client.post('/api/projects', json={
+            'creation_type': 'no_think',
+            'idea_prompt': 'AI 工具入门',
+            'no_think_options': {
+                'scenario': '内部培训',
+                'color_tone': '蓝绿色',
+                'density': '简洁',
+                'page_count': '5页',
+                'style_template': '现代商务',
+                'extra_instruction': '适合新员工',
+            },
+        })
+
+        data = assert_success_response(response, 201)
+        project_id = data['data']['project_id']
+
+        get_response = client.get(f'/api/projects/{project_id}')
+        project = assert_success_response(get_response)['data']
+
+        assert project['creation_type'] == 'no_think'
+        assert 'No Think PPT 生成需求' in project['idea_prompt']
+        assert '用途场景：内部培训' in project['idea_prompt']
+        assert '页数倾向：5页' in project['idea_prompt']
+
+    def test_generate_outline_for_no_think_generates_descriptions(self, client, monkeypatch):
+        from services.input_generation_service import InputGenerationResult
+
+        created = client.post('/api/projects', json={
+            'creation_type': 'no_think',
+            'idea_prompt': 'AI 工具入门',
+            'no_think_options': {'page_count': '3页'},
+        }).get_json()['data']
+        project_id = created['project_id']
+        observed = {}
+
+        class FakeInputGenerationService:
+            def __init__(self, ai_service):
+                self.ai_service = ai_service
+
+            def generate(self, project, project_context, options, save_mode='merge_by_index'):
+                from models import Page, db
+                observed['input_kind'] = options.input_kind
+                observed['target_depth'] = options.target_depth
+                page = Page(project_id=project.id, order_index=0, status='DESCRIPTION_GENERATED')
+                page.set_outline_content({'title': '封面', 'points': ['主题']})
+                page.set_description_content({'text': '封面描述'})
+                db.session.add(page)
+                project.status = 'DESCRIPTIONS_GENERATED'
+                return InputGenerationResult(
+                    input_kind=options.input_kind,
+                    outline=[{'title': '封面', 'points': ['主题']}],
+                    page_descriptions=[{'text': '封面描述'}],
+                    status='DESCRIPTIONS_GENERATED',
+                    page_count=1,
+                )
+
+        monkeypatch.setattr('controllers.project_controller.InputGenerationService', FakeInputGenerationService)
+
+        response = client.post(f'/api/projects/{project_id}/generate/outline', json={'language': 'zh'})
+
+        data = assert_success_response(response)
+        assert observed == {'input_kind': 'no_think', 'target_depth': 'outline_and_descriptions'}
+        assert data['data']['pages'][0]['description_content']['text'] == '封面描述'

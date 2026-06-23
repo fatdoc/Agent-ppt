@@ -30,7 +30,7 @@ export default defineConfig(({ mode }) => {
   // 端口：优先读 env，否则按 worktree 目录名自动计算
   const backendPort = env.BACKEND_PORT || String(computeWorktreePort(5000))
   const frontendPort = Number(env.FRONTEND_PORT) || computeWorktreePort(3000)
-  const backendUrl = `http://localhost:${backendPort}`
+  const backendUrl = `http://127.0.0.1:${backendPort}`
   
   return {
     envDir,
