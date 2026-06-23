@@ -561,15 +561,17 @@ class ServiceConfig:
                 mineru_api_base = current_app.config.get('MINERU_API_BASE', 'https://mineru.net')
             if upload_folder is None:
                 upload_folder = current_app.config.get('UPLOAD_FOLDER', './uploads')
+            mineru_provider = current_app.config.get('MINERU_PROVIDER', 'cloud')
         else:
             # 回退到默认值
             if mineru_api_base is None:
                 mineru_api_base = 'https://mineru.net'
             if upload_folder is None:
                 upload_folder = './uploads'
+            mineru_provider = 'cloud'
         
         # 验证必需配置
-        if not mineru_token:
+        if mineru_provider != 'local' and not mineru_token:
             raise ValueError("MinerU token is required. Please configure MINERU_TOKEN.")
         
         from services.file_parser_service import FileParserService
@@ -587,7 +589,8 @@ class ServiceConfig:
         # 创建MinerU解析服务
         parser_service = FileParserService(
             mineru_token=mineru_token,
-            mineru_api_base=mineru_api_base
+            mineru_api_base=mineru_api_base,
+            mineru_provider=mineru_provider
         )
         
         # 创建提取器注册表
@@ -763,4 +766,3 @@ class TextAttributeExtractorFactory:
         logger.info("创建TextAttributeExtractorRegistry")
         
         return registry
-

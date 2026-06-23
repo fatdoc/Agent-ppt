@@ -3,6 +3,19 @@ import axios from 'axios';
 // 开发环境：通过 Vite proxy 转发
 // 生产环境：通过 nginx proxy 转发
 const API_BASE_URL = '';
+const AUTH_TOKEN_KEY = 'banana-auth-token';
+
+export const getAuthToken = (): string => localStorage.getItem(AUTH_TOKEN_KEY) || '';
+
+export const setAuthToken = (token: string): void => {
+  if (token) localStorage.setItem(AUTH_TOKEN_KEY, token);
+  else localStorage.removeItem(AUTH_TOKEN_KEY);
+};
+
+export const getAuthHeaders = (): Record<string, string> => {
+  const token = getAuthToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+};
 
 // 创建 axios 实例
 export const apiClient = axios.create({
@@ -17,6 +30,11 @@ apiClient.interceptors.request.use(
     const accessCode = localStorage.getItem('banana-access-code');
     if (accessCode && config.headers) {
       config.headers['X-Access-Code'] = accessCode;
+    }
+
+    const authToken = getAuthToken();
+    if (authToken && config.headers) {
+      config.headers.Authorization = `Bearer ${authToken}`;
     }
 
     // 如果请求体是 FormData，删除 Content-Type 让浏览器自动设置
@@ -82,4 +100,3 @@ export const getImageUrl = (path?: string, timestamp?: string | number): string 
 };
 
 export default apiClient;
-

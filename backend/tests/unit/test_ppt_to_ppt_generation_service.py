@@ -69,12 +69,17 @@ def test_generate_pages_uses_blueprint_patterns():
     assert result.outline_text.startswith("第1页")
     assert result.pages[0].reference_page_index == 1
     assert result.pages[0].reference_page_role == "cover"
-    assert "Reference Page Pattern: cover" in result.pages[0].description
-    assert "Reference Page Index: 1" in result.pages[0].description
-    assert "Layout: Large title left" in result.pages[0].description
-    assert "Content Pattern: Project name plus tagline" in result.pages[0].description
-    assert "Visual Elements: Hero product visual" in result.pages[0].description
-    assert "Style Guidance:" in result.pages[0].description
+    assert result.pages[0].description == "页面展示智能客服项目定位，左侧标题右侧产品示意图。"
+    assert "Reference Page Pattern" not in result.pages[0].description
+    assert "Style Guidance" not in result.pages[0].description
+    assert result.pages[0].reference_visual_guidance == {
+        "page_pattern": "cover",
+        "page_index": 1,
+        "layout": "Large title left",
+        "content_pattern": "Project name plus tagline",
+        "visual_elements": "Hero product visual",
+        "style_guidance": {"color_palette": "navy", "tone": "confident"},
+    }
 
 
 def test_generate_prompt_includes_generation_context():
@@ -107,6 +112,105 @@ def test_generate_prompt_includes_generation_context():
     assert "Bank customer support automation." in ai_service.prompt
 
 
+def test_page_count_must_match_reference_page_count():
+    patterns = [
+        PagePattern(
+            reference_page_index=index + 1,
+            page_role=f"page_{index + 1}",
+            layout_pattern=f"Layout {index + 1}",
+            content_pattern=f"Content {index + 1}",
+            visual_pattern=f"Visual {index + 1}",
+        )
+        for index in range(37)
+    ]
+
+    with pytest.raises(ValueError) as exc:
+        PptToPptGenerationService(FakeAIService()).generate(
+            user_content="content",
+            blueprint=_blueprint(patterns),
+            options=PptToPptOptions.from_form({"page_count": "5"}),
+        )
+
+    assert "page_count must match reference page count (37)" in str(exc.value)
+
+
+def test_auto_target_generation_defaults_to_reference_deck_page_count():
+    patterns = [
+        PagePattern(
+            reference_page_index=index + 1,
+            page_role=f"page_{index + 1}",
+            layout_pattern=f"Layout {index + 1}",
+            content_pattern=f"Content {index + 1}",
+            visual_pattern=f"Visual {index + 1}",
+        )
+        for index in range(37)
+    ]
+
+    class StrictPageCountAI:
+        def __init__(self):
+            self.prompts = []
+
+        def generate_text(self, prompt):
+            self.prompts.append(prompt)
+            count = 5 if "Generate only pages 33-37" in prompt else 8
+            return json.dumps(
+                {
+                    "pages": [
+                        {
+                            "title": f"Generated {index + 1}",
+                            "points": [],
+                            "description": f"Description {index + 1}",
+                        }
+                        for index in range(count)
+                    ]
+                }
+            )
+
+    ai_service = StrictPageCountAI()
+
+    result = PptToPptGenerationService(ai_service).generate(
+        user_content="开始生成",
+        blueprint=_blueprint(patterns),
+        options=PptToPptOptions.from_form({}),
+    )
+
+    assert len(result.pages) == 37
+    assert len(ai_service.prompts) == 5
+    assert "Target page count: 8" in ai_service.prompts[0]
+    assert "Generate only pages 33-37" in ai_service.prompts[-1]
+    assert result.pages[-1].reference_page_index == 37
+
+
+def test_auto_target_generation_ignores_user_page_markers_and_uses_reference_count():
+    ai_service = FakeAIService(
+        {
+            "pages": [
+                {
+                    "title": f"Generated {index + 1}",
+                    "points": [],
+                    "description": f"Description {index + 1}",
+                }
+                for index in range(4)
+            ]
+        }
+    )
+
+    result = PptToPptGenerationService(ai_service).generate(
+        user_content="第1页：封面\n第2页：方案\n第3页：总结",
+        blueprint=_blueprint(
+            [
+                PagePattern(index + 1, f"page_{index + 1}", "Layout", "Content", "Visual")
+                for index in range(4)
+            ]
+        ),
+        options=PptToPptOptions.from_form({}),
+    )
+
+    assert len(result.pages) == 4
+    assert "Target page count: 4" in ai_service.prompt
+    assert "page_4" in ai_service.prompt
+
+
 def test_generate_coerces_scalar_points_to_single_item_list():
     ai_service = FakeAIService(
         {
@@ -131,7 +235,12 @@ def test_generate_coerces_scalar_points_to_single_item_list():
 
     result = PptToPptGenerationService(ai_service).generate(
         user_content="content",
-        blueprint=_blueprint(),
+        blueprint=_blueprint(
+            [
+                PagePattern(index + 1, f"page_{index + 1}", "Layout", "Content", "Visual")
+                for index in range(3)
+            ]
+        ),
         options=PptToPptOptions.from_form({}),
     )
 
@@ -165,7 +274,7 @@ def test_generate_parses_fenced_ai_json_and_builds_outline_fallback():
     assert result.description_text.startswith("--- 第1页 ---")
 
 
-def test_generated_pages_cycle_reference_patterns_by_index():
+def test_generated_pages_follow_reference_patterns_by_index():
     patterns = [
         PagePattern(
             reference_page_index=1,
@@ -187,7 +296,6 @@ def test_generated_pages_cycle_reference_patterns_by_index():
             "pages": [
                 {"title": "One", "points": [], "description": "First"},
                 {"title": "Two", "points": [], "description": "Second"},
-                {"title": "Three", "points": [], "description": "Third"},
             ]
         }
     )
@@ -198,8 +306,56 @@ def test_generated_pages_cycle_reference_patterns_by_index():
         options=PptToPptOptions.from_form({}),
     )
 
-    assert [page.reference_page_index for page in result.pages] == [1, 2, 1]
-    assert "Reference Page Pattern: cover" in result.pages[2].description
+    assert [page.reference_page_index for page in result.pages] == [1, 2]
+    assert "Reference Page Pattern" not in result.pages[0].description
+    assert result.pages[0].reference_visual_guidance["page_pattern"] == "cover"
+    assert result.pages[1].reference_visual_guidance["page_pattern"] == "section"
+
+
+def test_large_target_generation_is_chunked():
+    patterns = [
+        PagePattern(
+            reference_page_index=index + 1,
+            page_role=f"page_{index + 1}",
+            layout_pattern="Layout",
+            content_pattern="Content",
+            visual_pattern="Visual",
+        )
+        for index in range(10)
+    ]
+
+    class ChunkAI:
+        def __init__(self):
+            self.prompts = []
+
+        def generate_text(self, prompt):
+            self.prompts.append(prompt)
+            count = 2 if "Generate only pages 9-10" in prompt else 8
+            return json.dumps(
+                {
+                    "pages": [
+                        {
+                            "title": f"Page {index + 1}",
+                            "points": [],
+                            "description": f"Description {index + 1}",
+                        }
+                        for index in range(count)
+                    ]
+                }
+            )
+
+    ai_service = ChunkAI()
+    result = PptToPptGenerationService(ai_service).generate(
+        user_content="content",
+        blueprint=_blueprint(patterns),
+        options=PptToPptOptions.from_form({"page_count": "10"}),
+    )
+
+    assert len(result.pages) == 10
+    assert len(ai_service.prompts) == 2
+    assert "Generate only pages 1-8" in ai_service.prompts[0]
+    assert "Generate only pages 9-10" in ai_service.prompts[1]
+    assert result.pages[-1].reference_page_index == 10
 
 
 def test_generate_raises_when_no_pages_returned():

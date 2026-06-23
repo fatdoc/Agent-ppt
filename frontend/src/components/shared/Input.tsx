@@ -21,8 +21,8 @@ export const Input: React.FC<InputProps> = ({
       )}
       <input
         className={cn(
-          'w-full h-10 px-4 rounded-lg border border-gray-200 dark:border-border-primary bg-white dark:bg-background-secondary',
-          'focus:outline-none focus:ring-2 focus:ring-banana-500 focus:border-transparent',
+          'w-full h-10 px-4 rounded-lg border-2 border-[#121212]/10 dark:border-border-primary bg-white dark:bg-background-secondary',
+          'focus:outline-none focus:ring-2 focus:ring-banana-500/30 focus:border-banana-500',
           'placeholder:text-gray-400 dark:placeholder:text-gray-500 transition-all',
           'text-gray-900 dark:text-foreground-primary',
           error && 'border-red-500 focus:ring-red-500',
@@ -36,4 +36,3 @@ export const Input: React.FC<InputProps> = ({
     </div>
   );
 };
-

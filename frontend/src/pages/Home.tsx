@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Sparkles, FileText, FileEdit, ImagePlus, Paperclip, Palette, Lightbulb, Search, Settings, FolderOpen, HelpCircle, Sun, Moon, Globe, Monitor, ChevronDown, Upload, RefreshCw } from 'lucide-react';
-import { Button, Card, useToast, MaterialGeneratorModal, MaterialCenterModal, MaterialSelector, ReferenceFileList, ReferenceFileSelector, FilePreviewModal, HelpModal, Footer, GithubRepoCard, TextStyleSelector } from '@/components/shared';
+import { Button, Card, useToast, MaterialGeneratorModal, MaterialCenterModal, MaterialSelector, ReferenceFileList, ReferenceFileSelector, FilePreviewModal, Footer, GithubRepoCard, TextStyleSelector } from '@/components/shared';
 import { MarkdownTextarea, type MarkdownTextareaRef } from '@/components/shared/MarkdownTextarea';
 import { TemplateSelector, getTemplateFile } from '@/components/shared/TemplateSelector';
-import { listUserTemplates, type UserTemplate, uploadReferenceFile, type ReferenceFile, associateFileToProject, triggerFileParse, associateMaterialsToProject, createPptRenovationProject } from '@/api/endpoints';
+import { listUserTemplates, type UserTemplate, uploadReferenceFile, type ReferenceFile, associateFileToProject, triggerFileParse, associateMaterialsToProject, createPptRenovationProject, createPptToPptProject } from '@/api/endpoints';
 import { useProjectStore } from '@/store/useProjectStore';
 import { devLog } from '@/utils/logger';
 import { useTheme } from '@/hooks/useTheme';
@@ -14,26 +14,37 @@ import type { Material } from '@/types';
 import { useT } from '@/hooks/useT';
 import { ASPECT_RATIO_OPTIONS } from '@/config/aspectRatio';
 
-type CreationType = 'idea' | 'outline' | 'description' | 'ppt_renovation';
+type CreationType = 'no_think' | 'idea' | 'outline' | 'description' | 'ppt_to_ppt' | 'ppt_renovation';
+type VisibleCreationType = 'no_think' | 'outline' | 'ppt_to_ppt' | 'ppt_renovation';
+type RenovationStyleSource = 'original' | 'template';
+type PptToPptStyleSource = 'original' | 'template';
 
 // 支持作为参考文件上传的文档扩展名（与后端 file_parser_service 保持一致）
 const ALLOWED_DOC_EXTENSIONS = ['pdf', 'docx', 'pptx', 'doc', 'ppt', 'xlsx', 'xls', 'csv', 'txt', 'md'];
+
+const NO_THINK_SELECT_OPTIONS = {
+  scenario: ['工作汇报', '产品发布', '教学课件', '个人展示'],
+  colorTone: ['商务蓝', '科技紫', '温暖米', '清新绿'],
+  density: ['精炼要点版', '详细说明版'],
+  pageCount: ['短(5-7页)', '中(10-12页)', '长(15页以上)'],
+  styleTemplate: ['商务演示', '极简展示', '创意渐变'],
+};
 
 // 页面特有翻译 - AI 可以直接看到所有文案，保留原始 key 结构
 const homeI18n = {
   zh: {
     nav: {
       materialGenerate: '素材生成', materialCenter: '素材中心',
-      history: '历史项目', settings: '设置', help: '帮助'
+      history: '历史项目', settings: '设置'
     },
     settings: {
       language: { label: '界面语言' },
       theme: { label: '主题模式', light: '浅色', dark: '深色', system: '跟随系统' }
     },
     home: {
-      title: '蕉幻',
+      title: '启发',
       subtitle: 'Vibe your slides like vibe coding',
-      tagline: '基于 nano banana pro🍌 的原生 AI PPT 生成器',
+      tagline: '',
       features: {
         oneClick: '一句话生成 PPT',
         naturalEdit: '自然语言修改',
@@ -41,29 +52,55 @@ const homeI18n = {
         export: '一键导出 PPTX/PDF',
       },
       tabs: {
+        no_think: 'No Think PPT',
         idea: '一句话生成',
-        outline: '从大纲生成',
+        outline: '从内容生成 PPT',
         description: '从描述生成',
+        ppt_to_ppt: '借鉴优秀 PPT 生成',
         ppt_renovation: 'PPT 翻新',
       },
       tabDescriptions: {
+        no_think: '输入主题和偏好，AI 自动生成大纲和页面描述',
         idea: '输入你的想法，AI 将为你生成完整的 PPT',
-        outline: '已有大纲？直接粘贴，AI 将自动切分为结构化大纲',
+        outline: '已有大纲？直接粘贴，逐页描述可选填写，也可以稍后由 AI 生成',
         description: '已有完整描述？AI 将自动解析并直接生成图片，跳过大纲步骤',
+        ppt_to_ppt: '上传参考 PPT，再输入你的内容，AI 学习结构和表达方式生成新 PPT',
         ppt_renovation: '上传已有的 PDF/PPTX 文件，AI 将解析内容并重新生成翻新后的PPT',
       },
       placeholders: {
+        no_think: '例如：AI 工具入门培训',
         idea: '例如：生成一份关于 AI 发展史的演讲 PPT',
-        outline: '粘贴你的 PPT 大纲...',
+        outline: '粘贴你的 PPT 大纲（必填）...',
         description: '粘贴你的完整页面描述...',
+        ppt_to_ppt: '粘贴你的项目内容、工作材料或比赛说明...',
+      },
+      content: {
+        descriptionLabel: '逐页描述（选填）',
+        descriptionPlaceholder: '如果你已经有每页内容、布局、图表或素材说明，可以直接填到这里',
+        descriptionHint: '逐页描述用于补充每页内容、布局、图表和素材说明；全局视觉风格由上方风格模板控制。',
+        emptyOutlineTip: '还没有大纲？可以使用 NoThinkPPT 先生成完整结构',
+        generateDescriptions: '根据大纲生成逐页描述',
       },
       examples: {
-        outline: '格式示例：\n\n第一页：AI 的起源\n- 1956年达特茅斯会议\n- 早期研究者的愿景\n\n第二页：机器学习的发展\n- 从规则驱动到数据驱动\n- 经典算法介绍\n\n第三页：未来展望\n- 趋势与挑战\n\n支持标题+要点的形式，也可以只写标题。AI 会自动切分为结构化大纲。',
-        description: '格式示例：\n\n第一页：AI 的起源\n介绍人工智能概念的诞生，从1956年达特茅斯会议讲起。页面采用左文右图布局，左侧展示时间线，右侧配一张复古风格的计算机插画。\n\n第二页：机器学习的发展\n讲解从规则驱动到数据驱动的转变。使用深蓝色背景，中央放置算法对比图表，底部列出关键里程碑。\n\n每页可包含内容描述、排版布局、视觉风格等，用空行分隔各页。',
+        outline: '推荐输入格式（可直接复制）：\n\n第 1 页：AI 的起源\n- 1956 达特茅斯会议\n- 早期研究者的愿景\n\n第 2 页：机器学习的发展\n- 从规则驱动到数据驱动\n- 经典算法介绍\n\n第 3 页：未来展望\n- 趋势与挑战\n\n可只写页标题，AI 会按页头自动切分并转为结构化大纲；要点可选填，不影响解析。',
+        description: '推荐输入格式（可直接复制）：\n\n第 1 页：AI 的起源\n页面文字：\n- 1956 年达特茅斯会议开创了 AI 概念。\n- 建议封面用左文右图，突出“目标与问题定义”。\n\n第 2 页：机器学习的发展\n页面文字：\n- 讲解从规则驱动到数据驱动的转变。\n- 可放一张算法演进对比图，底部给出关键里程碑。\n\n第 3 页：未来展望\n页面文字：\n- 总结趋势与挑战。\n- 补充伦理合规与风险治理方向。',
+        fillOutline: '填入示例大纲',
+        copyOutline: '复制示例大纲',
+        fillDescription: '填入示例逐页描述',
+        copyDescription: '复制示例逐页描述',
       },
       template: {
         title: '选择风格模板',
         useTextStyle: '使用文字描述风格',
+      },
+      noThink: {
+        scenario: '使用场景',
+        colorTone: '色调',
+        density: '内容密度',
+        pageCount: '页数',
+        styleTemplate: '风格倾向',
+        extraInstruction: '额外要求',
+        extraPlaceholder: '例如：适合新员工，避免技术细节过深',
       },
       actions: {
         selectFile: '选择参考文件',
@@ -73,9 +110,22 @@ const homeI18n = {
       renovation: {
         uploadHint: '点击或拖拽上传 PDF / PPTX 文件',
         formatHint: '支持 .pdf, .pptx, .ppt 格式（推荐上传 PDF）',
-        keepLayout: '保留原始排版布局',
+        styleSource: '翻新风格',
+        reuseOriginalStyle: '复用原版风格',
+        chooseStyleTemplate: '选择风格模板',
         onlyPdfPptx: '仅支持 PDF 和 PPTX 文件',
         uploadFile: '请先上传 PDF 或 PPTX 文件',
+        selectStyleTemplate: '请先选择风格模板或填写文字风格',
+      },
+      pptToPpt: {
+        uploadHint: '点击或拖拽上传参考 PDF / PPTX 文件',
+        formatHint: '参考文件用于学习结构、版式和表达方式',
+        styleSource: '生成风格',
+        reuseReferenceStyle: '复用参考 PPT 风格',
+        chooseStyleTemplate: '选择风格模板',
+        onlyPdfPptx: '仅支持 PDF 和 PPTX 文件',
+        uploadFile: '请先上传参考 PDF 或 PPTX 文件',
+        selectStyleTemplate: '请先选择风格模板或填写文字风格',
       },
       messages: {
         enterContent: '请输入内容',
@@ -92,6 +142,9 @@ const homeI18n = {
         pptTip: '建议先在本地将 PPTX 转为 PDF 后再上传，可获得更好的兼容性和更快的处理速度',
         filesAdded: '已添加 {{count}} 个参考文件',
         imageRemoved: '已移除图片',
+        outlineCopied: '示例大纲已复制到剪贴板',
+        descriptionCopied: '示例主页描述已复制到剪贴板',
+        copyFailed: '复制失败，请手动复制',
         serviceTestTip: '建议先到设置页底部进行服务测试，避免后续功能异常',
         verifying: '正在验证 API 配置...',
         verifyFailed: '请在设置页配置正确的 API Key，并在页面底部点击「服务测试」验证',
@@ -101,7 +154,7 @@ const homeI18n = {
   en: {
     nav: {
       materialGenerate: 'Generate Material', materialCenter: 'Material Center',
-      history: 'History', settings: 'Settings', help: 'Help'
+      history: 'History', settings: 'Settings'
     },
     settings: {
       language: { label: 'Interface Language' },
@@ -110,7 +163,7 @@ const homeI18n = {
     home: {
       title: 'Banana Slides',
       subtitle: 'Vibe your slides like vibe coding',
-      tagline: 'AI-native PPT generator powered by nano banana pro🍌',
+      tagline: 'AI-native PPT generator for structured visual expression',
       features: {
         oneClick: 'One-click PPT generation',
         naturalEdit: 'Natural language editing',
@@ -118,29 +171,55 @@ const homeI18n = {
         export: 'Export to PPTX/PDF',
       },
       tabs: {
+        no_think: 'No Think PPT',
         idea: 'From Idea',
-        outline: 'From Outline',
+        outline: 'Generate from Content',
         description: 'From Description',
+        ppt_to_ppt: 'PPT to PPT',
         ppt_renovation: 'PPT Renovation',
       },
       tabDescriptions: {
+        no_think: 'Enter a topic and preferences; AI generates outline and slide descriptions automatically',
         idea: 'Enter your idea, AI will generate a complete PPT for you',
-        outline: 'Have an outline? Paste it directly, AI will split it into a structured outline',
+        outline: 'Have an outline? Paste it directly; slide descriptions are optional and can be generated later',
         description: 'Have detailed descriptions? AI will parse and generate images directly, skipping the outline step',
+        ppt_to_ppt: 'Upload a reference PPT, then enter your content; AI learns its structure and expression to generate a new deck',
         ppt_renovation: 'Upload an existing PDF/PPTX file, AI will parse its content and regenerate the renovated PPT',
       },
       placeholders: {
+        no_think: 'e.g., AI tools onboarding workshop',
         idea: 'e.g., Generate a presentation about the history of AI',
-        outline: 'Paste your PPT outline...',
+        outline: 'Paste your PPT outline (required)...',
         description: 'Paste your complete page descriptions...',
+        ppt_to_ppt: 'Paste your project content, work material, or competition brief...',
+      },
+      content: {
+        descriptionLabel: 'Slide descriptions (optional)',
+        descriptionPlaceholder: 'Paste slide-by-slide content, layout, chart, or asset notes here',
+        descriptionHint: 'Slide descriptions are for page content, layout, charts, and assets; the global visual style is controlled by the style template above.',
+        emptyOutlineTip: 'No outline yet? Use NoThinkPPT to generate a full structure first',
+        generateDescriptions: 'Generate slide descriptions from outline',
       },
       examples: {
-        outline: 'Format example:\n\nSlide 1: The Origins of AI\n- 1956 Dartmouth Conference\n- Vision of early researchers\n\nSlide 2: The Rise of Machine Learning\n- From rule-based to data-driven\n- Classic algorithms overview\n\nSlide 3: Future Outlook\n- Trends and challenges\n\nTitles with bullet points, or titles only. AI will split it into a structured outline.',
-        description: 'Format example:\n\nSlide 1: The Origins of AI\nIntroduce the birth of AI, starting from the 1956 Dartmouth Conference. Use a left-text right-image layout with a timeline on the left and a retro-style computer illustration on the right.\n\nSlide 2: The Rise of Machine Learning\nExplain the shift from rule-based to data-driven approaches. Dark blue background, algorithm comparison chart in the center, key milestones at the bottom.\n\nEach slide can include content, layout, and visual style. Separate slides with blank lines.',
+        outline: 'Recommended input (click to insert):\n\nPage 1: AI Origins\n- 1956 Dartmouth Conference\n- Early researchers\' vision\n\nPage 2: Evolution of Machine Learning\n- Shift from rule-based to data-driven\n- Overview of classic algorithms\n\nPage 3: Future Outlook\n- Trends and opportunities\n- Challenges and risks\n\nPage titles only is also supported. The AI will split by page headers and build structured outlines.',
+        description: 'Recommended input (click to insert):\n\nPage 1: AI Origins\nPage content:\n- The 1956 Dartmouth Conference launched AI as a research field.\n- Suggest a cover style with timeline on the left and machine illustration on the right.\n\nPage 2: Evolution of Machine Learning\nPage content:\n- Explain the shift from rule-based methods to data-driven methods.\n- Add a central comparison chart and key milestones below.\n\nPage 3: Future Outlook\nPage content:\n- Summarize trends and opportunities.\n- Include notes for ethics and governance risks.',
+        fillOutline: 'Insert outline sample',
+        copyOutline: 'Copy outline sample',
+        fillDescription: 'Insert slide description sample',
+        copyDescription: 'Copy slide description sample',
       },
       template: {
         title: 'Select Style Template',
         useTextStyle: 'Use text description for style',
+      },
+      noThink: {
+        scenario: 'Scenario',
+        colorTone: 'Color tone',
+        density: 'Content density',
+        pageCount: 'Pages',
+        styleTemplate: 'Style direction',
+        extraInstruction: 'Extra instruction',
+        extraPlaceholder: 'e.g., for new hires, keep technical details light',
       },
       actions: {
         selectFile: 'Select reference file',
@@ -150,9 +229,22 @@ const homeI18n = {
       renovation: {
         uploadHint: 'Click or drag to upload PDF / PPTX file',
         formatHint: 'Supports .pdf, .pptx, .ppt formats (PDF recommended)',
-        keepLayout: 'Keep original layout',
+        styleSource: 'Renovation style',
+        reuseOriginalStyle: 'Reuse original style',
+        chooseStyleTemplate: 'Select style template',
         onlyPdfPptx: 'Only PDF and PPTX files are supported',
         uploadFile: 'Please upload a PDF or PPTX file first',
+        selectStyleTemplate: 'Please select a style template or enter a text style',
+      },
+      pptToPpt: {
+        uploadHint: 'Click or drag to upload reference PDF / PPTX file',
+        formatHint: 'The reference file is used to learn structure, layout, and expression',
+        styleSource: 'Generation style',
+        reuseReferenceStyle: 'Reuse reference PPT style',
+        chooseStyleTemplate: 'Select style template',
+        onlyPdfPptx: 'Only PDF and PPTX files are supported',
+        uploadFile: 'Please upload a reference PDF or PPTX file first',
+        selectStyleTemplate: 'Please select a style template or enter a text style',
       },
       messages: {
         enterContent: 'Please enter content',
@@ -169,6 +261,9 @@ const homeI18n = {
         pptTip: 'We recommend converting your PPTX to PDF locally before uploading for better compatibility and faster processing',
         filesAdded: 'Added {{count}} reference file(s)',
         imageRemoved: 'Image removed',
+        outlineCopied: 'Outline sample copied to clipboard',
+        descriptionCopied: 'Page description sample copied to clipboard',
+        copyFailed: 'Copy failed, please copy manually',
         serviceTestTip: 'Test services in Settings first to avoid issues',
         verifying: 'Verifying API configuration...',
         verifyFailed: 'Please configure a valid API Key in Settings and click "Service Test" at the bottom to verify',
@@ -185,14 +280,14 @@ export const Home: React.FC = () => {
   const { initializeProject, isGlobalLoading } = useProjectStore();
   const { show, ToastContainer } = useToast();
   
-  const [activeTab, setActiveTab] = useState<CreationType>('idea');
+  const [activeTab, setActiveTab] = useState<CreationType>('no_think');
   const [content, setContent] = useState('');
+  const [pageDescriptions, setPageDescriptions] = useState('');
   const [selectedTemplate, setSelectedTemplate] = useState<File | null>(null);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const [selectedPresetTemplateId, setSelectedPresetTemplateId] = useState<string | null>(null);
   const [isMaterialModalOpen, setIsMaterialModalOpen] = useState(false);
   const [isMaterialCenterOpen, setIsMaterialCenterOpen] = useState(false);
-  const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
   const [isThemeMenuOpen, setIsThemeMenuOpen] = useState(false);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
   const [userTemplates, setUserTemplates] = useState<UserTemplate[]>([]);
@@ -205,11 +300,24 @@ export const Home: React.FC = () => {
   const [templateStyle, setTemplateStyle] = useState('');
   const [aspectRatio, setAspectRatio] = useState('16:9');
   const [isAspectRatioOpen, setIsAspectRatioOpen] = useState(false);
+  const [noThinkScenario, setNoThinkScenario] = useState(NO_THINK_SELECT_OPTIONS.scenario[0]);
+  const [noThinkColorTone, setNoThinkColorTone] = useState(NO_THINK_SELECT_OPTIONS.colorTone[0]);
+  const [noThinkDensity, setNoThinkDensity] = useState(NO_THINK_SELECT_OPTIONS.density[0]);
+  const [noThinkPageCount, setNoThinkPageCount] = useState(NO_THINK_SELECT_OPTIONS.pageCount[1]);
+  const [noThinkStyleTemplate, setNoThinkStyleTemplate] = useState(NO_THINK_SELECT_OPTIONS.styleTemplate[0]);
+  const [noThinkExtraInstruction, setNoThinkExtraInstruction] = useState('');
   const [renovationFile, setRenovationFile] = useState<File | null>(null);
-  const [keepLayout, setKeepLayout] = useState(false);
+  const [pptToPptReferenceFile, setPptToPptReferenceFile] = useState<File | null>(null);
+  const [pptToPptStyleSource, setPptToPptStyleSource] = useState<PptToPptStyleSource>('original');
+  const [renovationStyleSource, setRenovationStyleSource] = useState<RenovationStyleSource>('original');
   const renovationFileInputRef = useRef<HTMLInputElement>(null);
+  const pptToPptFileInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const themeMenuRef = useRef<HTMLDivElement>(null);
+  const modePanelRef = useRef<HTMLDivElement>(null);
+  const pendingModeScrollYRef = useRef<number | null>(null);
+  const pointerModeScrollYRef = useRef<number | null>(null);
+  const [modePanelMinHeight, setModePanelMinHeight] = useState<number | null>(null);
 
   // 持久化草稿到 sessionStorage，确保跳转设置页后返回时内容不丢失
   useEffect(() => {
@@ -219,7 +327,38 @@ export const Home: React.FC = () => {
   }, [content]);
 
   useEffect(() => {
+    if (pageDescriptions) {
+      sessionStorage.setItem('home-draft-page-descriptions', pageDescriptions);
+    }
+  }, [pageDescriptions]);
+
+  useEffect(() => {
     sessionStorage.setItem('home-draft-tab', activeTab);
+  }, [activeTab]);
+
+  useLayoutEffect(() => {
+    const panel = modePanelRef.current;
+    if (panel) {
+      const nextHeight = Math.ceil(panel.getBoundingClientRect().height);
+      if (nextHeight > 0) {
+        setModePanelMinHeight((currentHeight) => Math.max(currentHeight ?? 0, nextHeight));
+      }
+    }
+
+    if (pendingModeScrollYRef.current !== null) {
+      const scrollY = pendingModeScrollYRef.current;
+      const restoreScroll = () => window.scrollTo(window.scrollX, scrollY);
+      restoreScroll();
+      window.requestAnimationFrame(() => {
+        restoreScroll();
+        window.requestAnimationFrame(restoreScroll);
+        window.setTimeout(() => {
+          restoreScroll();
+          pendingModeScrollYRef.current = null;
+          document.documentElement.style.removeProperty('overflow-anchor');
+        }, 120);
+      });
+    }
   }, [activeTab]);
 
 
@@ -240,19 +379,6 @@ export const Home: React.FC = () => {
       }
     };
     loadTemplates();
-  }, []);
-
-  // 首次访问自动弹出帮助模态框
-  useEffect(() => {
-    const hasSeenHelp = localStorage.getItem('hasSeenHelpModal');
-    if (!hasSeenHelp) {
-      // 延迟500ms打开，让页面先渲染完成
-      const timer = setTimeout(() => {
-        setIsHelpModalOpen(true);
-        localStorage.setItem('hasSeenHelpModal', 'true');
-      }, 500);
-      return () => clearTimeout(timer);
-    }
   }, []);
 
   const handleOpenMaterialModal = () => {
@@ -487,12 +613,18 @@ export const Home: React.FC = () => {
     e.target.value = '';
   };
 
-  const tabConfig = {
-    idea: {
+  const tabConfig: Record<VisibleCreationType, {
+    icon: React.ReactNode;
+    label: string;
+    placeholder: string;
+    description: string;
+    example: string | null;
+  }> = {
+    no_think: {
       icon: <Sparkles size={20} />,
-      label: t('home.tabs.idea'),
-      placeholder: t('home.placeholders.idea'),
-      description: t('home.tabDescriptions.idea'),
+      label: t('home.tabs.no_think'),
+      placeholder: t('home.placeholders.no_think'),
+      description: t('home.tabDescriptions.no_think'),
       example: null as string | null,
     },
     outline: {
@@ -502,12 +634,12 @@ export const Home: React.FC = () => {
       description: t('home.tabDescriptions.outline'),
       example: t('home.examples.outline'),
     },
-    description: {
+    ppt_to_ppt: {
       icon: <FileEdit size={20} />,
-      label: t('home.tabs.description'),
-      placeholder: t('home.placeholders.description'),
-      description: t('home.tabDescriptions.description'),
-      example: t('home.examples.description'),
+      label: t('home.tabs.ppt_to_ppt'),
+      placeholder: t('home.placeholders.ppt_to_ppt'),
+      description: t('home.tabDescriptions.ppt_to_ppt'),
+      example: null as string | null,
     },
     ppt_renovation: {
       icon: <RefreshCw size={20} />,
@@ -517,6 +649,33 @@ export const Home: React.FC = () => {
       example: null as string | null,
     },
   };
+  const currentTabConfig = tabConfig[(activeTab in tabConfig ? activeTab : 'outline') as VisibleCreationType];
+
+  const captureModePanelHeight = useCallback(() => {
+    const panel = modePanelRef.current;
+    if (!panel) return;
+
+    const currentHeight = Math.ceil(panel.getBoundingClientRect().height);
+    if (currentHeight > 0) {
+      setModePanelMinHeight((savedHeight) => Math.max(savedHeight ?? 0, currentHeight));
+    }
+  }, []);
+
+  const handleTabPointerDown = useCallback(() => {
+    pointerModeScrollYRef.current = window.scrollY;
+    captureModePanelHeight();
+  }, [captureModePanelHeight]);
+
+  const handleTabChange = useCallback((type: VisibleCreationType) => {
+    if (type === activeTab) return;
+
+    captureModePanelHeight();
+
+    pendingModeScrollYRef.current = pointerModeScrollYRef.current ?? window.scrollY;
+    pointerModeScrollYRef.current = null;
+    document.documentElement.style.setProperty('overflow-anchor', 'none');
+    setActiveTab(type);
+  }, [activeTab, captureModePanelHeight]);
 
   const handleTemplateSelect = async (templateFile: File | null, templateId?: string) => {
     // 总是设置文件（如果提供）
@@ -548,14 +707,54 @@ export const Home: React.FC = () => {
 
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleSubmit = async () => {
+  const isPdfOrPptFile = (file: File | null) => {
+    if (!file) return false;
+    const name = file.name.toLowerCase();
+    return name.endsWith('.pdf') || name.endsWith('.pptx') || name.endsWith('.ppt');
+  };
+
+  const handlePptToPptReferenceFile = (file: File | null) => {
+    if (!file) return;
+    if (!isPdfOrPptFile(file)) {
+      show({ message: t('home.pptToPpt.onlyPdfPptx'), type: 'error' });
+      return;
+    }
+    setPptToPptReferenceFile(file);
+    const ext = file.name.split('.').pop()?.toLowerCase();
+    if (ext === 'ppt' || ext === 'pptx') {
+      show({ message: `💡 ${t('home.messages.pptTip')}`, type: 'info' });
+    }
+  };
+
+  const handleSubmit = async (eventOrOptions?: React.MouseEvent | { generateDescriptionsFromOutline?: boolean }) => {
+    const generateDescriptionsFromOutline = Boolean(
+      eventOrOptions &&
+      'generateDescriptionsFromOutline' in eventOrOptions &&
+      eventOrOptions.generateDescriptionsFromOutline
+    );
     // For ppt_renovation, validate file instead of content
     if (activeTab === 'ppt_renovation') {
       if (!renovationFile) {
         show({ message: t('home.renovation.uploadFile'), type: 'error' });
         return;
       }
-    } else if (!content.trim()) {
+    } else if (activeTab === 'ppt_to_ppt') {
+      if (!pptToPptReferenceFile) {
+        show({ message: t('home.pptToPpt.uploadFile'), type: 'error' });
+        return;
+      }
+      if (!content.trim()) {
+        show({ message: t('home.messages.enterContent'), type: 'error' });
+        return;
+      }
+      if (pptToPptStyleSource === 'template' && !selectedTemplate && !selectedTemplateId && !selectedPresetTemplateId && !templateStyle.trim()) {
+        show({ message: t('home.pptToPpt.selectStyleTemplate'), type: 'error' });
+        return;
+      }
+    } else if (activeTab === 'outline' && !content.trim()) {
+      show({ message: t('home.content.emptyOutlineTip'), type: 'error' });
+      return;
+    } else if (activeTab !== 'no_think' && !content.trim()) {
       show({ message: t('home.messages.enterContent'), type: 'error' });
       return;
     }
@@ -576,10 +775,25 @@ export const Home: React.FC = () => {
     try {
       // PPT 翻新模式：走独立的上传+异步解析流程
       if (activeTab === 'ppt_renovation' && renovationFile) {
-        const styleDesc = templateStyle.trim() ? templateStyle.trim() : undefined;
+        let templateFile = selectedTemplate;
+        if (!templateFile && (selectedTemplateId || selectedPresetTemplateId)) {
+          const templateId = selectedTemplateId || selectedPresetTemplateId;
+          if (templateId) {
+            templateFile = await getTemplateFile(templateId, userTemplates);
+          }
+        }
+
+        const useTemplateForRenovation = renovationStyleSource === 'template';
+        const styleDesc = useTemplateForRenovation && templateStyle.trim() ? templateStyle.trim() : undefined;
+        if (useTemplateForRenovation && !templateFile && !styleDesc) {
+          show({ message: t('home.renovation.selectStyleTemplate'), type: 'error' });
+          return;
+        }
+
         const result = await createPptRenovationProject(renovationFile, {
-          keepLayout,
+          keepLayout: renovationStyleSource === 'original',
           templateStyle: styleDesc,
+          templateImage: useTemplateForRenovation ? templateFile || undefined : undefined,
         });
 
         const projectId = result.data?.project_id;
@@ -597,9 +811,48 @@ export const Home: React.FC = () => {
 
         // Clear draft
         sessionStorage.removeItem('home-draft-content');
+        sessionStorage.removeItem('home-draft-page-descriptions');
         sessionStorage.removeItem('home-draft-tab');
 
         // Navigate to detail editor (will poll for task completion with skeleton UI)
+        navigate(`/project/${projectId}/detail`);
+        return;
+      }
+
+      if (activeTab === 'ppt_to_ppt' && pptToPptReferenceFile) {
+        let templateFile = selectedTemplate;
+        if (!templateFile && (selectedTemplateId || selectedPresetTemplateId)) {
+          const templateId = selectedTemplateId || selectedPresetTemplateId;
+          if (templateId) {
+            templateFile = await getTemplateFile(templateId, userTemplates);
+          }
+        }
+
+        const result = await createPptToPptProject(pptToPptReferenceFile, content.trim(), {
+          contentType: 'notes',
+          matchStrength: 'balanced',
+          referenceScope: 'structure_and_style',
+          styleSource: pptToPptStyleSource,
+          templateStyle: pptToPptStyleSource === 'template' ? templateStyle.trim() || undefined : undefined,
+          templateImage: pptToPptStyleSource === 'template' ? templateFile || undefined : undefined,
+        });
+
+        const projectId = result.data?.project_id;
+        const taskId = result.data?.task_id;
+        if (!projectId) {
+          show({ message: t('home.messages.projectCreateFailed'), type: 'error' });
+          return;
+        }
+
+        localStorage.setItem('currentProjectId', projectId);
+        if (taskId) {
+          localStorage.setItem('renovationTaskId', taskId);
+        }
+
+        sessionStorage.removeItem('home-draft-content');
+        sessionStorage.removeItem('home-draft-page-descriptions');
+        sessionStorage.removeItem('home-draft-tab');
+
         navigate(`/project/${projectId}/detail`);
         return;
       }
@@ -620,8 +873,32 @@ export const Home: React.FC = () => {
       const refFileIds = referenceFiles
         .filter(f => f.parse_status === 'completed')
         .map(f => f.id);
+      const submittedContent = activeTab === 'no_think' && !content.trim()
+        ? `${noThinkScenario} PPT`
+        : content;
 
-      await initializeProject(activeTab as 'idea' | 'outline' | 'description', content, templateFile || undefined, styleDesc, refFileIds.length > 0 ? refFileIds : undefined, aspectRatio);
+      const noThinkOptions = activeTab === 'no_think'
+        ? {
+            scenario: noThinkScenario,
+            color_tone: noThinkColorTone,
+            density: noThinkDensity,
+            page_count: noThinkPageCount,
+            style_template: noThinkStyleTemplate,
+            extra_instruction: noThinkExtraInstruction.trim() || undefined,
+          }
+        : undefined;
+
+      await initializeProject(
+        activeTab as 'no_think' | 'idea' | 'outline' | 'description',
+        submittedContent,
+        templateFile || undefined,
+        styleDesc,
+        refFileIds.length > 0 ? refFileIds : undefined,
+        aspectRatio,
+        noThinkOptions,
+        activeTab === 'outline' ? pageDescriptions : undefined,
+        activeTab === 'outline' ? generateDescriptionsFromOutline : false
+      );
       
       // 根据类型跳转到不同页面
       const projectId = localStorage.getItem('currentProjectId');
@@ -650,9 +927,10 @@ export const Home: React.FC = () => {
       
       // 关联图片素材到项目（解析content中的markdown图片链接）
       const imageRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
+      const materialSource = `${submittedContent}\n${activeTab === 'outline' ? pageDescriptions : ''}`;
       const materialUrls: string[] = [];
       let match;
-      while ((match = imageRegex.exec(content)) !== null) {
+      while ((match = imageRegex.exec(materialSource)) !== null) {
         materialUrls.push(match[2]); // match[2] 是 URL
       }
       
@@ -669,10 +947,12 @@ export const Home: React.FC = () => {
         devLog('No materials to associate');
       }
       
-      if (activeTab === 'idea' || activeTab === 'outline') {
+      if (activeTab === 'outline' && (pageDescriptions.trim() || generateDescriptionsFromOutline)) {
+        navigate(`/project/${projectId}/detail`);
+      } else if (activeTab === 'idea' || activeTab === 'outline') {
         navigate(`/project/${projectId}/outline`);
-      } else if (activeTab === 'description') {
-        // 从描述生成：直接跳到描述生成页（因为已经自动生成了大纲和描述）
+      } else if (activeTab === 'description' || activeTab === 'no_think') {
+        // 从描述/No Think 生成：直接跳到详情页（后端已生成页面描述）
         navigate(`/project/${projectId}/detail`);
       }
     } catch (error: any) {
@@ -684,29 +964,100 @@ export const Home: React.FC = () => {
     }
   };
 
+  const noThinkSelects = [
+    {
+      label: t('home.noThink.scenario'),
+      value: noThinkScenario,
+      onChange: setNoThinkScenario,
+      options: NO_THINK_SELECT_OPTIONS.scenario,
+    },
+    {
+      label: t('home.noThink.colorTone'),
+      value: noThinkColorTone,
+      onChange: setNoThinkColorTone,
+      options: NO_THINK_SELECT_OPTIONS.colorTone,
+    },
+    {
+      label: t('home.noThink.density'),
+      value: noThinkDensity,
+      onChange: setNoThinkDensity,
+      options: NO_THINK_SELECT_OPTIONS.density,
+    },
+    {
+      label: t('home.noThink.pageCount'),
+      value: noThinkPageCount,
+      onChange: setNoThinkPageCount,
+      options: NO_THINK_SELECT_OPTIONS.pageCount,
+    },
+    {
+      label: t('home.noThink.styleTemplate'),
+      value: noThinkStyleTemplate,
+      onChange: setNoThinkStyleTemplate,
+      options: NO_THINK_SELECT_OPTIONS.styleTemplate,
+    },
+  ];
+
+  const copyTextToClipboard = async (text: string, copiedMessage: string) => {
+    try {
+      if (!text) return;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+        show({ message: copiedMessage, type: 'success' });
+        return;
+      }
+    } catch (error) {
+      console.error('复制失败:', error);
+    }
+
+    try {
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.setAttribute('readonly', '');
+      textarea.style.position = 'fixed';
+      textarea.style.top = '0';
+      textarea.style.left = '0';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      const copied = document.execCommand('copy');
+      document.body.removeChild(textarea);
+      if (copied) {
+        show({ message: copiedMessage, type: 'success' });
+      } else {
+        throw new Error('execCommand copy failed');
+      }
+    } catch (error) {
+      console.error('复制失败:', error);
+      show({ message: t('home.messages.copyFailed'), type: 'error' });
+    }
+  };
+
+  const fillOutlineSample = () => {
+    setContent(t('home.examples.outline'));
+  };
+
+  const fillDescriptionSample = () => {
+    setPageDescriptions(t('home.examples.description'));
+  };
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-yellow-50 via-orange-50/30 to-pink-50/50 dark:from-background-primary dark:via-background-primary dark:to-background-primary relative overflow-hidden">
-      {/* 背景装饰元素 - 仅在亮色模式显示 */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none dark:hidden">
-        <div className="absolute -top-40 -right-40 w-80 h-80 bg-banana-500/10 rounded-full blur-3xl animate-pulse"></div>
-        <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-orange-400/10 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }}></div>
-        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-72 h-72 bg-yellow-400/5 rounded-full blur-3xl"></div>
-      </div>
+    <div className="app-surface min-h-screen dark:bg-background-primary relative overflow-hidden">
 
       {/* 导航栏 */}
-      <nav className="relative z-50 h-16 md:h-18 bg-white/40 dark:bg-background-primary backdrop-blur-2xl dark:backdrop-blur-none dark:border-b dark:border-border-primary">
+      <nav className="app-chrome relative z-50 h-16 md:h-18 border-b">
 
         <div className="max-w-7xl mx-auto px-4 md:px-6 h-full flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="flex items-center">
               <img
                 src="/logo.png"
-                alt="蕉幻 Banana Slides Logo"
+                alt="启发 Banana Slides Logo"
                 className="h-10 md:h-12 w-auto rounded-lg object-contain"
               />
             </div>
-            <span className="text-xl md:text-2xl font-bold bg-gradient-to-r from-banana-600 via-orange-500 to-pink-500 bg-clip-text text-transparent">
-              蕉幻
+            <span className="brand-wordmark text-xl md:text-2xl font-black text-[#AFFF00]">
+              启发
             </span>
           </div>
           <div className="flex items-center gap-2 md:gap-3">
@@ -766,23 +1117,6 @@ export const Home: React.FC = () => {
             >
               <span className="hidden md:inline">{t('nav.settings')}</span>
             </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setIsHelpModalOpen(true)}
-              className="hidden md:inline-flex hover:bg-banana-50/50"
-            >
-              {t('nav.help')}
-            </Button>
-            {/* 移动端帮助按钮 */}
-            <Button
-              variant="ghost"
-              size="sm"
-              icon={<HelpCircle size={16} />}
-              onClick={() => setIsHelpModalOpen(true)}
-              className="md:hidden hover:bg-banana-100/60 hover:shadow-sm hover:scale-105 transition-all duration-200"
-              title={t('nav.help')}
-            />
             {/* 分隔线 */}
             <div className="h-5 w-px bg-gray-300 dark:bg-border-primary mx-1" />
             {/* 语言切换按钮 */}
@@ -834,11 +1168,6 @@ export const Home: React.FC = () => {
                 </>
               )}
             </div>
-            {/* 分隔线 */}
-            <div className="h-5 w-px bg-gray-300 dark:bg-border-primary mx-1" />
-            {/* GitHub 仓库卡片 */}
-            <GithubRepoCard />
-            {/* 分隔线 */}
           </div>
         </div>
       </nav>
@@ -847,13 +1176,12 @@ export const Home: React.FC = () => {
       <main className="relative max-w-5xl mx-auto px-3 md:px-4 py-8 md:py-12">
         {/* Hero 标题区 */}
         <div className="text-center mb-10 md:mb-16 space-y-4 md:space-y-6">
-          <div className="inline-flex items-center gap-2 px-4 py-2 bg-white/60 dark:bg-background-secondary backdrop-blur-sm rounded-full shadow-sm dark:shadow-none mb-4">
-            <span className="text-2xl animate-pulse"><Sparkles size={20} className="text-orange-500 dark:text-banana" /></span>
-            <span className="text-sm font-medium text-gray-700 dark:text-foreground-secondary">{t('home.tagline')}</span>
-          </div>
+          {/*<div className="inline-flex items-center gap-2 px-4 py-2 bg-[#121212] text-white dark:bg-background-secondary backdrop-blur-sm rounded-full shadow-sm dark:shadow-none mb-4">*/}
+          {/*  <span className="text-sm font-medium text-white/85 dark:text-foreground-secondary">{t('home.tagline')}</span>*/}
+          {/*</div>*/}
 
           <h1 className="text-4xl md:text-6xl lg:text-7xl font-extrabold leading-tight">
-            <span className="bg-gradient-to-r from-yellow-600 via-orange-500 to-pink-500 dark:from-banana-dark dark:via-banana dark:to-banana-light bg-clip-text text-transparent dark:italic" style={{
+            <span className="bg-gradient-to-r from-[#121212] via-[#84cc16] to-[#AFFF00] dark:from-banana-dark dark:via-banana dark:to-banana-light bg-clip-text text-transparent dark:italic" style={{
               backgroundSize: '200% auto',
               animation: 'gradient 3s ease infinite',
             }}>
@@ -888,50 +1216,160 @@ export const Home: React.FC = () => {
         {/* 创建卡片 */}
         <Card className="p-4 md:p-10 bg-white/90 dark:bg-background-secondary backdrop-blur-xl dark:backdrop-blur-none shadow-2xl dark:shadow-none border-0 dark:border dark:border-border-primary hover:shadow-3xl dark:hover:shadow-none transition-all duration-300 dark:rounded-2xl">
           {/* 选项卡 */}
-          <div className="flex flex-col sm:flex-row gap-2 sm:gap-4 mb-6 md:mb-8">
-            {(Object.keys(tabConfig) as CreationType[]).map((type) => {
+          <div className="grid grid-cols-2 gap-1.5 rounded-2xl border border-gray-200/70 bg-gray-100/70 p-1.5 shadow-inner dark:border-border-primary dark:bg-background-tertiary/80 sm:grid-cols-4 md:gap-2 mb-6 md:mb-8">
+            {(Object.keys(tabConfig) as VisibleCreationType[]).map((type) => {
               const config = tabConfig[type];
+              const isActive = activeTab === type;
               return (
                 <button
                   key={type}
-                  onClick={() => setActiveTab(type)}
-                  className={`flex-1 flex items-center justify-center gap-1.5 md:gap-2 px-3 md:px-6 py-2.5 md:py-3 rounded-lg dark:rounded-xl font-medium transition-all text-sm md:text-base touch-manipulation ${
-                    activeTab === type
-                      ? 'bg-gradient-to-r from-banana-500 to-banana-600 dark:from-banana dark:to-banana text-black shadow-yellow dark:shadow-lg dark:shadow-banana/20'
-                      : 'bg-white dark:bg-background-elevated border border-gray-200 dark:border-border-primary text-gray-700 dark:text-foreground-secondary hover:bg-banana-50 dark:hover:bg-background-hover active:bg-banana-100'
+                  type="button"
+                  aria-pressed={isActive}
+                  onPointerDown={handleTabPointerDown}
+                  onClick={() => handleTabChange(type)}
+                  className={`home-mode-tab group relative flex min-h-[48px] items-center justify-center gap-1.5 overflow-hidden rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-300 ease-out touch-manipulation md:gap-2 md:px-4 md:py-3 md:text-base ${
+                    isActive
+                      ? 'bg-white text-gray-950 shadow-sm ring-1 ring-black/5 dark:bg-background-elevated dark:text-white dark:ring-white/10'
+                      : 'text-gray-600 hover:bg-white/70 hover:text-gray-950 dark:text-foreground-secondary dark:hover:bg-background-hover dark:hover:text-white'
                   }`}
                 >
-                  <span className="scale-90 md:scale-100">{config.icon}</span>
+                  <span
+                    className={`pointer-events-none absolute inset-x-3 top-1 h-0.5 origin-center rounded-full bg-banana-500 transition-all duration-300 dark:bg-banana ${
+                      isActive ? 'scale-x-100 opacity-100' : 'scale-x-0 opacity-0'
+                    }`}
+                  />
+                  <span className={`scale-90 transition-transform duration-300 md:scale-100 ${isActive ? 'text-banana-700 dark:text-banana' : 'group-hover:scale-100'}`}>
+                    {config.icon}
+                  </span>
                   <span className="truncate">{config.label}</span>
                 </button>
               );
             })}
           </div>
 
-          {/* 描述 */}
-          <div className="relative">
-            <p className="text-sm md:text-base mb-4 md:mb-6 leading-relaxed">
-              <span className="inline-flex items-center gap-2 text-gray-600 dark:text-foreground-tertiary">
-                <Lightbulb size={16} className="text-banana-600 dark:text-banana flex-shrink-0" />
-                <span className="font-semibold">
-                  {tabConfig[activeTab].description}
-                </span>
-                {tabConfig[activeTab].example && (
-                  <span className="relative group/tip inline-flex">
-                    <HelpCircle size={15} className="text-gray-400 dark:text-foreground-tertiary hover:text-banana-600 dark:hover:text-banana cursor-help transition-colors" />
-                    <span className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 hidden group-hover/tip:block z-50 w-72 md:w-80 p-3 bg-white dark:bg-background-elevated border border-gray-200 dark:border-border-primary rounded-lg shadow-xl dark:shadow-none text-xs text-gray-700 dark:text-foreground-secondary whitespace-pre-line leading-relaxed">
-                      {tabConfig[activeTab].example}
-                      <span className="absolute left-1/2 -translate-x-1/2 top-full -mt-px w-2 h-2 bg-white dark:bg-background-elevated border-r border-b border-gray-200 dark:border-border-primary rotate-45" />
+          <div
+            ref={modePanelRef}
+            className="transition-[min-height] duration-300 ease-out"
+            style={modePanelMinHeight ? { minHeight: modePanelMinHeight } : undefined}
+          >
+            <div key={activeTab} className="home-mode-panel">
+              {/* 描述 */}
+              <div className="relative">
+                <p className="text-sm md:text-base mb-4 md:mb-6 leading-relaxed">
+                  <span className="inline-flex items-center gap-2 text-gray-600 dark:text-foreground-tertiary">
+                    <Lightbulb size={16} className="text-banana-600 dark:text-banana flex-shrink-0" />
+                    <span className="font-semibold">
+                      {currentTabConfig.description}
                     </span>
+                    {currentTabConfig.example && (
+                      <span className="relative group/tip inline-flex">
+                        <HelpCircle size={15} className="text-gray-400 dark:text-foreground-tertiary hover:text-banana-600 dark:hover:text-banana cursor-help transition-colors" />
+                        <span className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 hidden group-hover/tip:block z-50 w-72 md:w-80 p-3 bg-white dark:bg-background-elevated border border-gray-200 dark:border-border-primary rounded-lg shadow-xl dark:shadow-none text-xs text-gray-700 dark:text-foreground-secondary whitespace-pre-line leading-relaxed">
+                          {currentTabConfig.example}
+                          <span className="absolute left-1/2 -translate-x-1/2 top-full -mt-px w-2 h-2 bg-white dark:bg-background-elevated border-r border-b border-gray-200 dark:border-border-primary rotate-45" />
+                        </span>
+                      </span>
+                    )}
                   </span>
-                )}
-              </span>
-            </p>
-          </div>
+                </p>
+              </div>
 
-          {/* 输入区 - 带工具栏 */}
-          <div className="mb-2">
-            {activeTab === 'ppt_renovation' ? (
+              {/* 输入区 - 带工具栏 */}
+              <div className="mb-2">
+            {activeTab === 'ppt_to_ppt' ? (
+              <div className="space-y-4">
+                <div
+                  className="border-2 border-dashed border-gray-300 dark:border-border-primary rounded-xl p-8 text-center cursor-pointer hover:border-banana-400 dark:hover:border-banana transition-colors duration-200"
+                  onClick={() => pptToPptFileInputRef.current?.click()}
+                  onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    handlePptToPptReferenceFile(e.dataTransfer.files[0] || null);
+                  }}
+                >
+                  {pptToPptReferenceFile ? (
+                    <div className="flex items-center justify-center gap-3">
+                      <FileText size={24} className="text-banana-600 dark:text-banana" />
+                      <div className="text-left">
+                        <p className="text-sm font-medium text-gray-900 dark:text-white">{pptToPptReferenceFile.name}</p>
+                        <p className="text-xs text-gray-500 dark:text-foreground-tertiary">{(pptToPptReferenceFile.size / 1024 / 1024).toFixed(1)} MB</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); setPptToPptReferenceFile(null); }}
+                        className="ml-2 text-gray-400 hover:text-red-500 transition-colors"
+                      >
+                        x
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <Upload size={32} className="mx-auto text-gray-400 dark:text-foreground-tertiary" />
+                      <p className="text-sm text-gray-600 dark:text-foreground-secondary">{t('home.pptToPpt.uploadHint')}</p>
+                      <p className="text-xs text-gray-400 dark:text-foreground-tertiary">{t('home.pptToPpt.formatHint')}</p>
+                    </div>
+                  )}
+                </div>
+                <input
+                  ref={pptToPptFileInputRef}
+                  type="file"
+                  accept=".pdf,.pptx,.ppt"
+                  onChange={(e) => {
+                    handlePptToPptReferenceFile(e.target.files?.[0] || null);
+                    e.target.value = '';
+                  }}
+                  className="hidden"
+                />
+                <div>
+                  <p className="mb-2 text-xs font-medium text-gray-500 dark:text-foreground-tertiary">
+                    {t('home.pptToPpt.styleSource')}
+                  </p>
+                  <div className="inline-flex rounded-lg border border-gray-200 bg-white p-1 dark:border-border-primary dark:bg-background-elevated">
+                    {([
+                      ['original', t('home.pptToPpt.reuseReferenceStyle')],
+                      ['template', t('home.pptToPpt.chooseStyleTemplate')],
+                    ] as const).map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => setPptToPptStyleSource(value)}
+                        className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                          pptToPptStyleSource === value
+                            ? 'bg-banana-500 text-black shadow-sm dark:bg-banana'
+                            : 'text-gray-600 hover:bg-gray-100 dark:text-foreground-secondary dark:hover:bg-background-hover'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <MarkdownTextarea
+                  ref={textareaRef}
+                  placeholder={currentTabConfig.placeholder}
+                  value={content}
+                  onChange={setContent}
+                  onPaste={handlePaste}
+                  onFiles={handleImageFiles}
+                  onDocumentFiles={handleDocumentFiles}
+                  onSelectFromLibrary={() => setIsMaterialSelectorOpen(true)}
+                  rows={8}
+                  className="text-sm md:text-base border-2 border-gray-200 dark:border-border-primary dark:bg-background-tertiary dark:text-white focus-within:border-banana-400 dark:focus-within:border-banana transition-colors duration-200"
+                  toolbarRight={
+                    <Button
+                      size="sm"
+                      onClick={handleSubmit}
+                      loading={isSubmitting || isGlobalLoading}
+                      disabled={!pptToPptReferenceFile}
+                      className="shadow-sm dark:shadow-background-primary/30 text-xs md:text-sm px-3 md:px-4"
+                    >
+                      {t('common.next')}
+                    </Button>
+                  }
+                />
+              </div>
+            ) : activeTab === 'ppt_renovation' ? (
               /* PPT 翻新：文件上传区 */
               <div className="space-y-4">
                 <div
@@ -994,22 +1432,31 @@ export const Home: React.FC = () => {
                   className="hidden"
                 />
 
-                {/* 保留布局 toggle */}
-                <div className="flex items-center justify-between">
-                  <label className="flex items-center gap-2 cursor-pointer group">
-                    <span className="text-sm text-gray-600 dark:text-foreground-tertiary group-hover:text-gray-900 dark:group-hover:text-white transition-colors">
-                      {t('home.renovation.keepLayout')}
-                    </span>
-                    <div className="relative">
-                      <input
-                        type="checkbox"
-                        checked={keepLayout}
-                        onChange={(e) => setKeepLayout(e.target.checked)}
-                        className="sr-only peer"
-                      />
-                      <div className="w-11 h-6 bg-gray-200 dark:bg-background-hover peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-banana-300 dark:peer-focus:ring-banana/30 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white dark:after:bg-foreground-secondary after:border-gray-300 dark:after:border-border-hover after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-banana"></div>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="mb-2 text-xs font-medium text-gray-500 dark:text-foreground-tertiary">
+                      {t('home.renovation.styleSource')}
+                    </p>
+                    <div className="inline-flex rounded-lg border border-gray-200 bg-white p-1 dark:border-border-primary dark:bg-background-elevated">
+                      {([
+                        ['original', t('home.renovation.reuseOriginalStyle')],
+                        ['template', t('home.renovation.chooseStyleTemplate')],
+                      ] as const).map(([value, label]) => (
+                        <button
+                          key={value}
+                          type="button"
+                          onClick={() => setRenovationStyleSource(value)}
+                          className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                            renovationStyleSource === value
+                              ? 'bg-banana-500 text-black shadow-sm dark:bg-banana'
+                              : 'text-gray-600 hover:bg-gray-100 dark:text-foreground-secondary dark:hover:bg-background-hover'
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
                     </div>
-                  </label>
+                  </div>
                   <Button
                     size="sm"
                     onClick={handleSubmit}
@@ -1022,16 +1469,37 @@ export const Home: React.FC = () => {
                 </div>
               </div>
             ) : (
+            <>
+            {activeTab === 'outline' && (
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={fillOutlineSample}
+                  className="shrink-0"
+                >
+                  {t('home.examples.fillOutline')}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => copyTextToClipboard(t('home.examples.outline'), t('home.messages.outlineCopied'))}
+                  className="shrink-0"
+                >
+                  {t('home.examples.copyOutline')}
+                </Button>
+              </div>
+            )}
             <MarkdownTextarea
               ref={textareaRef}
-              placeholder={tabConfig[activeTab].placeholder}
+              placeholder={currentTabConfig.placeholder}
               value={content}
               onChange={setContent}
               onPaste={handlePaste}
               onFiles={handleImageFiles}
               onDocumentFiles={handleDocumentFiles}
               onSelectFromLibrary={() => setIsMaterialSelectorOpen(true)}
-              rows={activeTab === 'idea' ? 4 : 8}
+              rows={8}
               className="text-sm md:text-base border-2 border-gray-200 dark:border-border-primary dark:bg-background-tertiary dark:text-white focus-within:border-banana-400 dark:focus-within:border-banana transition-colors duration-200"
               toolbarLeft={
                 <div className="flex items-center gap-1">
@@ -1079,7 +1547,6 @@ export const Home: React.FC = () => {
                   onClick={handleSubmit}
                   loading={isSubmitting || isGlobalLoading}
                   disabled={
-                    !content.trim() ||
                     isUploadingImage ||
                     referenceFiles.some(f => f.parse_status === 'pending' || f.parse_status === 'parsing')
                   }
@@ -1091,6 +1558,102 @@ export const Home: React.FC = () => {
                 </Button>
               }
             />
+            {activeTab === 'no_think' && (
+              <div className="mt-4 rounded-xl border border-gray-100 bg-white/60 p-3 dark:border-border-primary dark:bg-background-tertiary/60">
+                <div className="mb-3 flex items-center gap-2">
+                  <Sparkles size={16} className="text-banana-600 dark:text-banana" />
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
+                    NoThink PPT
+                  </h3>
+                </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                  {noThinkSelects.map((field) => (
+                    <label key={field.label} className="block">
+                      <span className="mb-1 block text-xs font-medium text-gray-500 dark:text-foreground-tertiary">
+                        {field.label}
+                      </span>
+                      <select
+                        value={field.value}
+                        onChange={(event) => field.onChange(event.target.value)}
+                        className="h-9 w-full rounded-lg border border-gray-200 bg-white px-2 text-sm text-gray-800 outline-none transition focus:border-banana-400 focus:ring-2 focus:ring-banana-200 dark:border-border-primary dark:bg-background-elevated dark:text-foreground-primary dark:focus:border-banana"
+                      >
+                        {field.options.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ))}
+                  <label className="block sm:col-span-2 lg:col-span-5">
+                    <span className="mb-1 block text-xs font-medium text-gray-500 dark:text-foreground-tertiary">
+                      {t('home.noThink.extraInstruction')}
+                    </span>
+                    <input
+                      type="text"
+                      value={noThinkExtraInstruction}
+                      onChange={(event) => setNoThinkExtraInstruction(event.target.value)}
+                      placeholder={t('home.noThink.extraPlaceholder')}
+                      className="h-9 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-800 outline-none transition placeholder:text-gray-400 focus:border-banana-400 focus:ring-2 focus:ring-banana-200 dark:border-border-primary dark:bg-background-elevated dark:text-foreground-primary dark:placeholder:text-foreground-tertiary dark:focus:border-banana"
+                    />
+                  </label>
+                </div>
+              </div>
+            )}
+            {activeTab === 'outline' && (
+              <div className="mt-4 rounded-xl border border-gray-200 bg-white/70 p-3 dark:border-border-primary dark:bg-background-tertiary/60">
+                <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-800 dark:text-foreground-primary">
+                      {t('home.content.descriptionLabel')}
+                    </label>
+                    <p className="mt-1 text-xs text-gray-500 dark:text-foreground-tertiary">
+                      {t('home.content.descriptionHint')}
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => handleSubmit({ generateDescriptionsFromOutline: true })}
+                    loading={isSubmitting || isGlobalLoading}
+                    disabled={
+                      isUploadingImage ||
+                      referenceFiles.some(f => f.parse_status === 'pending' || f.parse_status === 'parsing')
+                    }
+                    className="shrink-0 text-xs md:text-sm"
+                  >
+                    {t('home.content.generateDescriptions')}
+                  </Button>
+                </div>
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={fillDescriptionSample}
+                    className="shrink-0"
+                  >
+                    {t('home.examples.fillDescription')}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => copyTextToClipboard(t('home.examples.description'), t('home.messages.descriptionCopied'))}
+                    className="shrink-0"
+                  >
+                    {t('home.examples.copyDescription')}
+                  </Button>
+                </div>
+                <textarea
+                  value={pageDescriptions}
+                  onChange={(event) => setPageDescriptions(event.target.value)}
+                  onPaste={handlePaste}
+                  placeholder={t('home.content.descriptionPlaceholder')}
+                  rows={6}
+                  className="w-full resize-y rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm leading-relaxed text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-banana-400 focus:ring-2 focus:ring-banana-200 dark:border-border-primary dark:bg-background-elevated dark:text-white dark:focus:border-banana"
+                />
+              </div>
+            )}
+            </>
             )}
           </div>
 
@@ -1115,56 +1678,64 @@ export const Home: React.FC = () => {
           />
 
           {/* 模板选择 */}
-          <div className="mb-6 md:mb-8 pt-4 border-t border-gray-100 dark:border-border-primary">
-            <div className="flex items-center justify-between mb-3 md:mb-4">
-              <div className="flex items-center gap-2">
-                <Palette size={18} className="text-orange-600 dark:text-banana flex-shrink-0" />
-                <h3 className="text-base md:text-lg font-semibold text-gray-900 dark:text-white">
-                  {t('home.template.title')}
-                </h3>
-              </div>
-              {/* 无模板图模式开关 */}
-              <label className="flex items-center gap-2 cursor-pointer group">
-                <span className="text-sm text-gray-600 dark:text-foreground-tertiary group-hover:text-gray-900 dark:group-hover:text-white transition-colors">
-                  {t('home.template.useTextStyle')}
-                </span>
-                <div className="relative">
-                  <input
-                    type="checkbox"
-                    checked={useTemplateStyle}
-                    onChange={(e) => {
-                      setUseTemplateStyle(e.target.checked);
-                      // 切换到无模板图模式时，清空模板选择
-                      if (e.target.checked) {
-                        setSelectedTemplate(null);
-                        setSelectedTemplateId(null);
-                        setSelectedPresetTemplateId(null);
-                      }
-                      // 不再清空风格描述，允许用户保留已输入的内容
-                    }}
-                    className="sr-only peer"
-                  />
-                  <div className="w-11 h-6 bg-gray-200 dark:bg-background-hover peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-banana-300 dark:peer-focus:ring-banana/30 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white dark:after:bg-foreground-secondary after:border-gray-300 dark:after:border-border-hover after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-banana"></div>
+          {(
+            (activeTab !== 'ppt_renovation' && activeTab !== 'ppt_to_ppt') ||
+            (activeTab === 'ppt_renovation' && renovationStyleSource === 'template') ||
+            (activeTab === 'ppt_to_ppt' && pptToPptStyleSource === 'template')
+          ) && (
+            <div className="mb-6 md:mb-8 pt-4 border-t border-gray-100 dark:border-border-primary">
+              <div className="flex items-center justify-between mb-3 md:mb-4">
+                <div className="flex items-center gap-2">
+                  <Palette size={18} className="text-orange-600 dark:text-banana flex-shrink-0" />
+                  <h3 className="text-base md:text-lg font-semibold text-gray-900 dark:text-white">
+                    {t('home.template.title')}
+                  </h3>
                 </div>
-              </label>
+                {/* 无模板图模式开关 */}
+                <label className="flex items-center gap-2 cursor-pointer group">
+                  <span className="text-sm text-gray-600 dark:text-foreground-tertiary group-hover:text-gray-900 dark:group-hover:text-white transition-colors">
+                    {t('home.template.useTextStyle')}
+                  </span>
+                  <div className="relative">
+                    <input
+                      type="checkbox"
+                      checked={useTemplateStyle}
+                      onChange={(e) => {
+                        setUseTemplateStyle(e.target.checked);
+                        // 切换到无模板图模式时，清空模板选择
+                        if (e.target.checked) {
+                          setSelectedTemplate(null);
+                          setSelectedTemplateId(null);
+                          setSelectedPresetTemplateId(null);
+                        }
+                        // 不再清空风格描述，允许用户保留已输入的内容
+                      }}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-gray-200 dark:bg-background-hover peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-banana-300 dark:peer-focus:ring-banana/30 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white dark:after:bg-foreground-secondary after:border-gray-300 dark:after:border-border-hover after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-banana"></div>
+                  </div>
+                </label>
+              </div>
+              
+              {/* 根据模式显示不同的内容 */}
+              {useTemplateStyle ? (
+                <TextStyleSelector
+                  value={templateStyle}
+                  onChange={setTemplateStyle}
+                  onToast={show}
+                />
+              ) : (
+                <TemplateSelector
+                  onSelect={handleTemplateSelect}
+                  selectedTemplateId={selectedTemplateId}
+                  selectedPresetTemplateId={selectedPresetTemplateId}
+                  showUpload={true} // 在主页上传的模板保存到用户模板库
+                  projectId={currentProjectId}
+                />
+              )}
             </div>
-            
-            {/* 根据模式显示不同的内容 */}
-            {useTemplateStyle ? (
-              <TextStyleSelector
-                value={templateStyle}
-                onChange={setTemplateStyle}
-                onToast={show}
-              />
-            ) : (
-              <TemplateSelector
-                onSelect={handleTemplateSelect}
-                selectedTemplateId={selectedTemplateId}
-                selectedPresetTemplateId={selectedPresetTemplateId}
-                showUpload={true} // 在主页上传的模板保存到用户模板库
-                projectId={currentProjectId}
-              />
-            )}
+          )}
+            </div>
           </div>
 
         </Card>
@@ -1200,11 +1771,6 @@ export const Home: React.FC = () => {
       />
       
       <FilePreviewModal fileId={previewFileId} onClose={() => setPreviewFileId(null)} />
-      {/* 帮助模态框 */}
-      <HelpModal
-        isOpen={isHelpModalOpen}
-        onClose={() => setIsHelpModalOpen(false)}
-      />
       {/* Footer */}
       <Footer />
     </div>

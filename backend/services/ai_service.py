@@ -142,6 +142,17 @@ class AIService:
             如果启用图像推理则返回配置的 budget，否则返回 0
         """
         return self.image_thinking_budget if self.enable_image_reasoning else 0
+
+    def generate_text(self, prompt: str, thinking_budget: int = 0) -> str:
+        """
+        Generate plain text through the configured text provider.
+
+        Some higher-level services only need raw text instead of AIService's
+        JSON helpers. Keep this small adapter here so those services do not
+        need to know about provider internals.
+        """
+        actual_budget = self._get_text_thinking_budget()
+        return self.text_provider.generate_text(prompt, thinking_budget=actual_budget)
     
     @staticmethod
     def extract_image_urls_from_markdown(text: str) -> List[str]:
@@ -755,7 +766,8 @@ class AIService:
                             extra_requirements: Optional[str] = None,
                             language='zh',
                             has_template: bool = True,
-                            aspect_ratio: str = "16:9") -> str:
+                            aspect_ratio: str = "16:9",
+                            visual_guidance: Optional[Dict] = None) -> str:
         """
         Generate image generation prompt for a page
         Based on demo.py gen_prompts()
@@ -794,7 +806,8 @@ class AIService:
             language=language,
             has_template=has_template,
             page_index=page_index,
-            aspect_ratio=aspect_ratio
+            aspect_ratio=aspect_ratio,
+            visual_guidance=visual_guidance,
         )
         
         return prompt
@@ -1087,4 +1100,3 @@ class AIService:
     def extract_style_description(self, image_path: str) -> str:
         """从图片中提取风格描述"""
         return self._generate_text_from_image(get_style_extraction_prompt(), image_path)
-

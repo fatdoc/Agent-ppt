@@ -279,13 +279,14 @@ class HybridElementExtractor(ElementExtractor):
         merged_elements = self._merge_results(mineru_elements, baidu_elements, depth)
         logger.info(f"{indent}  合并后共 {len(merged_elements)} 个元素")
 
-        # 合并错误信息
+        # 合并错误信息。Hybrid 模式允许其中一个提取器失败后用另一个结果继续；
+        # 只有两边都失败或没有任何可用元素时，才把结果标记为错误。
         errors = []
         if mineru_result.has_error:
             errors.append(f"MinerU: {mineru_result.error}")
         if baidu_result.has_error:
             errors.append(f"百度OCR: {baidu_result.error}")
-        combined_error = "; ".join(errors) if errors else None
+        combined_error = "; ".join(errors) if errors and not merged_elements else None
 
         # 合并上下文
         context = ExtractionContext(
@@ -297,6 +298,7 @@ class HybridElementExtractor(ElementExtractor):
                 'merged_count': len(merged_elements),
                 'mineru_error': mineru_result.error,
                 'baidu_error': baidu_result.error,
+                'partial_errors': errors,
                 **mineru_result.context.metadata
             }
         )
@@ -485,4 +487,3 @@ def create_hybrid_extractor(
         contain_threshold=contain_threshold,
         intersection_threshold=intersection_threshold
     )
-

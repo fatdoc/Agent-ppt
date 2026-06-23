@@ -7,7 +7,7 @@ import PresetCapsules from '@/components/shared/PresetCapsules';
 // 组件内翻译
 const outlineI18n = {
   zh: {
-    home: { title: '蕉幻' },
+    home: { title: '启发' },
     outline: {
       title: "编辑大纲", pageCount: "共 {{count}} 页", addPage: "添加页面",
       generateDescriptions: "生成描述", generating: "生成中...", chapter: "章节",
@@ -472,9 +472,9 @@ export const OutlineEditor: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-background-primary flex flex-col">
+    <div className="app-surface min-h-screen dark:bg-background-primary flex flex-col">
       {/* 顶栏 */}
-      <header className="bg-white dark:bg-background-secondary shadow-sm dark:shadow-background-primary/30 border-b border-gray-200 dark:border-border-primary px-3 md:px-6 py-2 md:py-3 flex-shrink-0">
+      <header className="app-chrome border-b px-3 md:px-6 py-2 md:py-3 flex-shrink-0">
         <div className="flex items-center justify-between gap-2 md:gap-4">
           {/* 左侧：Logo 和标题 */}
           <div className="flex items-center gap-2 md:gap-4 flex-shrink-0">
@@ -486,7 +486,7 @@ export const OutlineEditor: React.FC = () => {
                 if (fromHistory) {
                   navigate('/history');
                 } else {
-                  navigate('/');
+                  navigate('/app');
                 }
               }}
               className="flex-shrink-0"
@@ -494,8 +494,8 @@ export const OutlineEditor: React.FC = () => {
               <span className="hidden sm:inline">{t('common.back')}</span>
             </Button>
             <div className="flex items-center gap-1.5 md:gap-2">
-              <span className="text-xl md:text-2xl">🍌</span>
-              <span className="text-base md:text-xl font-bold">{t('home.title')}</span>
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#121212] text-sm font-black text-[#AFFF00]">启</span>
+              <span className="brand-wordmark text-base md:text-xl font-black">{t('home.title')}</span>
             </div>
             <span className="text-gray-400 hidden lg:inline">|</span>
             <span className="text-sm md:text-lg font-semibold hidden lg:inline">{t('outline.title')}</span>

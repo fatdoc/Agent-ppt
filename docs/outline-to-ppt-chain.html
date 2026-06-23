@@ -1,0 +1,961 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>从大纲生成 PPT 链路介绍</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --paper: #fbfaf6;
+      --ink: #182026;
+      --muted: #607078;
+      --line: #d8ded8;
+      --panel: #ffffff;
+      --panel-soft: #f3f6f1;
+      --green: #20885f;
+      --blue: #1d69a6;
+      --amber: #b67922;
+      --red: #b44d43;
+      --shadow: 0 18px 46px rgba(24, 32, 38, 0.1);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      font-family: Inter, "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+      color: var(--ink);
+      background:
+        linear-gradient(90deg, rgba(216, 222, 216, 0.55) 1px, transparent 1px),
+        linear-gradient(0deg, rgba(216, 222, 216, 0.55) 1px, transparent 1px),
+        var(--paper);
+      background-size: 34px 34px;
+      letter-spacing: 0;
+    }
+
+    button,
+    textarea {
+      font: inherit;
+    }
+
+    code {
+      padding: 2px 5px;
+      border-radius: 5px;
+      background: rgba(24, 32, 38, 0.07);
+      color: #0f3e62;
+      font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+      font-size: 0.92em;
+    }
+
+    .hero {
+      position: relative;
+      min-height: 520px;
+      overflow: hidden;
+      color: white;
+      background:
+        linear-gradient(120deg, rgba(13, 33, 38, 0.92), rgba(17, 56, 66, 0.8)),
+        url("../assets/video_export.png") center / cover;
+    }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        linear-gradient(90deg, rgba(10, 20, 24, 0.88) 0%, rgba(10, 20, 24, 0.7) 42%, rgba(10, 20, 24, 0.18) 100%),
+        linear-gradient(0deg, rgba(10, 20, 24, 0.65), transparent 36%);
+    }
+
+    .hero-inner {
+      position: relative;
+      z-index: 1;
+      width: min(1180px, calc(100% - 40px));
+      margin: 0 auto;
+      padding: 72px 0 96px;
+    }
+
+    .eyebrow {
+      margin: 0 0 18px;
+      color: rgba(255, 255, 255, 0.72);
+      font-size: 14px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      max-width: 920px;
+      margin: 0;
+      font-size: clamp(42px, 8vw, 92px);
+      line-height: 0.98;
+      letter-spacing: 0;
+    }
+
+    .hero-copy {
+      max-width: 690px;
+      margin: 24px 0 0;
+      color: rgba(255, 255, 255, 0.8);
+      font-size: clamp(16px, 2vw, 20px);
+      line-height: 1.75;
+    }
+
+    .hero-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 32px;
+    }
+
+    .hero-actions a {
+      display: inline-flex;
+      align-items: center;
+      min-height: 42px;
+      padding: 10px 15px;
+      border: 1px solid rgba(255, 255, 255, 0.22);
+      border-radius: 8px;
+      color: white;
+      background: rgba(255, 255, 255, 0.09);
+      text-decoration: none;
+      transition: transform 180ms ease, background 180ms ease;
+    }
+
+    .hero-actions a:hover {
+      transform: translateY(-2px);
+      background: rgba(255, 255, 255, 0.16);
+    }
+
+    main {
+      width: min(1280px, calc(100% - 40px));
+      margin: -54px auto 0;
+      padding-bottom: 70px;
+      position: relative;
+      z-index: 2;
+    }
+
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .metric {
+      min-height: 132px;
+      padding: 18px;
+      border: 1px solid rgba(216, 222, 216, 0.92);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.94);
+      box-shadow: var(--shadow);
+    }
+
+    .metric strong {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 18px;
+    }
+
+    .metric p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.6;
+      font-size: 14px;
+    }
+
+    .section-title {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 18px;
+      margin: 44px 0 18px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    h2 {
+      margin: 0;
+      font-size: clamp(24px, 3vw, 36px);
+      letter-spacing: 0;
+    }
+
+    .section-title p {
+      max-width: 640px;
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.7;
+    }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: 360px minmax(0, 1fr);
+      gap: 18px;
+      align-items: start;
+    }
+
+    .form-panel,
+    .flow-panel,
+    .fishbone,
+    .table-wrap,
+    .output-grid article {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.95);
+      box-shadow: 0 12px 32px rgba(24, 32, 38, 0.06);
+    }
+
+    .form-panel {
+      position: sticky;
+      top: 16px;
+      padding: 18px;
+    }
+
+    .step-tabs {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+
+    .step-tab {
+      min-height: 42px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      color: var(--muted);
+      cursor: pointer;
+      transition: border-color 160ms ease, color 160ms ease, background 160ms ease;
+    }
+
+    .step-tab.active {
+      border-color: #17373c;
+      color: #fff;
+      background: #17373c;
+    }
+
+    .form-step {
+      display: none;
+      animation: lift 280ms ease both;
+    }
+
+    .form-step.active {
+      display: block;
+    }
+
+    @keyframes lift {
+      from {
+        opacity: 0;
+        transform: translateY(8px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .field-label {
+      display: block;
+      margin: 0 0 8px;
+      font-size: 13px;
+      font-weight: 800;
+      color: var(--muted);
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 184px;
+      resize: vertical;
+      padding: 13px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      outline: none;
+      line-height: 1.6;
+      background: #fff;
+      color: var(--ink);
+    }
+
+    textarea:focus {
+      border-color: var(--green);
+      box-shadow: 0 0 0 3px rgba(32, 136, 95, 0.12);
+    }
+
+    .option-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .option {
+      min-height: 78px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel-soft);
+    }
+
+    .option strong {
+      display: block;
+      margin-bottom: 5px;
+    }
+
+    .option span {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .primary-btn {
+      width: 100%;
+      min-height: 44px;
+      margin-top: 14px;
+      border: 0;
+      border-radius: 8px;
+      color: white;
+      background: #17373c;
+      cursor: pointer;
+      transition: transform 160ms ease, background 160ms ease;
+    }
+
+    .primary-btn:hover {
+      transform: translateY(-1px);
+      background: #20535a;
+    }
+
+    .flow-panel {
+      padding: 20px;
+    }
+
+    .rail {
+      position: relative;
+      display: grid;
+      gap: 12px;
+      padding-left: 28px;
+    }
+
+    .rail::before {
+      content: "";
+      position: absolute;
+      top: 24px;
+      bottom: 24px;
+      left: 10px;
+      width: 2px;
+      background: linear-gradient(var(--green), var(--blue), var(--amber));
+    }
+
+    .flow-step {
+      position: relative;
+      display: grid;
+      grid-template-columns: 122px minmax(0, 1fr);
+      gap: 14px;
+      padding: 16px;
+      border: 1px solid rgba(216, 222, 216, 0.84);
+      border-radius: 8px;
+      background: #fff;
+      transition: transform 180ms ease, border-color 180ms ease;
+    }
+
+    .flow-step::before {
+      content: attr(data-no);
+      position: absolute;
+      left: -28px;
+      top: 18px;
+      display: grid;
+      place-items: center;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      color: white;
+      background: #17373c;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .flow-step:hover {
+      transform: translateX(3px);
+      border-color: #9fb0a7;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      width: fit-content;
+      min-height: 28px;
+      padding: 5px 9px;
+      border-radius: 999px;
+      color: white;
+      background: var(--green);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .tag.blue {
+      background: var(--blue);
+    }
+
+    .tag.amber {
+      background: var(--amber);
+    }
+
+    .tag.red {
+      background: var(--red);
+    }
+
+    .flow-step h3 {
+      margin: 0 0 8px;
+      font-size: 18px;
+      letter-spacing: 0;
+    }
+
+    .flow-step p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.65;
+    }
+
+    .method-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .method {
+      padding: 18px;
+      border-left: 3px solid var(--green);
+      background: #fff;
+      border-radius: 0 8px 8px 0;
+      box-shadow: 0 10px 28px rgba(24, 32, 38, 0.05);
+    }
+
+    .method:nth-child(2) {
+      border-color: var(--blue);
+    }
+
+    .method:nth-child(3) {
+      border-color: var(--amber);
+    }
+
+    .method h3 {
+      margin: 0 0 10px;
+      font-size: 18px;
+    }
+
+    .method p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.65;
+    }
+
+    .fishbone {
+      padding: 18px;
+      overflow-x: auto;
+    }
+
+    .fishbone svg {
+      width: 100%;
+      min-width: 920px;
+      height: auto;
+      display: block;
+    }
+
+    .fish-label {
+      font: 700 15px Inter, "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+      fill: var(--ink);
+    }
+
+    .fish-small {
+      font: 13px Inter, "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+      fill: var(--muted);
+    }
+
+    .table-wrap {
+      overflow: hidden;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: white;
+    }
+
+    th,
+    td {
+      padding: 15px 14px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+      line-height: 1.55;
+    }
+
+    th {
+      color: #fff;
+      background: #17373c;
+      font-size: 13px;
+    }
+
+    td {
+      color: var(--muted);
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .output-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .output-grid article {
+      min-height: 170px;
+      padding: 18px;
+      overflow: hidden;
+    }
+
+    .output-grid b {
+      display: block;
+      margin-bottom: 10px;
+      font-size: 18px;
+    }
+
+    .output-grid p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.65;
+      font-size: 14px;
+    }
+
+    .mini-preview {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 5px;
+      margin-top: 16px;
+    }
+
+    .mini-preview span {
+      aspect-ratio: 16 / 10;
+      border-radius: 5px;
+      background: linear-gradient(135deg, rgba(32, 136, 95, 0.2), rgba(29, 105, 166, 0.26));
+    }
+
+    .note {
+      margin-top: 18px;
+      padding: 14px 16px;
+      border-left: 3px solid var(--green);
+      background: rgba(32, 136, 95, 0.08);
+      color: #2e5650;
+      line-height: 1.7;
+    }
+
+    @media (max-width: 980px) {
+      .summary,
+      .method-grid,
+      .output-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .workspace {
+        grid-template-columns: 1fr;
+      }
+
+      .form-panel {
+        position: static;
+      }
+    }
+
+    @media (max-width: 680px) {
+      .hero {
+        min-height: 560px;
+      }
+
+      .hero-inner {
+        padding-top: 52px;
+      }
+
+      main {
+        width: min(100% - 28px, 1280px);
+      }
+
+      .summary,
+      .method-grid,
+      .output-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .section-title {
+        display: block;
+      }
+
+      .section-title p {
+        margin-top: 10px;
+      }
+
+      .flow-step {
+        grid-template-columns: 1fr;
+      }
+
+      .option-row {
+        grid-template-columns: 1fr;
+      }
+
+      th,
+      td {
+        padding: 12px 10px;
+        font-size: 13px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="hero">
+    <div class="hero-inner">
+      <p class="eyebrow">Banana Slides / Outline To PPT</p>
+      <h1>从大纲到 PPT 的生成链路</h1>
+      <p class="hero-copy">这条链路把“已有结构”转成可交付演示稿：先保留用户的大纲意图，再补齐页面描述、视觉提示、图片渲染和导出文件。核心目标是让 AI 不重新猜主题，而是沿着用户给出的结构稳定生产。</p>
+      <nav class="hero-actions" aria-label="页面导航">
+        <a href="#workflow">查看链路</a>
+        <a href="#calls">方法调用</a>
+        <a href="#outputs">结果产出</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="summary" aria-label="链路摘要">
+      <article class="metric">
+        <strong>输入</strong>
+        <p>用户粘贴标题、章节、要点，创建 <code>creation_type=outline</code> 项目。</p>
+      </article>
+      <article class="metric">
+        <strong>解析</strong>
+        <p>优先本地解析大纲；复杂格式再交给 AI 解析为结构化页面。</p>
+      </article>
+      <article class="metric">
+        <strong>生成</strong>
+        <p>逐页生成描述，再调用图像模型渲染每一页幻灯片画面。</p>
+      </article>
+      <article class="metric">
+        <strong>交付</strong>
+        <p>输出图片型 PPTX、可编辑 PPTX、PDF、图片包等下载结果。</p>
+      </article>
+    </section>
+
+    <section id="workflow">
+      <div class="section-title">
+        <h2>步进表单与主链路</h2>
+        <p>左侧模拟用户侧的三步表单，右侧对应后端实际生产链路。大纲入口的关键是“结构先行”，后面的描述、图片和导出都围绕结构展开。</p>
+      </div>
+
+      <div class="workspace">
+        <aside class="form-panel" aria-label="步进表单示意">
+          <div class="step-tabs" role="tablist">
+            <button class="step-tab active" type="button" data-step="1">1 输入</button>
+            <button class="step-tab" type="button" data-step="2">2 配置</button>
+            <button class="step-tab" type="button" data-step="3">3 生成</button>
+          </div>
+
+          <div class="form-step active" data-panel="1">
+            <label class="field-label" for="outline-text">大纲文本</label>
+            <textarea id="outline-text">Slide 1: 企业 AI 落地路径
+- 背景与目标
+- 核心挑战
+
+Slide 2: 场景筛选
+- 价值优先级
+- 数据可得性
+- 风险边界</textarea>
+            <button class="primary-btn" type="button" data-next="2">下一步：选择生成约束</button>
+          </div>
+
+          <div class="form-step" data-panel="2">
+            <span class="field-label">生成配置</span>
+            <div class="option-row">
+              <div class="option">
+                <strong>比例</strong>
+                <span>默认 16:9，也可根据项目改成 4:3、21:9、1:1 或 9:16。</span>
+              </div>
+              <div class="option">
+                <strong>风格</strong>
+                <span>模板图、文本风格或自定义样式作为视觉参考。</span>
+              </div>
+              <div class="option">
+                <strong>语言</strong>
+                <span>传入 <code>zh</code>、<code>en</code>、<code>ja</code> 或自动识别。</span>
+              </div>
+              <div class="option">
+                <strong>材料</strong>
+                <span>参考文件解析后进入上下文，辅助描述生成。</span>
+              </div>
+            </div>
+            <button class="primary-btn" type="button" data-next="3">下一步：开始生成</button>
+          </div>
+
+          <div class="form-step" data-panel="3">
+            <span class="field-label">提交动作</span>
+            <div class="option">
+              <strong><code>POST /api/projects</code></strong>
+              <span>创建项目并保存 <code>outline_text</code>。</span>
+            </div>
+            <div class="option" style="margin-top: 10px;">
+              <strong><code>POST /generate/outline</code></strong>
+              <span>解析结构化页面，进入大纲编辑器。</span>
+            </div>
+            <button class="primary-btn" type="button" data-next="1">回到输入示例</button>
+          </div>
+        </aside>
+
+        <div class="flow-panel">
+          <div class="rail">
+            <article class="flow-step" data-no="1">
+              <span class="tag">Input</span>
+              <div>
+                <h3>创建项目，锁定入口类型</h3>
+                <p>前端提交 <code>creation_type: "outline"</code>、<code>outline_text</code>、比例、模板风格。后端创建 <code>Project</code>，初始状态为 <code>DRAFT</code>。</p>
+              </div>
+            </article>
+
+            <article class="flow-step" data-no="2">
+              <span class="tag">Outline</span>
+              <div>
+                <h3>大纲解析为页面结构</h3>
+                <p><code>InputGenerationService.build_outline()</code> 对 outline 入口先尝试本地解析；无法稳定拆分时调用 <code>AIService.parse_outline_text()</code>，得到页面标题、要点和章节。</p>
+              </div>
+            </article>
+
+            <article class="flow-step" data-no="3">
+              <span class="tag blue">Page</span>
+              <div>
+                <h3>保存页面草稿并支持编辑</h3>
+                <p><code>save_pages()</code> 按页面顺序写入 <code>Page.outline_content</code>。用户可在大纲编辑器里增删、拖拽、改标题和要点。</p>
+              </div>
+            </article>
+
+            <article class="flow-step" data-no="4">
+              <span class="tag blue">Description</span>
+              <div>
+                <h3>逐页补全画面描述</h3>
+                <p>确认大纲后调用 <code>POST /generate/descriptions</code>。任务层并发调用 <code>AIService.generate_page_description()</code>，把内容结构转成可渲染的页面描述。</p>
+              </div>
+            </article>
+
+            <article class="flow-step" data-no="5">
+              <span class="tag amber">Render</span>
+              <div>
+                <h3>基于描述生成幻灯片图片</h3>
+                <p><code>POST /generate/images</code> 创建异步任务，组合页面描述、模板风格、比例和视觉约束，调用图像模型生成每页成图。</p>
+              </div>
+            </article>
+
+            <article class="flow-step" data-no="6">
+              <span class="tag red">Export</span>
+              <div>
+                <h3>导出可交付文件</h3>
+                <p><code>ExportService</code> 将生成图片写入 PPTX/PDF；可编辑导出会进一步做版面元素提取和背景修复，生成可编辑 PPTX。</p>
+              </div>
+            </article>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-title">
+        <h2>思路拆解</h2>
+        <p>这条链路不是“一步到位生成 PPT”，而是分层生产：结构层、表达层、视觉层、交付层各自负责一个稳定目标。</p>
+      </div>
+
+      <div class="method-grid">
+        <article class="method">
+          <h3>先结构，后创作</h3>
+          <p>大纲入口意味着用户已经给出叙事顺序。系统只把它标准化，不主动改写核心逻辑，避免跑题。</p>
+        </article>
+        <article class="method">
+          <h3>每页独立扩写</h3>
+          <p>大纲拆成页面后逐页生成描述，既能并发提速，也便于单页重试、编辑和状态追踪。</p>
+        </article>
+        <article class="method">
+          <h3>图像与导出解耦</h3>
+          <p>图片生成完成后才进入导出层，同一批页面可复用到 PPTX、PDF、图片包和可编辑 PPTX。</p>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-title">
+        <h2>鱼骨图：影响结果质量的关键因素</h2>
+        <p>鱼头是最终 PPT 质量，鱼骨展示从输入到导出的主要影响项，方便做评审或对外介绍。</p>
+      </div>
+
+      <div class="fishbone" aria-label="鱼骨图">
+        <svg viewBox="0 0 1180 430" role="img">
+          <title>从大纲生成 PPT 质量鱼骨图</title>
+          <defs>
+            <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+              <path d="M0,0 L0,6 L9,3 z" fill="#17373c"></path>
+            </marker>
+          </defs>
+          <line x1="105" y1="220" x2="990" y2="220" stroke="#17373c" stroke-width="5" marker-end="url(#arrow)"></line>
+          <path d="M990 180 L1120 220 L990 260 Z" fill="#f3f6f1" stroke="#17373c" stroke-width="3"></path>
+          <circle cx="1074" cy="218" r="7" fill="#17373c"></circle>
+          <text x="1008" y="166" class="fish-label">高质量 PPT</text>
+          <text x="1004" y="284" class="fish-small">结构准、画面稳、可导出</text>
+
+          <line x1="250" y1="220" x2="170" y2="105" stroke="#20885f" stroke-width="3"></line>
+          <text x="92" y="72" class="fish-label">大纲输入</text>
+          <text x="72" y="96" class="fish-small">标题、要点、章节层级</text>
+          <line x1="178" y1="115" x2="122" y2="125" stroke="#20885f" stroke-width="2"></line>
+          <line x1="192" y1="135" x2="136" y2="154" stroke="#20885f" stroke-width="2"></line>
+
+          <line x1="390" y1="220" x2="330" y2="88" stroke="#1d69a6" stroke-width="3"></line>
+          <text x="276" y="52" class="fish-label">解析策略</text>
+          <text x="244" y="76" class="fish-small">本地解析优先，AI 兜底</text>
+          <line x1="337" y1="103" x2="284" y2="109" stroke="#1d69a6" stroke-width="2"></line>
+          <line x1="348" y1="130" x2="294" y2="146" stroke="#1d69a6" stroke-width="2"></line>
+
+          <line x1="540" y1="220" x2="494" y2="92" stroke="#b67922" stroke-width="3"></line>
+          <text x="448" y="56" class="fish-label">页面描述</text>
+          <text x="404" y="80" class="fish-small">内容、布局、视觉提示</text>
+          <line x1="502" y1="113" x2="450" y2="122" stroke="#b67922" stroke-width="2"></line>
+          <line x1="513" y1="144" x2="460" y2="164" stroke="#b67922" stroke-width="2"></line>
+
+          <line x1="690" y1="220" x2="650" y2="92" stroke="#b44d43" stroke-width="3"></line>
+          <text x="610" y="56" class="fish-label">视觉渲染</text>
+          <text x="568" y="80" class="fish-small">模板、比例、图像模型</text>
+          <line x1="657" y1="112" x2="604" y2="120" stroke="#b44d43" stroke-width="2"></line>
+          <line x1="666" y1="145" x2="616" y2="164" stroke="#b44d43" stroke-width="2"></line>
+
+          <line x1="360" y1="220" x2="300" y2="340" stroke="#20885f" stroke-width="3"></line>
+          <text x="222" y="370" class="fish-label">用户编辑</text>
+          <text x="180" y="394" class="fish-small">大纲卡片、拖拽、重排</text>
+          <line x1="307" y1="327" x2="252" y2="314" stroke="#20885f" stroke-width="2"></line>
+          <line x1="321" y1="300" x2="268" y2="280" stroke="#20885f" stroke-width="2"></line>
+
+          <line x1="590" y1="220" x2="548" y2="350" stroke="#1d69a6" stroke-width="3"></line>
+          <text x="492" y="376" class="fish-label">任务调度</text>
+          <text x="444" y="400" class="fish-small">并发、轮询、失败重试</text>
+          <line x1="555" y1="330" x2="505" y2="316" stroke="#1d69a6" stroke-width="2"></line>
+          <line x1="566" y1="300" x2="520" y2="278" stroke="#1d69a6" stroke-width="2"></line>
+
+          <line x1="790" y1="220" x2="760" y2="348" stroke="#b67922" stroke-width="3"></line>
+          <text x="702" y="376" class="fish-label">导出能力</text>
+          <text x="648" y="400" class="fish-small">PPTX、PDF、可编辑版本</text>
+          <line x1="764" y1="328" x2="716" y2="312" stroke="#b67922" stroke-width="2"></line>
+          <line x1="772" y1="300" x2="728" y2="276" stroke="#b67922" stroke-width="2"></line>
+        </svg>
+      </div>
+    </section>
+
+    <section id="calls">
+      <div class="section-title">
+        <h2>方法调用清单</h2>
+        <p>下面把前端动作、接口、核心方法和中间产物放在一张表里，适合放进技术方案或评审材料。</p>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>阶段</th>
+              <th>接口/动作</th>
+              <th>核心方法</th>
+              <th>产物/状态</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>创建项目</td>
+              <td><code>POST /api/projects</code></td>
+              <td><code>project_controller.create_project()</code></td>
+              <td>项目 ID、<code>outline_text</code>、<code>DRAFT</code></td>
+            </tr>
+            <tr>
+              <td>解析大纲</td>
+              <td><code>POST /api/projects/{id}/generate/outline</code></td>
+              <td><code>InputGenerationService.build_outline()</code><br><code>AIService.parse_outline_text()</code></td>
+              <td>结构化 <code>outline_content</code>、页面草稿</td>
+            </tr>
+            <tr>
+              <td>保存页面</td>
+              <td>大纲生成后自动写库</td>
+              <td><code>InputGenerationService.save_pages()</code></td>
+              <td><code>Page</code> 列表、<code>OUTLINE_GENERATED</code></td>
+            </tr>
+            <tr>
+              <td>生成描述</td>
+              <td><code>POST /api/projects/{id}/generate/descriptions</code></td>
+              <td><code>generate_descriptions_task()</code><br><code>AIService.generate_page_description()</code></td>
+              <td>逐页 <code>description_content</code>、<code>DESCRIPTIONS_GENERATED</code></td>
+            </tr>
+            <tr>
+              <td>生成图片</td>
+              <td><code>POST /api/projects/{id}/generate/images</code></td>
+              <td><code>generate_images_task()</code><br><code>AIService.generate_image()</code></td>
+              <td>每页图片路径、预览图、版本信息</td>
+            </tr>
+            <tr>
+              <td>导出文件</td>
+              <td><code>GET /export/pptx</code><br><code>GET /export/pdf</code><br><code>POST /export/editable-pptx</code></td>
+              <td><code>ExportService.create_pptx_from_images()</code><br><code>create_editable_pptx_with_recursive_analysis()</code></td>
+              <td>下载链接、PPTX/PDF/可编辑 PPTX</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="outputs">
+      <div class="section-title">
+        <h2>结果产出</h2>
+        <p>面向用户展示的是 PPT 文件，系统内部同时保留多个中间层，方便继续编辑、重试和多格式导出。</p>
+      </div>
+
+      <div class="output-grid">
+        <article>
+          <b>结构化大纲</b>
+          <p>每页包含标题、要点和章节信息，是后续描述、图片和导出的共同索引。</p>
+          <div class="mini-preview"><span></span><span></span><span></span></div>
+        </article>
+        <article>
+          <b>页面描述</b>
+          <p>把内容转成画面说明，包含布局、视觉风格、图表表达和文本约束。</p>
+          <div class="mini-preview"><span></span><span></span><span></span></div>
+        </article>
+        <article>
+          <b>幻灯片图片</b>
+          <p>每页生成一张可预览、可重试、可版本化的图片，作为导出的基础素材。</p>
+          <div class="mini-preview"><span></span><span></span><span></span></div>
+        </article>
+        <article>
+          <b>交付文件</b>
+          <p>输出图片型 PPTX、PDF、图片包；需要二次编辑时可导出可编辑 PPTX。</p>
+          <div class="mini-preview"><span></span><span></span><span></span></div>
+        </article>
+      </div>
+
+      <p class="note">一句话总结：从大纲生成 PPT 的本质是“用户给结构，系统补表达，模型出画面，导出层交付文件”。这样既保留人工构思，又利用 AI 完成高成本的页面设计与批量生产。</p>
+    </section>
+  </main>
+
+  <script>
+    const tabs = document.querySelectorAll(".step-tab");
+    const panels = document.querySelectorAll(".form-step");
+
+    function showStep(step) {
+      tabs.forEach((tab) => tab.classList.toggle("active", tab.dataset.step === step));
+      panels.forEach((panel) => panel.classList.toggle("active", panel.dataset.panel === step));
+    }
+
+    tabs.forEach((tab) => {
+      tab.addEventListener("click", () => showStep(tab.dataset.step));
+    });
+
+    document.querySelectorAll("[data-next]").forEach((button) => {
+      button.addEventListener("click", () => showStep(button.dataset.next));
+    });
+  </script>
+</body>
+</html>

@@ -13,6 +13,7 @@ class ReferenceFile(db.Model):
     __tablename__ = 'reference_files'
     
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = db.Column(db.String(36), db.ForeignKey('users.id'), nullable=True, index=True)
     project_id = db.Column(db.String(36), db.ForeignKey('projects.id'), nullable=True)  # Can be null for global files
     filename = db.Column(db.String(500), nullable=False)
     file_path = db.Column(db.String(500), nullable=False)  # Path relative to upload folder
@@ -27,6 +28,7 @@ class ReferenceFile(db.Model):
     
     # Relationships
     project = db.relationship('Project', backref='reference_files', foreign_keys=[project_id])
+    user = db.relationship('User', back_populates='reference_files')
     
     def to_dict(self, include_content=True, include_failed_count=False):
         """
@@ -38,6 +40,7 @@ class ReferenceFile(db.Model):
         """
         result = {
             'id': self.id,
+            'user_id': self.user_id,
             'project_id': self.project_id,
             'filename': self.filename,
             'file_size': self.file_size,
@@ -78,4 +81,3 @@ class ReferenceFile(db.Model):
     
     def __repr__(self):
         return f'<ReferenceFile {self.id}: {self.filename} ({self.parse_status})>'
-

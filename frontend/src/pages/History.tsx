@@ -15,7 +15,7 @@ import type { Project } from '@/types';
 // 页面特有翻译 - AI 可以直接看到所有文案
 const historyI18n = {
   zh: {
-    home: { title: '蕉幻', actions: { createProject: '创建新项目' } },
+    home: { title: '启发', actions: { createProject: '创建新项目' } },
     nav: { home: '主页' },
     settings: { language: { label: '界面语言' }, theme: { light: '浅色', dark: '深色' } },
     history: {
@@ -371,22 +371,22 @@ export const History: React.FC = () => {
   }, [handleSaveEdit, handleCancelEdit]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-banana-50 dark:from-background-primary via-white dark:via-background-primary to-gray-50 dark:to-background-primary">
+    <div className="app-surface min-h-screen dark:bg-background-primary">
       {/* 导航栏 */}
-      <nav className="h-14 md:h-16 bg-white dark:bg-background-secondary shadow-sm dark:shadow-background-primary/30 border-b border-gray-100 dark:border-border-primary">
+      <nav className="h-14 md:h-16 app-chrome border-b">
         <div className="max-w-7xl mx-auto px-3 md:px-4 h-full flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 md:w-10 md:h-10 bg-gradient-to-br from-banana-500 to-banana-600 rounded-lg flex items-center justify-center text-xl md:text-2xl">
-              🍌
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#121212] text-sm font-black text-[#AFFF00] md:h-10 md:w-10 md:text-base">
+              启
             </div>
-            <span className="text-lg md:text-xl font-bold text-gray-900 dark:text-foreground-primary">{t('home.title')}</span>
+            <span className="brand-wordmark text-lg md:text-xl font-black text-gray-900 dark:text-foreground-primary">{t('home.title')}</span>
           </div>
           <div className="flex items-center gap-2 md:gap-4">
             <Button
               variant="ghost"
               size="sm"
               icon={<Home size={16} className="md:w-[18px] md:h-[18px]" />}
-              onClick={() => navigate('/')}
+              onClick={() => navigate('/app')}
               className="text-xs md:text-sm"
             >
               {t('nav.home')}
@@ -468,7 +468,7 @@ export const History: React.FC = () => {
             <p className="text-gray-500 dark:text-foreground-tertiary mb-6">
               {t('history.createFirst')}
             </p>
-            <Button variant="primary" onClick={() => navigate('/')}>
+            <Button variant="primary" onClick={() => navigate('/app')}>
               {t('home.actions.createProject')}
             </Button>
           </Card>

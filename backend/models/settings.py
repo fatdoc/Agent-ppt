@@ -1,6 +1,7 @@
 """Settings model"""
 import json
 from datetime import datetime, timezone
+from flask import g, has_request_context
 from . import db
 
 
@@ -10,7 +11,8 @@ class Settings(db.Model):
     """
     __tablename__ = 'settings'
 
-    id = db.Column(db.Integer, primary_key=True, default=1)
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.String(36), db.ForeignKey('users.id'), nullable=True, unique=True, index=True)
     ai_provider_format = db.Column(db.String(20), nullable=True)   # AI提供商格式: openai, gemini (NULL=use .env)
     api_base_url = db.Column(db.String(500), nullable=True)        # API基础URL
     api_key = db.Column(db.String(500), nullable=True)             # API密钥
@@ -22,6 +24,7 @@ class Settings(db.Model):
     # 新增：大模型与 MinerU 相关可视化配置（可在设置页中编辑）
     text_model = db.Column(db.String(100), nullable=True)  # 文本大模型名称（覆盖 Config.TEXT_MODEL）
     image_model = db.Column(db.String(100), nullable=True)  # 图片大模型名称（覆盖 Config.IMAGE_MODEL）
+    mineru_provider = db.Column(db.String(20), nullable=True)  # MinerU 提供方式：cloud/local（NULL=use .env）
     mineru_api_base = db.Column(db.String(255), nullable=True)  # MinerU 服务地址（覆盖 Config.MINERU_API_BASE）
     mineru_token = db.Column(db.String(500), nullable=True)  # MinerU API Token（覆盖 Config.MINERU_TOKEN）
     image_caption_model = db.Column(db.String(100), nullable=True)  # 图片识别模型（覆盖 Config.IMAGE_CAPTION_MODEL）
@@ -74,6 +77,8 @@ class Settings(db.Model):
     created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
+    user = db.relationship('User', back_populates='settings')
+
     def _val(self, attr, defaults):
         """Return DB value, falling back to .env default when None."""
         v = getattr(self, attr)
@@ -116,6 +121,7 @@ class Settings(db.Model):
         image_caption_api_key = self._val('image_caption_api_key', d)
         return {
             'id': self.id,
+            'user_id': self.user_id,
             'ai_provider_format': self._val('ai_provider_format', d),
             'api_base_url': self._val('api_base_url', d),
             'api_key_length': len(api_key) if api_key else 0,
@@ -125,6 +131,7 @@ class Settings(db.Model):
             'max_image_workers': self._val('max_image_workers', d),
             'text_model': self._val('text_model', d),
             'image_model': self._val('image_model', d),
+            'mineru_provider': self._val('mineru_provider', d),
             'mineru_api_base': self._val('mineru_api_base', d),
             'mineru_token_length': len(mineru_token) if mineru_token else 0,
             'image_caption_model': self._val('image_caption_model', d),
@@ -243,6 +250,7 @@ class Settings(db.Model):
             'max_image_workers': Config.MAX_IMAGE_WORKERS,
             'text_model': Config.TEXT_MODEL,
             'image_model': Config.IMAGE_MODEL,
+            'mineru_provider': Config.MINERU_PROVIDER,
             'mineru_api_base': Config.MINERU_API_BASE,
             'mineru_token': Config.MINERU_TOKEN,
             'image_caption_model': Config.IMAGE_CAPTION_MODEL,
@@ -255,18 +263,33 @@ class Settings(db.Model):
         }
 
     @staticmethod
-    def get_settings():
+    def get_settings(user_id=None):
         """
-        Get or create the single settings instance.
+        Get or create settings for a user.
 
         Returns the ORM object as-is from the database.  ``.env``
         defaults for ``None`` fields are merged only at serialisation
         time in ``to_dict()``, so this method has no write side-effects.
         """
-        settings = Settings.query.first()
+        if user_id is None and has_request_context():
+            current_user = getattr(g, 'current_user', None)
+            if current_user is not None:
+                user_id = current_user.id
+
+        if user_id:
+            settings = Settings.query.filter_by(user_id=user_id).first()
+            if settings is None:
+                settings = Settings(user_id=user_id)
+                db.session.add(settings)
+                db.session.commit()
+            return settings
+
+        settings = Settings.query.filter_by(user_id=None).first()
+        if settings is None:
+            settings = Settings.query.first()
 
         if settings is None:
-            settings = Settings(id=1)
+            settings = Settings()
             db.session.add(settings)
             db.session.commit()
 

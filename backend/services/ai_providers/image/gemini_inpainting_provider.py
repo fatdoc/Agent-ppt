@@ -7,6 +7,7 @@ from typing import Optional
 from PIL import Image, ImageDraw
 import numpy as np
 from tenacity import retry, stop_after_attempt, wait_exponential
+from services.prompt_registry import prompt_registry
 from .genai_provider import GenAIImageProvider
 from config import get_config
 
@@ -18,17 +19,7 @@ class GeminiInpaintingProvider:
     
     # DEFAULT_MODEL = "gemini-2.5-flash-image"
     DEFAULT_MODEL = "gemini-3-pro-image-preview"
-    DEFAULT_PROMPT = """\
-你是一个专业的图片前景元素去除专家，以极高的精度进行前景元素的去除工作。
-现在用户向你提供了两张不同的图片：
-1. 原始图片
-2. 使用黑色矩形遮罩标注后的图片，黑色矩形区域表示要移除的前景元素，你只需要处理这些区域。
-
-你需要根据原始图片和黑色遮罩信息，重新绘制黑色遮罩标注的区域，去除前景元素，使得这些区域无缝融入周围的画面，就好像前景元素从来没有出现过。如果一个区域被整体标注，请你将其作为一个整体进行移除，而不是只移除其内部的内容。
-
-禁止遗漏任何一个黑色矩形标注的区域。
-
-"""
+    DEFAULT_PROMPT = prompt_registry.render("inpainting.gemini.default")
     
     def __init__(
         self, 

@@ -166,6 +166,95 @@ describe('initializeProject - reference file association', () => {
     expect(result.current.error).toBeNull()
   })
 
+  it('should create no-think project and immediately generate outline plus descriptions', async () => {
+    const mockGenerateOutline = vi.mocked((await import('@/api/endpoints')).generateOutline)
+    mockGenerateOutline.mockResolvedValue({ data: {} })
+
+    const { result } = renderHook(() => useProjectStore())
+
+    await act(async () => {
+      await result.current.initializeProject(
+        'no_think',
+        'AI 工具入门',
+        undefined,
+        undefined,
+        undefined,
+        '16:9',
+        {
+          scenario: '内部培训',
+          color_tone: '蓝绿色',
+          density: '简洁',
+          page_count: '5页',
+          style_template: '现代商务',
+          extra_instruction: '适合新员工',
+        }
+      )
+    })
+
+    expect(mockCreateProject).toHaveBeenCalledWith(expect.objectContaining({
+      creation_type: 'no_think',
+      idea_prompt: 'AI 工具入门',
+      no_think_options: expect.objectContaining({
+        scenario: '内部培训',
+        page_count: '5页',
+      }),
+    }))
+    expect(mockGenerateOutline).toHaveBeenCalledWith('proj-001')
+  })
+
+  it('should create outline-only content projects and generate outline when page descriptions are empty', async () => {
+    const mockGenerateOutline = vi.mocked((await import('@/api/endpoints')).generateOutline)
+    mockGenerateOutline.mockResolvedValue({ data: {} })
+
+    const { result } = renderHook(() => useProjectStore())
+
+    await act(async () => {
+      await result.current.initializeProject(
+        'outline',
+        '第一页：封面\n第二页：方案',
+        undefined,
+        undefined,
+        undefined,
+        '16:9',
+        undefined,
+        ''
+      )
+    })
+
+    expect(mockCreateProject).toHaveBeenCalledWith(expect.objectContaining({
+      outline_text: '第一页：封面\n第二页：方案',
+    }))
+    expect(mockGenerateOutline).toHaveBeenCalledWith('proj-001')
+    expect(mockGenerateFromDescription).not.toHaveBeenCalled()
+  })
+
+  it('should keep required outline and parse optional page descriptions when provided', async () => {
+    const { result } = renderHook(() => useProjectStore())
+
+    await act(async () => {
+      await result.current.initializeProject(
+        'outline',
+        '第一页：封面\n第二页：方案',
+        undefined,
+        undefined,
+        undefined,
+        '16:9',
+        undefined,
+        '第一页：封面采用大标题居中\n\n第二页：方案采用三栏布局'
+      )
+    })
+
+    expect(mockCreateProject).toHaveBeenCalledWith(expect.objectContaining({
+      creation_type: 'descriptions',
+      outline_text: '第一页：封面\n第二页：方案',
+      description_text: '第一页：封面采用大标题居中\n\n第二页：方案采用三栏布局',
+    }))
+    expect(mockGenerateFromDescription).toHaveBeenCalledWith(
+      'proj-001',
+      '第一页：封面采用大标题居中\n\n第二页：方案采用三栏布局'
+    )
+  })
+
   it('should associate files before uploading template', async () => {
     const templateFile = new File(['dummy'], 'template.png', { type: 'image/png' })
 

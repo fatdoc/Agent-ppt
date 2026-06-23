@@ -38,6 +38,45 @@ _caption_provider_cache: dict = {}
 _cache_lock = Lock()
 
 
+def _config_fingerprint(kind: str, model: str) -> tuple:
+    """Build a provider cache key that changes when credentials/config change."""
+    if not (has_app_context() and current_app and hasattr(current_app, "config")):
+        return (model,)
+
+    cfg = current_app.config
+    provider_format = cfg.get("AI_PROVIDER_FORMAT")
+    source_key = {
+        "text": "TEXT_MODEL_SOURCE",
+        "image": "IMAGE_MODEL_SOURCE",
+        "caption": "IMAGE_CAPTION_MODEL_SOURCE",
+    }.get(kind)
+    api_key_key = {
+        "text": "TEXT_API_KEY",
+        "image": "IMAGE_API_KEY",
+        "caption": "IMAGE_CAPTION_API_KEY",
+    }.get(kind)
+    api_base_key = {
+        "text": "TEXT_API_BASE",
+        "image": "IMAGE_API_BASE",
+        "caption": "IMAGE_CAPTION_API_BASE",
+    }.get(kind)
+
+    explicit_key = cfg.get(api_key_key or "", "") or cfg.get("OPENAI_API_KEY", "") or cfg.get("GOOGLE_API_KEY", "")
+    explicit_base = cfg.get(api_base_key or "", "") or cfg.get("OPENAI_API_BASE", "") or cfg.get("GOOGLE_API_BASE", "")
+
+    # Keep only a short deterministic fingerprint in memory/loggable structures.
+    import hashlib
+    secret_hash = hashlib.sha256((explicit_key or "").encode("utf-8")).hexdigest()[:12] if explicit_key else ""
+    return (
+        model,
+        provider_format,
+        cfg.get(source_key or "", ""),
+        explicit_base,
+        secret_hash,
+        cfg.get("OPENAI_IMAGE_API_PROTOCOL", ""),
+    )
+
+
 def _get_cached_text_provider(model: str) -> TextProvider:
     """
     Get or create a cached text provider instance
@@ -48,13 +87,14 @@ def _get_cached_text_provider(model: str) -> TextProvider:
     Returns:
         Cached or new TextProvider instance
     """
+    cache_key = _config_fingerprint("text", model)
     with _cache_lock:
-        if model not in _text_provider_cache:
+        if cache_key not in _text_provider_cache:
             logger.info(f"Creating new TextProvider for model: {model}")
-            _text_provider_cache[model] = get_text_provider(model=model)
+            _text_provider_cache[cache_key] = get_text_provider(model=model)
         else:
             logger.debug(f"Reusing cached TextProvider for model: {model}")
-        return _text_provider_cache[model]
+        return _text_provider_cache[cache_key]
 
 
 def _get_cached_image_provider(model: str) -> ImageProvider:
@@ -67,22 +107,24 @@ def _get_cached_image_provider(model: str) -> ImageProvider:
     Returns:
         Cached or new ImageProvider instance
     """
+    cache_key = _config_fingerprint("image", model)
     with _cache_lock:
-        if model not in _image_provider_cache:
+        if cache_key not in _image_provider_cache:
             logger.info(f"Creating new ImageProvider for model: {model}")
-            _image_provider_cache[model] = get_image_provider(model=model)
+            _image_provider_cache[cache_key] = get_image_provider(model=model)
         else:
             logger.debug(f"Reusing cached ImageProvider for model: {model}")
-        return _image_provider_cache[model]
+        return _image_provider_cache[cache_key]
 
 
 def _get_cached_caption_provider(model: str) -> TextProvider:
     """Get or create a cached caption provider instance"""
+    cache_key = _config_fingerprint("caption", model)
     with _cache_lock:
-        if model not in _caption_provider_cache:
+        if cache_key not in _caption_provider_cache:
             logger.info(f"Creating new CaptionProvider for model: {model}")
-            _caption_provider_cache[model] = get_caption_provider(model=model)
-        return _caption_provider_cache[model]
+            _caption_provider_cache[cache_key] = get_caption_provider(model=model)
+        return _caption_provider_cache[cache_key]
 
 
 def get_ai_service(force_new: bool = False) -> AIService:
@@ -181,8 +223,8 @@ def get_provider_cache_info() -> dict:
     """
     with _cache_lock:
         return {
-            "text_providers": list(_text_provider_cache.keys()),
-            "image_providers": list(_image_provider_cache.keys()),
-            "caption_providers": list(_caption_provider_cache.keys()),
+            "text_providers": [str(key[0] if isinstance(key, tuple) else key) for key in _text_provider_cache.keys()],
+            "image_providers": [str(key[0] if isinstance(key, tuple) else key) for key in _image_provider_cache.keys()],
+            "caption_providers": [str(key[0] if isinstance(key, tuple) else key) for key in _caption_provider_cache.keys()],
             "total_cached": len(_text_provider_cache) + len(_image_provider_cache) + len(_caption_provider_cache)
         }

@@ -14,6 +14,7 @@ class Task(db.Model):
     __tablename__ = 'tasks'
     
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = db.Column(db.String(36), db.ForeignKey('users.id'), nullable=True, index=True)
     project_id = db.Column(db.String(36), db.ForeignKey('projects.id'), nullable=False)
     task_type = db.Column(db.String(50), nullable=False)  # GENERATE_DESCRIPTIONS|GENERATE_IMAGES
     status = db.Column(db.String(50), nullable=False, default='PENDING')
@@ -24,6 +25,7 @@ class Task(db.Model):
     
     # Relationships
     project = db.relationship('Project', back_populates='tasks')
+    user = db.relationship('User')
     
     def get_progress(self):
         """Parse progress from JSON string"""
@@ -54,6 +56,7 @@ class Task(db.Model):
         """Convert to dictionary"""
         return {
             'task_id': self.id,
+            'user_id': self.user_id,
             'task_type': self.task_type,
             'status': self.status,
             'progress': self.get_progress(),
@@ -64,4 +67,3 @@ class Task(db.Model):
     
     def __repr__(self):
         return f'<Task {self.id}: {self.task_type} - {self.status}>'
-

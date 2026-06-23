@@ -12,12 +12,14 @@ from flask import Blueprint, request, current_app
 from PIL import Image
 from models import db, Settings, Task
 from utils import success_response, error_response, bad_request
+from utils.auth import current_user_id
 from config import Config, PROJECT_ROOT
 from services.ai_service import AIService
 from services.file_parser_service import FileParserService
 from services.ai_providers.ocr.baidu_accurate_ocr_provider import create_baidu_accurate_ocr_provider
 from services.ai_providers.image.baidu_inpainting_provider import create_baidu_inpainting_provider
 from services.ai_providers import LAZYLLM_VENDORS
+from services.prompt_registry import prompt_registry
 from services.task_manager import task_manager
 
 logger = logging.getLogger(__name__)
@@ -106,7 +108,12 @@ def temporary_settings_override(settings_override: dict):
 
         if settings_override.get("mineru_api_base"):
             original_values["MINERU_API_BASE"] = current_app.config.get("MINERU_API_BASE")
-            current_app.config["MINERU_API_BASE"] = settings_override["mineru_api_base"]
+            mineru_api_base = FileParserService.normalize_mineru_api_base(settings_override["mineru_api_base"])
+            current_app.config["MINERU_API_BASE"] = mineru_api_base
+
+        if settings_override.get("mineru_provider"):
+            original_values["MINERU_PROVIDER"] = current_app.config.get("MINERU_PROVIDER")
+            current_app.config["MINERU_PROVIDER"] = settings_override["mineru_provider"]
 
         if settings_override.get("mineru_token"):
             original_values["MINERU_TOKEN"] = current_app.config.get("MINERU_TOKEN")
@@ -246,6 +253,12 @@ def update_settings():
 
         if "mineru_api_base" in data:
             settings.mineru_api_base = (data["mineru_api_base"] or "").strip() or None
+
+        if "mineru_provider" in data:
+            mineru_provider = (data["mineru_provider"] or "").strip().lower()
+            if mineru_provider and mineru_provider not in ("cloud", "local"):
+                return bad_request("MinerU provider must be 'cloud' or 'local'")
+            settings.mineru_provider = mineru_provider or None
 
         if "mineru_token" in data:
             settings.mineru_token = data["mineru_token"]
@@ -391,6 +404,7 @@ def reset_settings():
         settings.text_model = None
         settings.image_model = None
         settings.mineru_api_base = None
+        settings.mineru_provider = None
         settings.mineru_token = None
         settings.image_caption_model = None
         settings.output_language = None
@@ -509,6 +523,9 @@ def get_active_config():
         "image_model": current_app.config.get("IMAGE_MODEL"),
         "output_language": current_app.config.get("OUTPUT_LANGUAGE"),
         "image_caption_model": current_app.config.get("IMAGE_CAPTION_MODEL"),
+        "mineru_provider": current_app.config.get("MINERU_PROVIDER"),
+        "mineru_api_base": current_app.config.get("MINERU_API_BASE"),
+        "mineru_local_api_base": current_app.config.get("MINERU_LOCAL_API_BASE"),
     })
 
 
@@ -688,8 +705,15 @@ def _sync_settings_to_config(settings: Settings):
     logger.info(f"Updated worker settings: desc={current_app.config['MAX_DESCRIPTION_WORKERS']}, img={current_app.config['MAX_IMAGE_WORKERS']}")
 
     # Sync MinerU settings (fall back to Config defaults when NULL)
+    current_app.config["MINERU_PROVIDER"] = settings.mineru_provider or Config.MINERU_PROVIDER
     current_app.config["MINERU_API_BASE"] = settings.mineru_api_base or Config.MINERU_API_BASE
     current_app.config["MINERU_TOKEN"] = settings.mineru_token if settings.mineru_token is not None else Config.MINERU_TOKEN
+    current_app.config["MINERU_LOCAL_API_BASE"] = Config.MINERU_LOCAL_API_BASE
+    current_app.config["MINERU_LOCAL_BACKEND"] = Config.MINERU_LOCAL_BACKEND
+    current_app.config["MINERU_LOCAL_PARSE_METHOD"] = Config.MINERU_LOCAL_PARSE_METHOD
+    current_app.config["MINERU_LOCAL_RETURN_IMAGES"] = Config.MINERU_LOCAL_RETURN_IMAGES
+    current_app.config["MINERU_LOCAL_RESPONSE_FORMAT_ZIP"] = Config.MINERU_LOCAL_RESPONSE_FORMAT_ZIP
+    current_app.config["MINERU_LOCAL_RETURN_ORIGINAL_FILE"] = Config.MINERU_LOCAL_RETURN_ORIGINAL_FILE
     current_app.config["IMAGE_CAPTION_MODEL"] = settings.image_caption_model or Config.IMAGE_CAPTION_MODEL
     current_app.config["OUTPUT_LANGUAGE"] = settings.output_language or Config.OUTPUT_LANGUAGE
     
@@ -853,6 +877,13 @@ def _create_file_parser():
             Config, 'IMAGE_CAPTION_MODEL_SOURCE', None
         ),
         provider_format=caption_format,
+        mineru_provider=current_app.config.get("MINERU_PROVIDER", Config.MINERU_PROVIDER),
+        local_api_base=current_app.config.get("MINERU_LOCAL_API_BASE", Config.MINERU_LOCAL_API_BASE),
+        local_backend=current_app.config.get("MINERU_LOCAL_BACKEND", Config.MINERU_LOCAL_BACKEND),
+        local_parse_method=current_app.config.get("MINERU_LOCAL_PARSE_METHOD", Config.MINERU_LOCAL_PARSE_METHOD),
+        local_return_images=current_app.config.get("MINERU_LOCAL_RETURN_IMAGES", Config.MINERU_LOCAL_RETURN_IMAGES),
+        local_response_format_zip=current_app.config.get("MINERU_LOCAL_RESPONSE_FORMAT_ZIP", Config.MINERU_LOCAL_RESPONSE_FORMAT_ZIP),
+        local_return_original_file=current_app.config.get("MINERU_LOCAL_RETURN_ORIGINAL_FILE", Config.MINERU_LOCAL_RETURN_ORIGINAL_FILE),
     )
 
 
@@ -897,7 +928,7 @@ def _test_caption_model():
 
         parser = _create_file_parser()
         image_url = f"/files/mineru/{extract_id}/{image_path.name}"
-        caption = parser._generate_single_caption(image_url).strip()
+        caption = parser._generate_single_caption(image_url, raise_on_error=True).strip()
 
         if not caption:
             raise ValueError("图片识别模型返回空结果")
@@ -945,7 +976,7 @@ def _test_image_model():
     """测试图像生成模型"""
     ai_service = AIService()
     test_image_path = _get_test_image_path()
-    prompt = "生成一张简洁、明亮、适合演示文稿的背景图。"
+    prompt = prompt_registry.render("settings.image_model_test").strip()
     settings = Settings.get_settings()
     result = ai_service.generate_image(
         prompt=prompt,
@@ -962,11 +993,34 @@ def _test_image_model():
 
 def _test_mineru_pdf():
     """测试 MinerU PDF 解析"""
+    parser = _create_file_parser()
+    tmp_file = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            tmp_file = Path(tmp.name)
+        test_image_path = _get_test_image_path()
+        with Image.open(test_image_path) as image:
+            if image.mode != "RGB":
+                image = image.convert("RGB")
+            image.save(tmp_file, format="PDF")
+
+        if parser.mineru_provider == "local":
+            _batch_id, markdown_content, extract_id, error, _failed = parser.parse_file(str(tmp_file), "mineru-test.pdf")
+            if error:
+                raise ValueError(error)
+            return {
+                "provider": "local",
+                "extract_id": extract_id,
+                "content_preview": (markdown_content or "").strip()[:120],
+            }, "本地 MinerU 解析测试成功"
+    finally:
+        if tmp_file and tmp_file.exists():
+            tmp_file.unlink()
+
     mineru_token = current_app.config.get("MINERU_TOKEN", "")
     if not mineru_token:
         raise ValueError("未配置 MINERU_TOKEN")
 
-    parser = _create_file_parser()
     tmp_file = None
     try:
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
@@ -1123,6 +1177,8 @@ def run_settings_test(test_name: str):
                     test_settings[attr] = val
         if global_settings.mineru_api_base:
             test_settings["mineru_api_base"] = global_settings.mineru_api_base
+        if global_settings.mineru_provider:
+            test_settings["mineru_provider"] = global_settings.mineru_provider
         if global_settings.mineru_token:
             test_settings["mineru_token"] = global_settings.mineru_token
         if global_settings.baidu_api_key:
@@ -1144,6 +1200,7 @@ def run_settings_test(test_name: str):
 
         # 创建任务记录（使用特殊的 project_id='settings-test'）
         task = Task(
+            user_id=current_user_id(),
             project_id='settings-test',  # 特殊标记，表示这是设置测试任务
             task_type=f'TEST_{test_name.upper().replace("-", "_")}',
             status='PENDING'
@@ -1196,6 +1253,9 @@ def get_test_status(task_id: str):
     try:
         task = Task.query.get(task_id)
         if not task:
+            return error_response("TASK_NOT_FOUND", "测试任务不存在", 404)
+        user_id = current_user_id()
+        if task.user_id and user_id and task.user_id != user_id:
             return error_response("TASK_NOT_FOUND", "测试任务不存在", 404)
 
         # 构建响应数据

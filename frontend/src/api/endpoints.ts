@@ -1,8 +1,54 @@
-import { apiClient } from './client';
+import { apiClient, getAuthHeaders } from './client';
 import type { Project, Task, ApiResponse, CreateProjectRequest, Page } from '@/types';
 import type { Settings } from '../types/index';
 
 // ===== 访问口令 API =====
+
+export interface AuthUser {
+  id: string;
+  username: string;
+  email?: string | null;
+  created_at?: string;
+}
+
+export const getAuthConfig = async (): Promise<ApiResponse<{ enabled: boolean }>> => {
+  const response = await apiClient.get<ApiResponse<{ enabled: boolean }>>('/api/auth/config');
+  return response.data;
+};
+
+export const login = async (
+  identifier: string,
+  password: string
+): Promise<ApiResponse<{ user: AuthUser; token: string }>> => {
+  const response = await apiClient.post<ApiResponse<{ user: AuthUser; token: string }>>('/api/auth/login', {
+    identifier,
+    password,
+  });
+  return response.data;
+};
+
+export const register = async (
+  username: string,
+  password: string,
+  email?: string
+): Promise<ApiResponse<{ user: AuthUser; token: string }>> => {
+  const response = await apiClient.post<ApiResponse<{ user: AuthUser; token: string }>>('/api/auth/register', {
+    username,
+    password,
+    email,
+  });
+  return response.data;
+};
+
+export const getCurrentUser = async (): Promise<ApiResponse<{ user: AuthUser }>> => {
+  const response = await apiClient.get<ApiResponse<{ user: AuthUser }>>('/api/auth/me');
+  return response.data;
+};
+
+export const logout = async (): Promise<ApiResponse> => {
+  const response = await apiClient.post<ApiResponse>('/api/auth/logout');
+  return response.data;
+};
 
 export const checkAccessCode = async (): Promise<ApiResponse<{ enabled: boolean }>> => {
   const response = await apiClient.get<ApiResponse<{ enabled: boolean }>>('/api/access-code/check');
@@ -21,10 +67,10 @@ export const verifyAccessCode = async (code: string): Promise<ApiResponse<{ vali
  */
 export const createProject = async (data: CreateProjectRequest): Promise<ApiResponse<Project>> => {
   // 根据输入类型确定 creation_type
-  let creation_type = 'idea';
-  if (data.description_text) {
+  let creation_type = data.creation_type || 'idea';
+  if (!data.creation_type && data.description_text) {
     creation_type = 'descriptions';
-  } else if (data.outline_text) {
+  } else if (!data.creation_type && data.outline_text) {
     creation_type = 'outline';
   }
 
@@ -35,6 +81,7 @@ export const createProject = async (data: CreateProjectRequest): Promise<ApiResp
     description_text: data.description_text,
     template_style: data.template_style,
     image_aspect_ratio: data.image_aspect_ratio,
+    no_think_options: data.no_think_options,
   });
   return response.data;
 };
@@ -157,6 +204,7 @@ export const generateOutlineStream = async (
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      ...getAuthHeaders(),
       ...(accessCode ? { 'X-Access-Code': accessCode } : {}),
     },
     body: JSON.stringify({ language: lang, lock_page_count: lockPageCount }),
@@ -270,6 +318,7 @@ export const generateDescriptionsStream = async (
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      ...getAuthHeaders(),
       ...(accessCode ? { 'X-Access-Code': accessCode } : {}),
     },
     body: JSON.stringify({ language: lang, detail_level: detailLevel || 'default' }),
@@ -1449,6 +1498,55 @@ export const getTestStatus = async (taskId: string): Promise<ApiResponse<{
 // ===== PPT 翻新相关 API =====
 
 /**
+ * 创建 PPT to PPT 项目
+ * 上传参考 PDF/PPTX 文件，并用用户内容生成一份新的 PPT 项目
+ */
+export const createPptToPptProject = async (
+  referenceFile: File,
+  content: string,
+  options?: {
+    contentType?: 'idea' | 'outline' | 'notes' | 'document_text';
+    matchStrength?: 'loose' | 'balanced' | 'strict';
+    pageCount?: number;
+    language?: string;
+    extraRequirements?: string;
+    referenceScope?: 'style_only' | 'structure_and_style' | 'full_blueprint';
+    styleSource?: 'original' | 'template';
+    templateStyle?: string;
+    templateImage?: File;
+  }
+): Promise<ApiResponse<{ project_id: string; task_id: string; reference_page_count: number | null }>> => {
+  const formData = new FormData();
+  formData.append('reference_file', referenceFile);
+  formData.append('content', content);
+  formData.append('content_type', options?.contentType || 'notes');
+  formData.append('match_strength', options?.matchStrength || 'balanced');
+  formData.append('reference_scope', options?.referenceScope || 'structure_and_style');
+  formData.append('style_source', options?.styleSource || 'original');
+  if (options?.pageCount) {
+    formData.append('page_count', String(options.pageCount));
+  }
+  if (options?.language) {
+    formData.append('language', options.language);
+  }
+  if (options?.extraRequirements) {
+    formData.append('extra_requirements', options.extraRequirements);
+  }
+  if (options?.templateStyle) {
+    formData.append('template_style', options.templateStyle);
+  }
+  if (options?.templateImage) {
+    formData.append('template_image', options.templateImage);
+  }
+
+  const response = await apiClient.post<ApiResponse<{ project_id: string; task_id: string; reference_page_count: number | null }>>(
+    '/api/projects/ppt-to-ppt',
+    formData
+  );
+  return response.data;
+};
+
+/**
  * 创建 PPT 翻新项目
  * 上传 PDF/PPTX 文件，后端异步解析内容并填充大纲+描述
  */
@@ -1457,6 +1555,7 @@ export const createPptRenovationProject = async (
   options?: {
     keepLayout?: boolean;
     templateStyle?: string;
+    templateImage?: File;
     language?: string;
   }
 ): Promise<ApiResponse<{ project_id: string; task_id: string; page_count: number }>> => {
@@ -1467,6 +1566,9 @@ export const createPptRenovationProject = async (
   }
   if (options?.templateStyle) {
     formData.append('template_style', options.templateStyle);
+  }
+  if (options?.templateImage) {
+    formData.append('template_image', options.templateImage);
   }
   if (options?.language) {
     formData.append('language', options.language);

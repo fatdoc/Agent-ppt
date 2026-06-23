@@ -35,6 +35,7 @@ Requires-Dist: socksio>=1.0.0
 Requires-Dist: opencv-python-headless>=4.13.0.92
 Requires-Dist: elevenlabs>=2.45.0
 Requires-Dist: onnxruntime>=1.18.0
+Requires-Dist: gradio-client>=1.13.3
 Provides-Extra: test
 Requires-Dist: pytest>=7.4.0; extra == "test"
 Requires-Dist: pytest-mock>=3.12.0; extra == "test"

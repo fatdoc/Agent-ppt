@@ -40,6 +40,7 @@
 !docs/specs/cli-spec.md
 !docs/superpowers/specs/*.md
 !docs/superpowers/plans/*.md
+!docs/superpowers/progress/*.md
 !.github/**/*.md
 *.pyc
 .env

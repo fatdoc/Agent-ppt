@@ -1,6 +1,6 @@
 @echo off
 echo ====================================
-echo 蕉幻 (Banana Slides) 前端启动脚本
+echo 启发 (Banana Slides) 前端启动脚本
 echo ====================================
 echo.
 

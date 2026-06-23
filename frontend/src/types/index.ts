@@ -97,7 +97,7 @@ export interface Project {
 }
 
 // 任务状态
-export type TaskStatus = 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED';
+export type TaskStatus = 'PENDING' | 'RUNNING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
 
 // 任务信息
 export interface Task {
@@ -119,10 +119,21 @@ export interface Task {
 }
 
 // 创建项目请求
+export interface NoThinkOptions {
+  scenario?: string;
+  color_tone?: string;
+  density?: string;
+  page_count?: string;
+  style_template?: string;
+  extra_instruction?: string;
+}
+
 export interface CreateProjectRequest {
+  creation_type?: 'idea' | 'outline' | 'descriptions' | 'no_think';
   idea_prompt?: string;
   outline_text?: string;
   description_text?: string;
+  no_think_options?: NoThinkOptions;
   template_image?: File;
   template_style?: string;
   image_aspect_ratio?: string;
@@ -149,6 +160,7 @@ export interface Settings {
   max_image_workers: number;
   text_model?: string;
   image_model?: string;
+  mineru_provider?: 'cloud' | 'local';
   mineru_api_base?: string;
   mineru_token_length: number;
   image_caption_model?: string;

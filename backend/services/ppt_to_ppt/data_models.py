@@ -11,6 +11,7 @@ class MatchStrength(str, Enum):
 
 VALID_CONTENT_TYPES = {"idea", "outline", "notes", "document_text"}
 VALID_REFERENCE_SCOPES = {"style_only", "structure_and_style", "full_blueprint"}
+VALID_STYLE_SOURCES = {"original", "template"}
 
 
 @dataclass
@@ -21,6 +22,8 @@ class PptToPptOptions:
     language: str = "zh"
     extra_requirements: str | None = None
     reference_scope: str = "structure_and_style"
+    style_source: str = "original"
+    template_style: str | None = None
 
     @classmethod
     def from_form(cls, form: dict[str, Any]) -> "PptToPptOptions":
@@ -49,6 +52,10 @@ class PptToPptOptions:
         if reference_scope not in VALID_REFERENCE_SCOPES:
             raise ValueError("reference_scope must be style_only, structure_and_style, or full_blueprint")
 
+        style_source = (form.get("style_source") or "original").strip()
+        if style_source not in VALID_STYLE_SOURCES:
+            raise ValueError("style_source must be original or template")
+
         return cls(
             content_type=content_type,
             match_strength=match_strength,
@@ -56,6 +63,8 @@ class PptToPptOptions:
             language=(form.get("language") or "zh").strip() or "zh",
             extra_requirements=(form.get("extra_requirements") or "").strip() or None,
             reference_scope=reference_scope,
+            style_source=style_source,
+            template_style=(form.get("template_style") or "").strip() or None,
         )
 
 
@@ -110,3 +119,4 @@ class GeneratedPptToPptPage:
     description: str
     reference_page_index: int | None
     reference_page_role: str | None
+    reference_visual_guidance: dict[str, Any] | None = None

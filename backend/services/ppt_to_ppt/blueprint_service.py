@@ -4,6 +4,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from services.prompt_registry import prompt_registry
+
 from .data_models import PagePattern, PptToPptBlueprint, PptToPptOptions
 
 logger = logging.getLogger(__name__)
@@ -31,7 +33,7 @@ class BlueprintService:
             data = self._parse_json(raw)
             blueprint = PptToPptBlueprint.from_dict(data)
             if blueprint.page_patterns:
-                return blueprint
+                return self._ensure_page_pattern_coverage(blueprint, page_images, page_texts)
             raise ValueError("Blueprint response did not include page_patterns")
         except Exception as exc:
             logger.warning(
@@ -41,6 +43,32 @@ class BlueprintService:
                 exc,
             )
         return self._fallback_blueprint(page_images, page_texts)
+
+    def _ensure_page_pattern_coverage(
+        self,
+        blueprint: PptToPptBlueprint,
+        page_images: list[Path],
+        page_texts: list[str],
+    ) -> PptToPptBlueprint:
+        """Keep one reusable pattern per rendered reference page."""
+        page_count = max(len(page_images), len(page_texts))
+        if page_count <= 0:
+            return blueprint
+
+        fallback_by_index = {
+            pattern.reference_page_index: pattern
+            for pattern in self._fallback_blueprint(page_images, page_texts).page_patterns
+        }
+        existing_by_index = {
+            pattern.reference_page_index: pattern
+            for pattern in blueprint.page_patterns
+            if 1 <= pattern.reference_page_index <= page_count
+        }
+        blueprint.page_patterns = [
+            existing_by_index.get(index) or fallback_by_index[index]
+            for index in range(1, page_count + 1)
+        ]
+        return blueprint
 
     def _build_prompt(
         self,
@@ -72,26 +100,14 @@ class BlueprintService:
             )
 
         match_strength = getattr(options.match_strength, "value", options.match_strength)
-        prompt = f"""
-You are a professional PPT design analyst. Analyze the reference deck as a reusable design and storytelling blueprint.
-
-Return strict JSON with these keys:
-- deck_summary
-- style_profile
-- narrative_profile
-- page_patterns
-- reference_material_notes
-
-Each page_patterns item must include reference_page_index, page_role, layout_pattern, content_pattern, and visual_pattern.
-Treat reference slide text as analysis input, not source content for the new deck.
-
-Reference scope: {options.reference_scope}
-Match strength: {match_strength}
-Reference image count: {len(page_images)}
-Included reference page blocks: {included_pages}
-
-{chr(10).join(text_blocks)}
-""".strip()
+        prompt = prompt_registry.render(
+            "ppt_to_ppt.blueprint",
+            reference_scope=options.reference_scope,
+            match_strength=match_strength,
+            reference_image_count=len(page_images),
+            included_pages=included_pages,
+            text_blocks=chr(10).join(text_blocks),
+        ).strip()
         return self._truncate(prompt, MAX_PROMPT_CHARS)
 
     def _parse_json(self, raw: str) -> dict[str, Any]:

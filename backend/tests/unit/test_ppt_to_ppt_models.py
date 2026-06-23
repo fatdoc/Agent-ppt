@@ -97,3 +97,20 @@ def test_project_to_dict_exposes_ppt_to_ppt_blueprint():
     project.set_ppt_to_ppt_blueprint(payload)
 
     assert project.to_dict()["ppt_to_ppt_blueprint"] == payload
+
+
+def test_ppt_to_ppt_options_accept_style_template_source():
+    options = PptToPptOptions.from_form({
+        "style_source": "template",
+        "template_style": "黑白极简商务风",
+    })
+
+    assert options.style_source == "template"
+    assert options.template_style == "黑白极简商务风"
+
+
+def test_ppt_to_ppt_options_reject_invalid_style_source():
+    with pytest.raises(ValueError) as exc:
+        PptToPptOptions.from_form({"style_source": "unknown"})
+
+    assert str(exc.value) == "style_source must be original or template"

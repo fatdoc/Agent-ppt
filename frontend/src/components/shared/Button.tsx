@@ -18,12 +18,12 @@ export const Button: React.FC<ButtonProps> = ({
   disabled,
   ...props
 }) => {
-  const baseStyles = 'inline-flex items-center justify-center font-semibold rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-banana-500 focus:ring-offset-2 dark:focus:ring-offset-gray-900 disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation';
+  const baseStyles = 'inline-flex items-center justify-center font-bold rounded-full tracking-normal transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-banana-500 focus:ring-offset-2 dark:focus:ring-offset-gray-900 disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation active:scale-[0.98]';
 
   const variants = {
-    primary: 'bg-gradient-to-r from-banana-500 to-banana-600 text-black hover:shadow-yellow hover:-translate-y-0.5 active:translate-y-0 shadow-md',
-    secondary: 'bg-white dark:bg-background-secondary border border-banana-500 text-black dark:text-foreground-primary hover:bg-banana-50 dark:hover:bg-background-hover',
-    ghost: 'bg-transparent text-gray-700 dark:text-foreground-secondary hover:bg-gray-100 dark:hover:bg-background-secondary',
+    primary: 'bg-[#AFFF00] text-[#121212] shadow-[0_10px_28px_rgba(175,255,0,0.28)] hover:bg-[#BCFF22] hover:-translate-y-0.5',
+    secondary: 'bg-white dark:bg-background-secondary border-2 border-[#121212] dark:border-white/20 text-[#121212] dark:text-foreground-primary hover:bg-[#121212] hover:text-white dark:hover:bg-white dark:hover:text-[#121212]',
+    ghost: 'bg-transparent text-[#121212]/70 dark:text-foreground-secondary hover:bg-[#121212]/5 hover:text-[#121212] dark:hover:bg-white/10 dark:hover:text-white',
   };
   
   const sizes = {
@@ -72,4 +72,3 @@ export const Button: React.FC<ButtonProps> = ({
     </button>
   );
 };
-

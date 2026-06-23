@@ -4,10 +4,14 @@ from types import SimpleNamespace
 from models import Page, Project, Task, db
 from services.ppt_to_ppt.data_models import (
     GeneratedPptToPptPage,
+    PagePattern,
     PptToPptBlueprint,
 )
 from services.ppt_to_ppt.generation_service import PptToPptGenerationResult
-from services.task_manager import process_ppt_to_ppt_task
+from services.task_manager import (
+    _append_ppt_to_ppt_reference_guidance,
+    process_ppt_to_ppt_task,
+)
 
 
 class FakeRenderer:
@@ -30,7 +34,16 @@ class FakeBlueprintService:
             deck_summary="Reference",
             style_profile={"mood": "professional"},
             narrative_profile={"section_flow": ["cover"]},
-            page_patterns=[],
+            page_patterns=[
+                PagePattern(
+                    reference_page_index=index + 1,
+                    page_role="cover" if index == 0 else f"page_{index + 1}",
+                    layout_pattern="Large title left",
+                    content_pattern="Project name plus tagline",
+                    visual_pattern="Hero product visual",
+                )
+                for index, _ in enumerate(page_images)
+            ],
             reference_material_notes=["Use reference for structure only"],
         )
 
@@ -41,17 +54,33 @@ class FakeGenerationService:
 
     def generate(self, user_content, blueprint, options):
         self.calls.append((user_content, blueprint, options))
+        page_count = len(blueprint.page_patterns) or options.page_count or 1
         return PptToPptGenerationResult(
-            outline_text="第1页：智能客服",
-            description_text="--- 第1页 ---\n智能客服页面描述",
+            outline_text="\n\n".join(
+                f"第{index + 1}页：智能客服"
+                for index in range(page_count)
+            ),
+            description_text="\n\n".join(
+                f"--- 第{index + 1}页 ---\n智能客服页面描述"
+                for index in range(page_count)
+            ),
             pages=[
                 GeneratedPptToPptPage(
                     title="智能客服",
                     points=["银行场景"],
                     description="智能客服页面描述",
-                    reference_page_index=1,
-                    reference_page_role="cover",
+                    reference_page_index=index + 1,
+                    reference_page_role="cover" if index == 0 else f"page_{index + 1}",
+                    reference_visual_guidance={
+                        "page_pattern": "cover" if index == 0 else f"page_{index + 1}",
+                        "page_index": index + 1,
+                        "layout": "Large title left",
+                        "content_pattern": "Project name plus tagline",
+                        "visual_elements": "Hero product visual",
+                        "style_guidance": {"mood": "professional"},
+                    },
                 )
+                for index in range(page_count)
             ],
         )
 
@@ -63,6 +92,33 @@ class EmptyGenerationService:
             description_text="",
             pages=[],
         )
+
+
+def test_ppt_to_ppt_reference_guidance_is_prompt_only():
+    desc_text = "页面展示智能客服项目定位。"
+    desc_content = {
+        "text": desc_text,
+        "ppt_to_ppt_reference": {
+            "page_index": 1,
+            "page_role": "cover",
+            "visual_guidance": {
+                "page_pattern": "cover",
+                "page_index": 1,
+                "layout": "Large title left",
+                "content_pattern": "Project name plus tagline",
+                "visual_elements": "Hero product visual",
+                "style_guidance": {"mood": "professional"},
+            },
+        },
+    }
+
+    prompt_text = _append_ppt_to_ppt_reference_guidance(desc_text, desc_content)
+
+    assert desc_content["text"] == desc_text
+    assert prompt_text.startswith(desc_text)
+    assert "隐藏视觉参考" in prompt_text
+    assert "不要作为页面文字渲染" in prompt_text
+    assert "版式结构：Large title left" in prompt_text
 
 
 def test_process_ppt_to_ppt_task_creates_generated_pages(app, client):
@@ -121,7 +177,53 @@ def test_process_ppt_to_ppt_task_creates_generated_pages(app, client):
         assert pages[0].get_description_content()["ppt_to_ppt_reference"] == {
             "page_index": 1,
             "page_role": "cover",
+            "visual_guidance": {
+                "page_pattern": "cover",
+                "page_index": 1,
+                "layout": "Large title left",
+                "content_pattern": "Project name plus tagline",
+                "visual_elements": "Hero product visual",
+                "style_guidance": {"mood": "professional"},
+            },
         }
+
+
+def test_process_ppt_to_ppt_task_uses_reference_page_count_for_auto_generation(app, client):
+    with app.app_context():
+        project = Project(creation_type="ppt_to_ppt", idea_prompt="开始生成")
+        db.session.add(project)
+        db.session.flush()
+        task = Task(project_id=project.id, task_type="PPT_TO_PPT_ANALYSIS", status="PENDING")
+        db.session.add(task)
+        db.session.commit()
+
+        rendered = SimpleNamespace(
+            page_images=[Path(f"/tmp/page{index + 1}.png") for index in range(37)],
+            page_count=37,
+            aspect_ratio="16:9",
+        )
+        blueprint_service = FakeBlueprintService()
+        generation_service = FakeGenerationService()
+
+        process_ppt_to_ppt_task(
+            task.id,
+            project.id,
+            reference_file_path="/tmp/reference.pdf",
+            renderer=FakeRenderer(rendered),
+            blueprint_service=blueprint_service,
+            generation_service=generation_service,
+            options_payload={"language": "zh"},
+            app=app,
+        )
+
+        db.session.expire_all()
+        refreshed_task = Task.query.get(task.id)
+        pages = Page.query.filter_by(project_id=project.id).all()
+
+        assert blueprint_service.calls[0][2].page_count is None
+        assert generation_service.calls[0][2].page_count is None
+        assert refreshed_task.get_progress()["target_page_count"] == 37
+        assert len(pages) == 37
 
 
 def test_process_ppt_to_ppt_task_empty_generation_fails_and_preserves_pages(app, client):

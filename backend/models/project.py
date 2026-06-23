@@ -14,6 +14,7 @@ class Project(db.Model):
     __tablename__ = 'projects'
     
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = db.Column(db.String(36), db.ForeignKey('users.id'), nullable=True, index=True)
     project_title = db.Column(db.String(255), nullable=True)
     idea_prompt = db.Column(db.Text, nullable=True)
     outline_text = db.Column(db.Text, nullable=True)  # 用户输入的大纲文本（用于outline类型）
@@ -43,6 +44,7 @@ class Project(db.Model):
                            cascade='all, delete-orphan')
     materials = db.relationship('Material', back_populates='project', lazy='select',
                            cascade='all, delete-orphan')
+    user = db.relationship('User', back_populates='projects')
     
     def to_dict(self, include_pages=False):
         """Convert to dictionary"""
@@ -57,6 +59,7 @@ class Project(db.Model):
         
         data = {
             'project_id': self.id,
+            'user_id': self.user_id,
             'project_title': self.project_title,
             'idea_prompt': self.idea_prompt,
             'outline_text': self.outline_text,

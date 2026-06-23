@@ -53,6 +53,25 @@ def test_extract_blueprint_parses_ai_json(tmp_path):
     assert "Reference image count: 1" in ai_service.prompt
 
 
+def test_extract_blueprint_fills_missing_page_patterns(tmp_path):
+    page_images = []
+    for index in range(3):
+        page_image = tmp_path / f"page_{index + 1}.png"
+        page_image.write_bytes(b"png")
+        page_images.append(page_image)
+
+    blueprint = BlueprintService(FakeAIService()).extract_blueprint(
+        page_images=page_images,
+        page_texts=[""] * 3,
+        options=PptToPptOptions.from_form({}),
+    )
+
+    assert [pattern.reference_page_index for pattern in blueprint.page_patterns] == [1, 2, 3]
+    assert blueprint.page_patterns[0].page_role == "cover"
+    assert blueprint.page_patterns[1].page_role == "page_2"
+    assert blueprint.page_patterns[2].page_role == "page_3"
+
+
 def test_extract_blueprint_fallback_when_ai_json_is_invalid(tmp_path):
     class BadAI:
         def generate_text(self, prompt):

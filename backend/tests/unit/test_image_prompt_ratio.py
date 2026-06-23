@@ -30,3 +30,23 @@ class TestImagePromptAspectRatio:
         )
         assert "1:1比例" in prompt
         assert "16:9比例" not in prompt
+
+    def test_visual_guidance_uses_layered_prompt_blocks(self):
+        prompt = get_image_generation_prompt(
+            page_desc="页面内容",
+            outline_text="Test outline",
+            current_section="Section 1",
+            visual_guidance={
+                "global_visual_system": "全局视觉系统",
+                "page_visual_notes": "页面局部视觉说明",
+            },
+        )
+
+        assert "<global_visual_system>" in prompt
+        assert "全局视觉系统" in prompt
+        assert "<page_content>" in prompt
+        assert "页面内容" in prompt
+        assert "<page_layout_notes>" in prompt
+        assert "页面局部视觉说明" in prompt
+        assert "<style_conflict_rule>" not in prompt
+        assert "页面描述中的普通风格词" not in prompt
