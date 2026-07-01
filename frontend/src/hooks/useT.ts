@@ -12,6 +12,10 @@ type Translations = {
  * 例如：getNestedValue(obj, 'home.title') 获取 obj.home.title
  */
 function getNestedValue(obj: NestedRecord, path: string): string | undefined {
+  if (typeof path !== 'string') {
+    return undefined;
+  }
+
   const keys = path.split('.');
   let current: unknown = obj;
   
@@ -37,13 +41,13 @@ function getNestedValue(obj: NestedRecord, path: string): string | undefined {
  * const homeI18n = {
  *   zh: {
  *     home: {
- *       title: '启发',
+ *       title: '兰台',
  *       messages: { success: '成功' }
  *     }
  *   },
  *   en: {
  *     home: {
- *       title: 'Banana Slides',
+ *       title: 'Lantai PPT Agent',
  *       messages: { success: 'Success' }
  *     }
  *   }
@@ -51,7 +55,7 @@ function getNestedValue(obj: NestedRecord, path: string): string | undefined {
  * 
  * const t = useT(homeI18n);
  * 
- * t('home.title')     // 从组件内翻译获取: "启发"
+ * t('home.title')     // 从组件内翻译获取: "兰台"
  * t('common.save')    // 组件内没有，自动 fallback 到全局: "保存"
  * ```
  * 
@@ -83,6 +87,6 @@ export function useT<T extends Translations>(translations: T) {
     }
     
     // 组件内没找到，fallback 到全局翻译（保持原始参数传递）
-    return globalT(key, defaultOrParams as any);
+    return typeof key === 'string' ? String(globalT(key, defaultOrParams as any)) : '';
   };
 }

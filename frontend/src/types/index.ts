@@ -69,6 +69,11 @@ export type ExportExtractorMethod = 'mineru' | 'hybrid';
 // 导出设置 - 背景图获取方法
 export type ExportInpaintMethod = 'generative' | 'baidu' | 'hybrid';
 
+// 视觉生成策略
+export type VisualStrategy = 'native' | 'external_skill';
+export type GenerationMode = 'fast' | 'harness';
+export type HarnessTemplate = 'paper_operators';
+
 // 项目
 export interface Project {
   project_id: string;  // 后端返回 project_id
@@ -84,6 +89,12 @@ export interface Project {
   template_image_url?: string; // 后端返回 template_image_url
   template_image_path?: string; // 前端使用的别名
   template_style?: string; // 风格描述文本（无模板图模式）
+  generation_mode?: GenerationMode; // 生成模式
+  harness_template?: HarnessTemplate; // Harness 模板
+  harness_payload?: Record<string, unknown> | string | null;
+  visual_strategy?: VisualStrategy; // 视觉生成策略
+  external_style_skill_id?: string;
+  external_style_payload?: Record<string, unknown> | string | null;
   // 导出设置
   export_extractor_method?: ExportExtractorMethod; // 组件提取方法
   export_inpaint_method?: ExportInpaintMethod; // 背景图获取方法
@@ -118,10 +129,45 @@ export interface Task {
   completed_at?: string;
 }
 
+export interface CreditEstimate {
+  operation: string;
+  amount: number;
+  details?: {
+    page_count?: number;
+    reference_page_count?: number;
+    target_page_count?: number;
+    [key: string]: any;
+  };
+}
+
+export interface CreditAccount {
+  user_id: string;
+  balance: number;
+  reserved_balance: number;
+  available_balance: number;
+  lifetime_credited: number;
+  lifetime_spent: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface CreditLedgerEntry {
+  id: string;
+  user_id: string;
+  task_id?: string | null;
+  project_id?: string | null;
+  entry_type: string;
+  operation: string;
+  amount: number;
+  balance_after: number;
+  reserved_after: number;
+  metadata?: Record<string, any>;
+  created_at?: string;
+}
+
 // 创建项目请求
 export interface NoThinkOptions {
   scenario?: string;
-  color_tone?: string;
   density?: string;
   page_count?: string;
   style_template?: string;
@@ -136,6 +182,12 @@ export interface CreateProjectRequest {
   no_think_options?: NoThinkOptions;
   template_image?: File;
   template_style?: string;
+  generation_mode?: GenerationMode;
+  harness_template?: HarnessTemplate;
+  harness_payload?: Record<string, unknown> | string | null;
+  visual_strategy?: VisualStrategy;
+  external_style_skill_id?: string;
+  external_style_payload?: Record<string, unknown> | string | null;
   image_aspect_ratio?: string;
 }
 

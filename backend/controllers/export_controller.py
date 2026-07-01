@@ -17,12 +17,26 @@ from utils import (
 )
 from utils.auth import current_user_id, owned_project_or_404
 from services import ExportService, FileService
+from services.credit_service import (
+    InsufficientCredits,
+    attach_task_credit_progress,
+    estimate_operation,
+    reserve_credits,
+)
 from services.ai_service_manager import get_ai_service
 from services.prompts import normalize_narration_generation_config
 
 logger = logging.getLogger(__name__)
 
 export_bp = Blueprint('export', __name__, url_prefix='/api/projects')
+
+
+def _credit_error_response(exc: InsufficientCredits):
+    return error_response(
+        'INSUFFICIENT_CREDITS',
+        f'积分不足：需要 {exc.required}，当前可用 {exc.available}',
+        402,
+    )
 
 
 @export_bp.route('/<project_id>/exports', methods=['GET'])
@@ -373,6 +387,7 @@ def export_editable_pptx(project_id):
             return bad_request("max_workers must be an integer between 1 and 16")
         
         # Create task record
+        estimate = estimate_operation('editable_export', page_count=len(pages))
         task = Task(
             user_id=current_user_id(),
             project_id=project_id,
@@ -380,6 +395,16 @@ def export_editable_pptx(project_id):
             status='PENDING'
         )
         db.session.add(task)
+        db.session.flush()
+        reserve_credits(
+            user_id=current_user_id(),
+            amount=estimate.amount,
+            operation=estimate.operation,
+            project_id=project_id,
+            task_id=task.id,
+            metadata={**estimate.details, 'endpoint': 'export_editable_pptx'},
+        )
+        attach_task_credit_progress(task, estimate)
         db.session.commit()
         
         logger.info(f"Created export task {task.id} for project {project_id} (recursive analysis: depth={max_depth}, workers={max_workers})")
@@ -429,11 +454,15 @@ def export_editable_pptx(project_id):
                 "task_id": task.id,
                 "method": "recursive_analysis",
                 "max_depth": max_depth,
-                "max_workers": max_workers
+                "max_workers": max_workers,
+                "credit_estimate": estimate.to_dict(),
             },
             message="Export task created (using recursive analysis)"
         )
     
+    except InsufficientCredits as e:
+        db.session.rollback()
+        return _credit_error_response(e)
     except Exception as e:
         logger.exception("Error creating export task")
         return error_response('SERVER_ERROR', str(e), 500)

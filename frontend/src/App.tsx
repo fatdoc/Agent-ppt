@@ -31,9 +31,9 @@ function App() {
   }, [error, setError, show]);
 
   return (
-    <AccessCodeGuard>
-      <AuthGuard>
-        <BrowserRouter>
+    <BrowserRouter>
+      <AccessCodeGuard>
+        <AuthGuard>
           <Routes>
             <Route path="/" element={<Landing />} />
             <Route path="/app" element={<Home />} />
@@ -46,9 +46,9 @@ function App() {
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
           <ToastContainer />
-        </BrowserRouter>
-      </AuthGuard>
-    </AccessCodeGuard>
+        </AuthGuard>
+      </AccessCodeGuard>
+    </BrowserRouter>
   );
 }
 

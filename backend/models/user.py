@@ -26,6 +26,8 @@ class User(db.Model):
     user_style_templates = db.relationship('UserStyleTemplate', back_populates='user', lazy='select')
     reference_files = db.relationship('ReferenceFile', back_populates='user', lazy='select')
     materials = db.relationship('Material', back_populates='user', lazy='select')
+    credit_account = db.relationship('CreditAccount', back_populates='user', lazy='select', uselist=False)
+    credit_ledger = db.relationship('CreditLedger', back_populates='user', lazy='select')
 
     def set_password(self, password: str) -> None:
         self.password_hash = generate_password_hash(password)

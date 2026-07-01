@@ -26,6 +26,17 @@ from services import (
     ProjectContext,
 )
 from services.ai_service_manager import get_ai_service
+from services.credit_service import (
+    InsufficientCredits,
+    attach_task_credit_progress,
+    debit_credits_now,
+    ensure_credits_available,
+    estimate_operation,
+    estimate_page_count_from_text,
+    estimate_project_pages,
+    reserve_credits,
+)
+from services.harness_generation_service import clear_harness_artifacts, enhance_project_context, ensure_page_visual_plans
 from services.task_manager import (
     task_manager,
     generate_descriptions_task,
@@ -41,6 +52,87 @@ from utils.auth import current_user_id, owned_project_or_404
 logger = logging.getLogger(__name__)
 
 project_bp = Blueprint('projects', __name__, url_prefix='/api/projects')
+
+VALID_VISUAL_STRATEGIES = {'native', 'external_skill'}
+VALID_GENERATION_MODES = {'fast', 'harness'}
+VALID_HARNESS_TEMPLATES = {'paper_operators'}
+
+
+def _credit_error_response(exc: InsufficientCredits):
+    return error_response(
+        'INSUFFICIENT_CREDITS',
+        f'积分不足：需要 {exc.required}，当前可用 {exc.available}',
+        402,
+    )
+
+
+def _normalize_visual_strategy(data: dict) -> str:
+    strategy = data.get('visual_strategy') or 'native'
+    if strategy not in VALID_VISUAL_STRATEGIES:
+        raise ValueError("visual_strategy must be native or external_skill")
+    return strategy
+
+
+def _normalize_generation_mode(data: dict) -> str:
+    mode = data.get('generation_mode') or 'fast'
+    if mode not in VALID_GENERATION_MODES:
+        raise ValueError("generation_mode must be fast or harness")
+    return mode
+
+
+def _normalize_harness_template(data: dict) -> str | None:
+    template = data.get('harness_template')
+    if not template:
+        return None
+    if template == 'paper-operators':
+        template = 'paper_operators'
+    if template not in VALID_HARNESS_TEMPLATES:
+        raise ValueError("harness_template must be paper_operators")
+    return template
+
+
+def _is_paper_operators_harness(project: Project) -> bool:
+    return (
+        (project.generation_mode or 'fast') == 'harness'
+        and project.harness_template == 'paper_operators'
+    )
+
+
+def _apply_generation_mode_fields(project: Project, data: dict) -> None:
+    if 'generation_mode' in data:
+        project.generation_mode = _normalize_generation_mode(data)
+    elif not project.generation_mode:
+        project.generation_mode = 'fast'
+
+    if project.generation_mode == 'harness':
+        project.harness_template = _normalize_harness_template(data) or project.harness_template or 'paper_operators'
+    else:
+        project.harness_template = None
+
+    if 'harness_payload' in data:
+        project.set_harness_payload(data.get('harness_payload'))
+
+
+def _apply_visual_strategy_fields(project: Project, data: dict) -> None:
+    if 'visual_strategy' in data:
+        project.visual_strategy = _normalize_visual_strategy(data)
+    elif not project.visual_strategy:
+        project.visual_strategy = 'native'
+
+    if 'external_style_skill_id' in data:
+        skill_id = data.get('external_style_skill_id')
+        project.external_style_skill_id = str(skill_id).strip() if skill_id else None
+
+    if 'external_style_payload' in data:
+        project.set_external_style_payload(data.get('external_style_payload'))
+
+    if project.visual_strategy != 'external_skill':
+        return
+
+    payload = project.get_external_style_payload()
+    payload_empty = payload is None or payload == "" or payload == {}
+    if not project.external_style_skill_id and payload_empty:
+        raise ValueError("external_style_skill_id or external_style_payload is required when visual_strategy=external_skill")
 
 
 def _get_project_reference_files_content(project_id: str) -> list:
@@ -252,6 +344,13 @@ def create_project():
             options = NoThinkOptions.from_dict(data.get('no_think_options'))
             idea_prompt = NoThinkService().normalize_prompt(idea_prompt, options)
 
+        try:
+            visual_strategy = _normalize_visual_strategy(data)
+            generation_mode = _normalize_generation_mode(data)
+            harness_template = _normalize_harness_template(data)
+        except ValueError as e:
+            return bad_request(str(e))
+
         # Create project
         project = Project(
             user_id=current_user_id(),
@@ -260,9 +359,22 @@ def create_project():
             outline_text=data.get('outline_text'),
             description_text=data.get('description_text'),
             template_style=data.get('template_style'),
+            generation_mode=generation_mode,
+            harness_template=harness_template if generation_mode == 'harness' else None,
+            visual_strategy=visual_strategy,
+            external_style_skill_id=(str(data.get('external_style_skill_id')).strip() if data.get('external_style_skill_id') else None),
             image_aspect_ratio=image_aspect_ratio,
             status='DRAFT'
         )
+        try:
+            if 'harness_payload' in data:
+                project.set_harness_payload(data.get('harness_payload'))
+            _apply_generation_mode_fields(project, data)
+            if 'external_style_payload' in data:
+                project.set_external_style_payload(data.get('external_style_payload'))
+            _apply_visual_strategy_fields(project, data)
+        except ValueError as e:
+            return bad_request(str(e))
         
         db.session.add(project)
         db.session.commit()
@@ -362,6 +474,12 @@ def update_project(project_id):
         # Update template_style if provided
         if 'template_style' in data:
             project.template_style = data['template_style']
+
+        try:
+            _apply_generation_mode_fields(project, data)
+            _apply_visual_strategy_fields(project, data)
+        except ValueError as e:
+            return bad_request(str(e))
         
         # Update aspect ratio if provided
         if 'image_aspect_ratio' in data:
@@ -494,20 +612,33 @@ def generate_outline(project_id):
             project.idea_prompt = idea_prompt
             input_kind = 'idea'
 
-        project_context = ProjectContext(project, reference_files_content)
+        project_context = enhance_project_context(project, ProjectContext(project, reference_files_content))
+        target_depth = 'outline_and_descriptions' if input_kind == 'no_think' else 'outline_only'
+        estimate = estimate_operation(
+            'outline_and_descriptions' if target_depth == 'outline_and_descriptions' else 'outline',
+            page_count=estimate_project_pages(project),
+        )
+        ensure_credits_available(current_user_id(), estimate.amount)
         generation_service = InputGenerationService(ai_service)
         generation_service.generate(
             project,
             project_context,
             InputGenerationOptions(
                 input_kind=input_kind,
-                target_depth='outline_and_descriptions' if input_kind == 'no_think' else 'outline_only',
+                target_depth=target_depth,
                 language=language,
                 detail_level=data.get('detail_level'),
             ),
             save_mode='merge_by_index',
         )
         pages_list = Page.query.filter_by(project_id=project_id).order_by(Page.order_index).all()
+        debit_credits_now(
+            user_id=current_user_id(),
+            amount=estimate.amount,
+            operation=estimate.operation,
+            project_id=project_id,
+            metadata={**estimate.details, 'endpoint': 'generate_outline'},
+        )
 
         db.session.commit()
         
@@ -518,6 +649,9 @@ def generate_outline(project_id):
             'pages': [page.to_dict() for page in pages_list]
         })
     
+    except InsufficientCredits as e:
+        db.session.rollback()
+        return _credit_error_response(e)
     except Exception as e:
         db.session.rollback()
         logger.error(f"generate_outline failed: {str(e)}", exc_info=True)
@@ -544,6 +678,12 @@ def generate_outline_stream(project_id):
 
     data = request.get_json() or {}
     language = data.get('language', current_app.config.get('OUTPUT_LANGUAGE', 'zh'))
+    estimate = estimate_operation('outline', page_count=estimate_project_pages(project))
+    try:
+        ensure_credits_available(current_user_id(), estimate.amount)
+    except InsufficientCredits as exc:
+        return _credit_error_response(exc)
+    request_user_id = current_user_id()
 
     # Capture app reference for use inside the generator (which runs outside request context)
     app = current_app._get_current_object()
@@ -572,7 +712,7 @@ def generate_outline_stream(project_id):
                         return
                     proj.idea_prompt = idea_prompt
 
-                project_context = ProjectContext(proj, reference_files_content)
+                project_context = enhance_project_context(proj, ProjectContext(proj, reference_files_content))
 
                 # Stream pages from AI
                 streamed_pages = []
@@ -602,6 +742,7 @@ def generate_outline_stream(project_id):
                             streamed_pages.append({'title': '', 'points': []})
 
                 # Save all pages to database
+                clear_harness_artifacts(project_id)
                 pages_list = _smart_merge_pages(project_id, streamed_pages)
 
                 if all(p.description_content for p in pages_list) and pages_list:
@@ -609,6 +750,14 @@ def generate_outline_stream(project_id):
                 else:
                     proj.status = 'OUTLINE_GENERATED'
                 proj.updated_at = datetime.utcnow()
+                ensure_page_visual_plans(proj, pages_list)
+                debit_credits_now(
+                    user_id=request_user_id,
+                    amount=estimate.amount,
+                    operation=estimate.operation,
+                    project_id=project_id,
+                    metadata={**estimate.details, 'endpoint': 'generate_outline_stream'},
+                )
                 db.session.commit()
 
                 logger.info(f"流式大纲生成完成: 项目 {project_id}, {len(pages_list)} 个页面")
@@ -667,8 +816,8 @@ def generate_from_description(project_id):
         if not project:
             return not_found('Project')
         
-        if project.creation_type != 'descriptions':
-            return bad_request("This endpoint is only for descriptions type projects")
+        if project.creation_type not in ('descriptions', 'outline'):
+            return bad_request("This endpoint is only for descriptions or outline type projects")
         
         # Get description text and language
         data = request.get_json() or {}
@@ -679,13 +828,18 @@ def generate_from_description(project_id):
             return bad_request("description_text is required")
         
         project.description_text = description_text
+        estimate = estimate_operation(
+            'from_description',
+            page_count=estimate_page_count_from_text(description_text, default=estimate_project_pages(project)),
+        )
+        ensure_credits_available(current_user_id(), estimate.amount)
         
         # Get singleton AI service instance
         ai_service = get_ai_service()
         
         # Get reference files content and create project context
         reference_files_content = _get_project_reference_files_content(project_id)
-        project_context = ProjectContext(project, reference_files_content)
+        project_context = enhance_project_context(project, ProjectContext(project, reference_files_content))
         
         logger.info(f"开始从描述生成大纲和页面描述: 项目 {project_id}")
 
@@ -702,6 +856,13 @@ def generate_from_description(project_id):
             save_mode='replace',
         )
         pages_list = Page.query.filter_by(project_id=project_id).order_by(Page.order_index).all()
+        debit_credits_now(
+            user_id=current_user_id(),
+            amount=estimate.amount,
+            operation=estimate.operation,
+            project_id=project_id,
+            metadata={**estimate.details, 'endpoint': 'generate_from_description'},
+        )
 
         db.session.commit()
         
@@ -713,6 +874,12 @@ def generate_from_description(project_id):
             'status': 'DESCRIPTIONS_GENERATED'
         })
     
+    except InsufficientCredits as e:
+        db.session.rollback()
+        return _credit_error_response(e)
+    except ValueError as e:
+        db.session.rollback()
+        return bad_request(str(e))
     except Exception as e:
         db.session.rollback()
         logger.error(f"generate_from_description failed: {str(e)}", exc_info=True)
@@ -758,6 +925,7 @@ def generate_descriptions(project_id):
         detail_level = data.get('detail_level', 'default')
         
         # Create task
+        estimate = estimate_operation('descriptions', page_count=len(pages))
         task = Task(
             user_id=current_user_id(),
             project_id=project_id,
@@ -771,6 +939,16 @@ def generate_descriptions(project_id):
         })
         
         db.session.add(task)
+        db.session.flush()
+        reserve_credits(
+            user_id=current_user_id(),
+            amount=estimate.amount,
+            operation=estimate.operation,
+            project_id=project_id,
+            task_id=task.id,
+            metadata={**estimate.details, 'endpoint': 'generate_descriptions'},
+        )
+        attach_task_credit_progress(task, estimate)
         db.session.commit()
         
         # Get singleton AI service instance
@@ -804,9 +982,13 @@ def generate_descriptions(project_id):
         return success_response({
             'task_id': task.id,
             'status': 'GENERATING_DESCRIPTIONS',
-            'total_pages': len(pages)
+            'total_pages': len(pages),
+            'credit_estimate': estimate.to_dict(),
         }, status_code=202)
     
+    except InsufficientCredits as e:
+        db.session.rollback()
+        return _credit_error_response(e)
     except Exception as e:
         db.session.rollback()
         logger.error(f"generate_descriptions failed: {str(e)}", exc_info=True)
@@ -835,6 +1017,13 @@ def generate_descriptions_stream(project_id):
     data = request.get_json() or {}
     language = data.get('language', current_app.config.get('OUTPUT_LANGUAGE', 'zh'))
     detail_level = data.get('detail_level', 'default')
+    page_count = Page.query.filter_by(project_id=project_id).count()
+    estimate = estimate_operation('descriptions', page_count=page_count)
+    try:
+        ensure_credits_available(current_user_id(), estimate.amount)
+    except InsufficientCredits as exc:
+        return _credit_error_response(exc)
+    request_user_id = current_user_id()
 
     app = current_app._get_current_object()
 
@@ -844,7 +1033,7 @@ def generate_descriptions_stream(project_id):
                 proj = db.session.get(Project, project_id)
                 ai_service = get_ai_service()
                 reference_files_content = _get_project_reference_files_content(project_id)
-                project_context = ProjectContext(proj, reference_files_content)
+                project_context = enhance_project_context(proj, ProjectContext(proj, reference_files_content))
 
                 pages = Page.query.filter_by(project_id=project_id).order_by(Page.order_index).all()
                 if not pages:
@@ -903,6 +1092,15 @@ def generate_descriptions_stream(project_id):
 
                 proj.status = 'DESCRIPTIONS_GENERATED'
                 proj.updated_at = datetime.utcnow()
+                pages = Page.query.filter_by(project_id=project_id).order_by(Page.order_index).all()
+                ensure_page_visual_plans(proj, pages)
+                debit_credits_now(
+                    user_id=request_user_id,
+                    amount=estimate.amount,
+                    operation=estimate.operation,
+                    project_id=project_id,
+                    metadata={**estimate.details, 'endpoint': 'generate_descriptions_stream'},
+                )
                 db.session.commit()
 
                 # Re-fetch pages for final response
@@ -997,7 +1195,8 @@ def generate_images(project_id):
         if use_template:
             ref_image_path = file_service.get_template_path(project_id)
         
-        if not ref_image_path and not project.template_style:
+        external_visual_strategy = (project.visual_strategy or 'native') == 'external_skill'
+        if not external_visual_strategy and not ref_image_path and not project.template_style and not _is_paper_operators_harness(project):
             return bad_request("请先上传模板图片或添加风格描述。")
         
         # Reconstruct outline from pages with part structure
@@ -1009,6 +1208,7 @@ def generate_images(project_id):
         language = data.get('language', current_app.config.get('OUTPUT_LANGUAGE', 'zh'))
         
         # Create task
+        estimate = estimate_operation('images', page_count=len(pages))
         task = Task(
             user_id=current_user_id(),
             project_id=project_id,
@@ -1022,6 +1222,16 @@ def generate_images(project_id):
         })
         
         db.session.add(task)
+        db.session.flush()
+        reserve_credits(
+            user_id=current_user_id(),
+            amount=estimate.amount,
+            operation=estimate.operation,
+            project_id=project_id,
+            task_id=task.id,
+            metadata={**estimate.details, 'endpoint': 'generate_images'},
+        )
+        attach_task_credit_progress(task, estimate)
         db.session.commit()
         
         # Get singleton AI service instance
@@ -1063,9 +1273,13 @@ def generate_images(project_id):
         return success_response({
             'task_id': task.id,
             'status': 'GENERATING_IMAGES',
-            'total_pages': len(pages)
+            'total_pages': len(pages),
+            'credit_estimate': estimate.to_dict(),
         }, status_code=202)
     
+    except InsufficientCredits as e:
+        db.session.rollback()
+        return _credit_error_response(e)
     except Exception as e:
         db.session.rollback()
         logger.error(f"generate_images failed: {str(e)}", exc_info=True)

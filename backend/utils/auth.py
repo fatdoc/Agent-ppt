@@ -11,7 +11,7 @@ from models import Project, User, db
 from utils.response import error_response, not_found
 
 TOKEN_SALT = 'banana-slides-auth'
-DEFAULT_USERNAME = 'default'
+DEFAULT_USERNAME = 'admin'
 
 
 def auth_required_enabled() -> bool:
@@ -58,7 +58,7 @@ def get_or_create_default_user() -> User:
     if user:
         return user
     user = User(username=DEFAULT_USERNAME, email=None)
-    user.set_password(os.getenv('DEFAULT_USER_PASSWORD', 'banana-slides-default'))
+    user.set_password(os.getenv('DEFAULT_USER_PASSWORD', 'admin123'))
     db.session.add(user)
     db.session.flush()
     return user

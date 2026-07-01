@@ -16,6 +16,8 @@ from sqlalchemy import func
 from sqlalchemy.exc import OperationalError
 from PIL import Image, ImageDraw, ImageFilter
 from models import db, Task, Page, Material, PageImageVersion
+from services.credit_service import settle_task_credits
+from services.harness_generation_service import ensure_page_visual_plans
 from services.visual_guidance_service import VisualGuidanceService
 from utils import get_filtered_pages
 from utils.image_utils import check_image_resolution
@@ -83,6 +85,26 @@ from pathlib import Path
 from services.pdf_service import split_pdf_to_pages
 
 logger = logging.getLogger(__name__)
+
+
+def _settle_task_credits_safe(
+    task_id: str,
+    *,
+    completed_units: int | None = None,
+    total_units: int | None = None,
+    force_release: bool = False,
+) -> None:
+    try:
+        settle_task_credits(
+            task_id,
+            completed_units=completed_units,
+            total_units=total_units,
+            force_release=force_release,
+        )
+        db.session.commit()
+    except Exception as exc:
+        db.session.rollback()
+        logger.warning("Failed to settle credits for task %s: %s", task_id, exc, exc_info=True)
 
 
 class TaskManager:
@@ -455,8 +477,11 @@ def generate_descriptions_task(task_id: str, project_id: str, ai_service,
             project = Project.query.get(project_id)
             if project and failed == 0:
                 project.status = 'DESCRIPTIONS_GENERATED'
+                pages = Page.query.filter_by(project_id=project_id).order_by(Page.order_index).all()
+                ensure_page_visual_plans(project, pages)
                 db.session.commit()
                 logger.info(f"Project {project_id} status updated to DESCRIPTIONS_GENERATED")
+            _settle_task_credits_safe(task_id, completed_units=completed, total_units=len(pages))
         
         except Exception as e:
             # Mark task as failed
@@ -466,6 +491,7 @@ def generate_descriptions_task(task_id: str, project_id: str, ai_service,
                 task.error_message = str(e)
                 task.completed_at = datetime.utcnow()
                 db.session.commit()
+            _settle_task_credits_safe(task_id, force_release=True)
 
 
 def generate_images_task(task_id: str, project_id: str, ai_service, file_service,
@@ -574,15 +600,17 @@ def generate_images_task(task_id: str, project_id: str, ai_service, file_service
                                 page_additional_ref_images = image_urls
                                 has_material_images = True
                         
+                        from models import Project
+                        project = Project.query.get(project_id)
+                        external_visual_strategy = (getattr(project, "visual_strategy", None) or "native") == "external_skill"
+
                         # 在子线程中动态获取模板路径，确保使用最新模板
                         page_ref_image_path = None
-                        if use_template:
+                        if use_template and not external_visual_strategy:
                             page_ref_image_path = file_service.get_template_path(project_id)
                             # 注意：如果有风格描述，即使没有模板图片也允许生成
                             # 这个检查已经在 controller 层完成，这里不再检查
 
-                        from models import Project
-                        project = Project.query.get(project_id)
                         visual_guidance = VisualGuidanceService().build_visual_guidance(
                             project=project,
                             page_desc=desc_text,
@@ -596,7 +624,7 @@ def generate_images_task(task_id: str, project_id: str, ai_service, file_service
                             has_material_images=has_material_images,
                             extra_requirements=extra_requirements,
                             language=language,
-                            has_template=use_template,
+                            has_template=bool(page_ref_image_path),
                             aspect_ratio=aspect_ratio,
                             visual_guidance=visual_guidance,
                         )
@@ -658,10 +686,19 @@ def generate_images_task(task_id: str, project_id: str, ai_service, file_service
                         if error:
                             page.status = 'FAILED'
                             failed += 1
+                            from models import GenerationJob
+                            for job in GenerationJob.query.filter_by(task_id=task_id, page_id=page_id).all():
+                                job.status = 'failed'
+                                job.error_message = error
+                                job.retry_count = (job.retry_count or 0) + 1
                             db.session.commit()
                         else:
                             # 图片已在子线程中保存并创建版本记录，这里只需要更新计数
                             completed += 1
+                            from models import GenerationJob
+                            for job in GenerationJob.query.filter_by(task_id=task_id, page_id=page_id).all():
+                                job.status = 'completed'
+                                job.completed_at = datetime.utcnow()
                             # 刷新页面对象以获取最新状态
                             db.session.refresh(page)
                     
@@ -695,6 +732,7 @@ def generate_images_task(task_id: str, project_id: str, ai_service, file_service
                 project.status = 'COMPLETED'
                 db.session.commit()
                 logger.info(f"Project {project_id} status updated to COMPLETED")
+            _settle_task_credits_safe(task_id, completed_units=completed, total_units=len(pages))
         
         except Exception as e:
             # Mark task as failed
@@ -704,6 +742,7 @@ def generate_images_task(task_id: str, project_id: str, ai_service, file_service
                 task.error_message = str(e)
                 task.completed_at = datetime.utcnow()
                 db.session.commit()
+            _settle_task_credits_safe(task_id, force_release=True)
 
 
 def generate_single_page_image_task(task_id: str, project_id: str, page_id: str, 
@@ -768,15 +807,17 @@ def generate_single_page_image_task(task_id: str, project_id: str, page_id: str,
                     additional_ref_images = image_urls
                     has_material_images = True
             
+            from models import Project
+            project = Project.query.get(project_id)
+            external_visual_strategy = (getattr(project, "visual_strategy", None) or "native") == "external_skill"
+
             # Get template path if use_template
             ref_image_path = None
-            if use_template:
+            if use_template and not external_visual_strategy:
                 ref_image_path = file_service.get_template_path(project_id)
                 # 注意：如果有风格描述，即使没有模板图片也允许生成
                 # 这个检查已经在 controller 层完成，这里不再检查
 
-            from models import Project
-            project = Project.query.get(project_id)
             visual_guidance = VisualGuidanceService().build_visual_guidance(
                 project=project,
                 page_desc=desc_text,
@@ -794,7 +835,7 @@ def generate_single_page_image_task(task_id: str, project_id: str, page_id: str,
                 has_material_images=has_material_images,
                 extra_requirements=extra_requirements,
                 language=language,
-                has_template=use_template,
+                has_template=bool(ref_image_path),
                 aspect_ratio=aspect_ratio,
                 visual_guidance=visual_guidance,
             )
@@ -825,6 +866,7 @@ def generate_single_page_image_task(task_id: str, project_id: str, page_id: str,
             db.session.commit()
             
             logger.info(f"✅ Task {task_id} COMPLETED - Page {page_id} image generated")
+            _settle_task_credits_safe(task_id, completed_units=1, total_units=1)
         
         except Exception as e:
             import traceback
@@ -844,6 +886,7 @@ def generate_single_page_image_task(task_id: str, project_id: str, page_id: str,
             if page:
                 page.status = 'FAILED'
                 db.session.commit()
+            _settle_task_credits_safe(task_id, force_release=True)
 
 
 def edit_page_image_task(task_id: str, project_id: str, page_id: str,
@@ -924,6 +967,7 @@ def edit_page_image_task(task_id: str, project_id: str, page_id: str,
             db.session.commit()
             
             logger.info(f"✅ Task {task_id} COMPLETED - Page {page_id} image edited")
+            _settle_task_credits_safe(task_id, completed_units=1, total_units=1)
         
         except Exception as e:
             import traceback
@@ -951,6 +995,7 @@ def edit_page_image_task(task_id: str, project_id: str, page_id: str,
             if page:
                 page.status = 'FAILED'
                 db.session.commit()
+            _settle_task_credits_safe(task_id, force_release=True)
 
 
 def generate_material_image_task(task_id: str, project_id: str, prompt: str,
@@ -1029,6 +1074,7 @@ def generate_material_image_task(task_id: str, project_id: str, prompt: str,
             db.session.commit()
             
             logger.info(f"✅ Task {task_id} COMPLETED - Material {material.id} generated")
+            _settle_task_credits_safe(task_id, completed_units=1, total_units=1)
         
         except Exception as e:
             import traceback
@@ -1042,6 +1088,7 @@ def generate_material_image_task(task_id: str, project_id: str, prompt: str,
                 task.error_message = str(e)
                 task.completed_at = datetime.utcnow()
                 db.session.commit()
+            _settle_task_credits_safe(task_id, force_release=True)
         
         finally:
             if temp_dir:
@@ -1186,6 +1233,7 @@ def process_material_image_task(
             db.session.commit()
 
             logger.info(f"✅ Task {task_id} COMPLETED - Material {material.id} processed via {operation}")
+            _settle_task_credits_safe(task_id, completed_units=1, total_units=1)
 
         except Exception as e:
             import traceback
@@ -1198,6 +1246,7 @@ def process_material_image_task(
                 task.error_message = str(e)
                 task.completed_at = datetime.utcnow()
                 db.session.commit()
+            _settle_task_credits_safe(task_id, force_release=True)
 
         finally:
             if source_image is not None:
@@ -1588,6 +1637,7 @@ def process_ppt_to_ppt_task(
                 done_progress["target_page_count"] = target_page_count
             task.set_progress(done_progress)
             db.session.commit()
+            _settle_task_credits_safe(task_id, completed_units=1, total_units=1)
         except Exception as exc:
             db.session.rollback()
             task = Task.query.get(task_id)
@@ -1604,6 +1654,7 @@ def process_ppt_to_ppt_task(
             if project:
                 project.status = "DRAFT"
             db.session.commit()
+            _settle_task_credits_safe(task_id, force_release=True)
 
 
 def export_editable_pptx_with_recursive_analysis_task(
@@ -1818,6 +1869,7 @@ def export_editable_pptx_with_recursive_analysis_task(
                 })
                 db.session.commit()
                 logger.info(f"✓ 任务 {task_id} 完成 - 递归分析导出成功（深度={max_depth}）")
+                _settle_task_credits_safe(task_id, completed_units=len(image_paths), total_units=len(image_paths))
 
         except ExportError as e:
             # 导出错误（fail_fast 模式下的详细错误）
@@ -1848,6 +1900,7 @@ def export_editable_pptx_with_recursive_analysis_task(
                     "help_text": e.help_text
                 })
                 db.session.commit()
+            _settle_task_credits_safe(task_id, force_release=True)
 
         except Exception as e:
             import traceback
@@ -1861,6 +1914,7 @@ def export_editable_pptx_with_recursive_analysis_task(
                 task.error_message = str(e)
                 task.completed_at = datetime.utcnow()
                 db.session.commit()
+            _settle_task_credits_safe(task_id, force_release=True)
 
 
 def export_video_task(

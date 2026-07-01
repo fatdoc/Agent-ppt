@@ -8,6 +8,14 @@ from utils import success_response, error_response, not_found, bad_request
 from utils.auth import current_user_id, owned_project_or_404
 from services import FileService, ProjectContext
 from services.ai_service_manager import get_ai_service
+from services.credit_service import (
+    InsufficientCredits,
+    attach_task_credit_progress,
+    debit_credits_now,
+    ensure_credits_available,
+    estimate_operation,
+    reserve_credits,
+)
 from services.task_manager import task_manager, generate_single_page_image_task, edit_page_image_task
 from datetime import datetime
 from pathlib import Path
@@ -19,6 +27,21 @@ import json
 logger = logging.getLogger(__name__)
 
 page_bp = Blueprint('pages', __name__, url_prefix='/api/projects')
+
+
+def _is_paper_operators_harness(project: Project) -> bool:
+    return (
+        (project.generation_mode or 'fast') == 'harness'
+        and project.harness_template == 'paper_operators'
+    )
+
+
+def _credit_error_response(exc: InsufficientCredits):
+    return error_response(
+        'INSUFFICIENT_CREDITS',
+        f'积分不足：需要 {exc.required}，当前可用 {exc.available}',
+        402,
+    )
 
 
 @page_bp.route('/<project_id>/pages', methods=['POST'])
@@ -262,6 +285,8 @@ def generate_page_description(project_id, page_id):
         # Check if already generated
         if page.get_description_content() and not force_regenerate:
             return bad_request("Description already exists. Set force_regenerate=true to regenerate")
+        estimate = estimate_operation('page_description', page_count=1)
+        ensure_credits_available(current_user_id(), estimate.amount)
         
         # Get outline content
         outline_content = page.get_outline_content()
@@ -312,11 +337,21 @@ def generate_page_description(project_id, page_id):
         page.set_description_content(desc_content)
         page.status = 'DESCRIPTION_GENERATED'
         page.updated_at = datetime.utcnow()
+        debit_credits_now(
+            user_id=current_user_id(),
+            amount=estimate.amount,
+            operation=estimate.operation,
+            project_id=project_id,
+            metadata={**estimate.details, 'endpoint': 'generate_page_description', 'page_id': page_id},
+        )
         
         db.session.commit()
         
         return success_response(page.to_dict())
     
+    except InsufficientCredits as e:
+        db.session.rollback()
+        return _credit_error_response(e)
     except Exception as e:
         db.session.rollback()
         return error_response('AI_SERVICE_ERROR', str(e), 503)
@@ -412,12 +447,13 @@ def generate_page_image(project_id, page_id):
         
         # Get template path
         ref_image_path = None
-        if use_template:
+        external_visual_strategy = (project.visual_strategy or 'native') == 'external_skill'
+        if use_template and not external_visual_strategy:
             ref_image_path = file_service.get_template_path(project_id)
         
         # 检查是否有模板图片或风格描述
         # 如果都没有，则返回错误
-        if not ref_image_path and not project.template_style:
+        if not external_visual_strategy and not ref_image_path and not project.template_style and not _is_paper_operators_harness(project):
             return bad_request("No template image or style description found for project")
         
         # Generate prompt
@@ -450,6 +486,7 @@ def generate_page_image(project_id, page_id):
         extra_requirements = project.extra_requirements or ""
         
         # Create async task for image generation
+        estimate = estimate_operation('images', page_count=1)
         task = Task(
             user_id=current_user_id(),
             project_id=project_id,
@@ -462,6 +499,16 @@ def generate_page_image(project_id, page_id):
             'failed': 0
         })
         db.session.add(task)
+        db.session.flush()
+        reserve_credits(
+            user_id=current_user_id(),
+            amount=estimate.amount,
+            operation=estimate.operation,
+            project_id=project_id,
+            task_id=task.id,
+            metadata={**estimate.details, 'endpoint': 'generate_page_image', 'page_id': page_id},
+        )
+        attach_task_credit_progress(task, estimate)
         db.session.commit()
         
         # Get app instance for background task
@@ -488,9 +535,13 @@ def generate_page_image(project_id, page_id):
         return success_response({
             'task_id': task.id,
             'page_id': page_id,
-            'status': 'PENDING'
+            'status': 'PENDING',
+            'credit_estimate': estimate.to_dict(),
         }, status_code=202)
     
+    except InsufficientCredits as e:
+        db.session.rollback()
+        return _credit_error_response(e)
     except Exception as e:
         db.session.rollback()
         return error_response('AI_SERVICE_ERROR', str(e), 503)
@@ -624,6 +675,7 @@ def edit_page_image(project_id, page_id):
                 raise e
         
         # Create async task for image editing
+        estimate = estimate_operation('image_edit', page_count=1)
         task = Task(
             user_id=current_user_id(),
             project_id=project_id,
@@ -636,6 +688,16 @@ def edit_page_image(project_id, page_id):
             'failed': 0
         })
         db.session.add(task)
+        db.session.flush()
+        reserve_credits(
+            user_id=current_user_id(),
+            amount=estimate.amount,
+            operation=estimate.operation,
+            project_id=project_id,
+            task_id=task.id,
+            metadata={**estimate.details, 'endpoint': 'edit_page_image', 'page_id': page_id},
+        )
+        attach_task_credit_progress(task, estimate)
         db.session.commit()
         
         # Get app instance for background task
@@ -662,9 +724,13 @@ def edit_page_image(project_id, page_id):
         return success_response({
             'task_id': task.id,
             'page_id': page_id,
-            'status': 'PENDING'
+            'status': 'PENDING',
+            'credit_estimate': estimate.to_dict(),
         }, status_code=202)
     
+    except InsufficientCredits as e:
+        db.session.rollback()
+        return _credit_error_response(e)
     except Exception as e:
         db.session.rollback()
         return error_response('AI_SERVICE_ERROR', str(e), 503)

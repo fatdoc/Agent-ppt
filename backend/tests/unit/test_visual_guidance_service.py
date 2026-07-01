@@ -58,3 +58,31 @@ def test_blueprint_priority_beats_template_style():
     assert guidance["reference_images"]["blueprint_layout_reference"] == "primary"
     assert guidance["reference_images"]["style_reference"] == "supplemental"
     assert "PPT 蓝图对应页截图" in guidance["global_visual_system"]
+
+
+def test_external_skill_strategy_ignores_native_style_sources():
+    from services.visual_guidance_service import VisualGuidanceService
+
+    project = SimpleNamespace(
+        visual_strategy="external_skill",
+        external_style_skill_id="ppt-style-pro",
+        external_style_payload={"style_prompt": "只使用外部 Skill 的黑金发布会视觉系统"},
+        template_style="浅色手绘风",
+        extra_requirements="减少文字",
+    )
+    service = VisualGuidanceService()
+
+    guidance = service.build_visual_guidance(
+        project=project,
+        page_desc="页面描述要求使用橙色复古风。",
+        has_template_image=True,
+        has_blueprint_page=True,
+    )
+
+    assert guidance["style_priority"] == "external_skill_first"
+    assert guidance["reference_images"]["style_reference"] == "external_skill"
+    assert guidance["reference_images"]["blueprint_layout_reference"] is None
+    assert "外部风格 Skill 是唯一的全局视觉系统" in guidance["global_visual_system"]
+    assert "黑金发布会视觉系统" in guidance["global_visual_system"]
+    assert "浅色手绘风" not in guidance["global_visual_system"]
+    assert "PPT 蓝图对应页截图" not in guidance["global_visual_system"]

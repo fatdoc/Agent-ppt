@@ -182,7 +182,6 @@ describe('initializeProject - reference file association', () => {
         '16:9',
         {
           scenario: '内部培训',
-          color_tone: '蓝绿色',
           density: '简洁',
           page_count: '5页',
           style_template: '现代商务',
@@ -200,6 +199,68 @@ describe('initializeProject - reference file association', () => {
       }),
     }))
     expect(mockGenerateOutline).toHaveBeenCalledWith('proj-001')
+  })
+
+  it('should pass external visual strategy without native template style', async () => {
+    const { result } = renderHook(() => useProjectStore())
+
+    await act(async () => {
+      await result.current.initializeProject(
+        'idea',
+        'AI 工具入门',
+        undefined,
+        undefined,
+        undefined,
+        '16:9',
+        undefined,
+        undefined,
+        false,
+        {
+          visual_strategy: 'external_skill',
+          external_style_skill_id: 'ppt-style-pro',
+          external_style_payload: { style_prompt: '外部 Skill 黑金风格' },
+        }
+      )
+    })
+
+    expect(mockCreateProject).toHaveBeenCalledWith(expect.objectContaining({
+      idea_prompt: 'AI 工具入门',
+      visual_strategy: 'external_skill',
+      external_style_skill_id: 'ppt-style-pro',
+      external_style_payload: { style_prompt: '外部 Skill 黑金风格' },
+    }))
+    expect(mockCreateProject.mock.calls[0][0]).not.toHaveProperty('template_style')
+  })
+
+  it('should pass harness generation mode without removing native style controls', async () => {
+    const { result } = renderHook(() => useProjectStore())
+
+    await act(async () => {
+      await result.current.initializeProject(
+        'idea',
+        'AI 工具入门',
+        undefined,
+        '稳重科技风',
+        undefined,
+        '16:9',
+        undefined,
+        undefined,
+        false,
+        { visual_strategy: 'native' },
+        {
+          generation_mode: 'harness',
+          harness_template: 'paper_operators',
+        }
+      )
+    })
+
+    expect(mockCreateProject).toHaveBeenCalledWith(expect.objectContaining({
+      idea_prompt: 'AI 工具入门',
+      template_style: '稳重科技风',
+      visual_strategy: 'native',
+      generation_mode: 'harness',
+      harness_template: 'paper_operators',
+    }))
   })
 
   it('should create outline-only content projects and generate outline when page descriptions are empty', async () => {

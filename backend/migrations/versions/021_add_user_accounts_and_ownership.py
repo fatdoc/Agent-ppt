@@ -43,7 +43,7 @@ def _column_exists(table_name: str, column_name: str) -> bool:
 
 def _ensure_default_user() -> str:
     bind = op.get_bind()
-    row = bind.execute(sa.text("SELECT id FROM users WHERE username = :username"), {"username": "default"}).fetchone()
+    row = bind.execute(sa.text("SELECT id FROM users WHERE username = :username"), {"username": "admin"}).fetchone()
     if row:
         return row[0]
 
@@ -57,8 +57,8 @@ def _ensure_default_user() -> str:
         ),
         {
             "id": user_id,
-            "username": "default",
-            "password_hash": generate_password_hash("banana-slides-default"),
+            "username": "admin",
+            "password_hash": generate_password_hash("admin123"),
         },
     )
     return user_id

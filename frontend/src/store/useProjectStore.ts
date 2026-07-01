@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { NoThinkOptions, Project } from '@/types';
+import type { GenerationMode, HarnessTemplate, NoThinkOptions, Project, VisualStrategy } from '@/types';
 import * as api from '@/api/endpoints';
 import { debounce, normalizeProject, normalizeErrorMessage } from '@/utils';
 import { devLog } from '@/utils/logger';
@@ -73,6 +73,18 @@ const storeI18n = {
 };
 const t = getT(storeI18n);
 
+interface VisualOptions {
+  visual_strategy?: VisualStrategy;
+  external_style_skill_id?: string;
+  external_style_payload?: Record<string, unknown> | string | null;
+}
+
+interface GenerationOptions {
+  generation_mode?: GenerationMode;
+  harness_template?: HarnessTemplate;
+  harness_payload?: Record<string, unknown> | string | null;
+}
+
 interface ProjectState {
   // 状态
   currentProject: Project | null;
@@ -95,7 +107,7 @@ interface ProjectState {
   setError: (error: string | null) => void;
   
   // 项目操作
-  initializeProject: (type: 'idea' | 'outline' | 'description' | 'no_think', content: string, templateImage?: File, templateStyle?: string, referenceFileIds?: string[], aspectRatio?: string, noThinkOptions?: NoThinkOptions, pageDescriptions?: string, generateDescriptionsFromOutline?: boolean) => Promise<void>;
+  initializeProject: (type: 'idea' | 'outline' | 'description' | 'no_think', content: string, templateImage?: File, templateStyle?: string, referenceFileIds?: string[], aspectRatio?: string, noThinkOptions?: NoThinkOptions, pageDescriptions?: string, generateDescriptionsFromOutline?: boolean, visualOptions?: VisualOptions, generationOptions?: GenerationOptions) => Promise<void>;
   syncProject: (projectId?: string) => Promise<void>;
   
   // 页面操作
@@ -197,7 +209,7 @@ const debouncedUpdatePage = debounce(
   setError: (error) => set({ error }),
 
   // 初始化项目
-  initializeProject: async (type, content, templateImage, templateStyle, referenceFileIds, aspectRatio, noThinkOptions, pageDescriptions, generateDescriptionsFromOutline = false) => {
+  initializeProject: async (type, content, templateImage, templateStyle, referenceFileIds, aspectRatio, noThinkOptions, pageDescriptions, generateDescriptionsFromOutline = false, visualOptions, generationOptions) => {
     set({ isGlobalLoading: true, error: null });
     try {
       const request: any = {};
@@ -206,9 +218,9 @@ const debouncedUpdatePage = debounce(
       if (type === 'idea') {
         request.idea_prompt = content;
       } else if (type === 'outline') {
+        request.creation_type = 'outline';
         request.outline_text = content;
         if (trimmedPageDescriptions) {
-          request.creation_type = 'descriptions';
           request.description_text = trimmedPageDescriptions;
         }
       } else if (type === 'description') {
@@ -227,6 +239,18 @@ const debouncedUpdatePage = debounce(
       // 添加画面比例（如果有）
       if (aspectRatio) {
         request.image_aspect_ratio = aspectRatio;
+      }
+
+      if (visualOptions) {
+        request.visual_strategy = visualOptions.visual_strategy;
+        request.external_style_skill_id = visualOptions.external_style_skill_id;
+        request.external_style_payload = visualOptions.external_style_payload;
+      }
+
+      if (generationOptions) {
+        request.generation_mode = generationOptions.generation_mode;
+        request.harness_template = generationOptions.harness_template;
+        request.harness_payload = generationOptions.harness_payload;
       }
 
       // 1. 创建项目

@@ -9,7 +9,6 @@ from services.prompt_registry import prompt_registry
 @dataclass
 class NoThinkOptions:
     scenario: str | None = None
-    color_tone: str | None = None
     density: str | None = None
     page_count: str | None = None
     style_template: str | None = None
@@ -20,7 +19,6 @@ class NoThinkOptions:
         data = data or {}
         return cls(
             scenario=_clean(data.get("scenario")),
-            color_tone=_clean(data.get("color_tone")),
             density=_clean(data.get("density")),
             page_count=_clean(data.get("page_count")),
             style_template=_clean(data.get("style_template")),
@@ -39,8 +37,6 @@ class NoThinkService:
             parts.append(f"用户补充说明：{cleaned_extra}")
         if options.scenario:
             parts.append(f"用途场景：{options.scenario}")
-        if options.color_tone:
-            parts.append(f"色调感觉：{options.color_tone}")
         if options.density:
             parts.append(f"内容密度：{options.density}")
         if options.page_count:

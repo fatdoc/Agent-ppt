@@ -9,6 +9,12 @@ from flask import Blueprint, current_app, request
 from models import Project, Task, db
 from services import FileService
 from services.ai_service_manager import get_ai_service
+from services.credit_service import (
+    InsufficientCredits,
+    attach_task_credit_progress,
+    estimate_operation,
+    reserve_credits,
+)
 from services.ppt_to_ppt import (
     BlueprintService,
     PptToPptGenerationService,
@@ -21,6 +27,14 @@ from utils import bad_request, error_response, success_response
 logger = logging.getLogger(__name__)
 
 ppt_to_ppt_bp = Blueprint("ppt_to_ppt", __name__, url_prefix="/api/projects")
+
+
+def _credit_error_response(exc: InsufficientCredits):
+    return error_response(
+        'INSUFFICIENT_CREDITS',
+        f'积分不足：需要 {exc.required}，当前可用 {exc.available}',
+        402,
+    )
 
 
 @ppt_to_ppt_bp.route("/ppt-to-ppt", methods=["POST"])
@@ -67,9 +81,17 @@ def create_ppt_to_ppt_project():
 
         temp_reference_path = _save_temp_reference_file(reference_file, project.id)
         reference_page_count = _count_reference_pages(temp_reference_path)
+        estimated_reference_pages = reference_page_count or options.page_count or 10
+        estimated_target_pages = options.page_count or estimated_reference_pages
+        estimate = estimate_operation(
+            'ppt_to_ppt',
+            reference_page_count=estimated_reference_pages,
+            target_page_count=estimated_target_pages,
+        )
 
         task = Task(
             project_id=project.id,
+            user_id=project.user_id,
             task_type="PPT_TO_PPT_ANALYSIS",
             status="PENDING",
         )
@@ -81,6 +103,16 @@ def create_ppt_to_ppt_project():
             "reference_page_count": reference_page_count,
         })
         db.session.add(task)
+        db.session.flush()
+        reserve_credits(
+            user_id=project.user_id,
+            amount=estimate.amount,
+            operation=estimate.operation,
+            project_id=project.id,
+            task_id=task.id,
+            metadata={**estimate.details, 'endpoint': 'create_ppt_to_ppt_project'},
+        )
+        attach_task_credit_progress(task, estimate)
         db.session.commit()
 
         ai_service = get_ai_service()
@@ -104,8 +136,13 @@ def create_ppt_to_ppt_project():
                 "project_id": project.id,
                 "task_id": task.id,
                 "reference_page_count": reference_page_count,
+                "credit_estimate": estimate.to_dict(),
             }
         )
+    except InsufficientCredits as exc:
+        db.session.rollback()
+        _cleanup_failed_create(project, task, temp_reference_path)
+        return _credit_error_response(exc)
     except ValueError as exc:
         db.session.rollback()
         _cleanup_failed_create(project, task, temp_reference_path)

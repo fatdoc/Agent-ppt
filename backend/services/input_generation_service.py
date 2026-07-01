@@ -7,6 +7,7 @@ import re
 from typing import Any
 
 from models import Page, db
+from services.harness_generation_service import clear_harness_artifacts, enhance_project_context, ensure_page_visual_plans
 
 
 @dataclass
@@ -238,6 +239,10 @@ class InputGenerationService:
                 getattr(project_context, "description_text", "") or "",
                 expected_count=len(pages),
             )
+            if raw_descriptions is None and getattr(project_context, "outline_text", None):
+                raise ValueError(
+                    "逐页描述数量必须和大纲页数一致，请使用“第 1 页/第 2 页”格式逐页填写。"
+                )
             if raw_descriptions is None:
                 raw_descriptions = self.ai_service.parse_description_to_page_descriptions(
                     project_context,
@@ -325,9 +330,12 @@ class InputGenerationService:
         if options.target_depth not in self.VALID_TARGET_DEPTHS:
             raise ValueError(f"Unsupported target_depth: {options.target_depth}")
 
+        project_context = enhance_project_context(project, project_context)
         outline = self.build_outline(options.input_kind, project_context, options)
         page_descriptions = self.build_descriptions(options.input_kind, outline, project_context, options)
+        clear_harness_artifacts(project.id)
         pages = self.save_pages(project.id, outline, page_descriptions, mode=save_mode)
+        ensure_page_visual_plans(project, pages)
 
         if page_descriptions is not None and pages:
             status = "DESCRIPTIONS_GENERATED"

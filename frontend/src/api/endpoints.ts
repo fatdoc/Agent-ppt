@@ -1,6 +1,59 @@
 import { apiClient, getAuthHeaders } from './client';
-import type { Project, Task, ApiResponse, CreateProjectRequest, Page } from '@/types';
+import type { Project, Task, ApiResponse, CreateProjectRequest, Page, CreditAccount, CreditEstimate, CreditLedgerEntry, GenerationMode, HarnessTemplate } from '@/types';
 import type { Settings } from '../types/index';
+
+export interface AgentModeCreatePlanRequest {
+  topic: string;
+  audience: string;
+  page_count: number;
+  style?: string;
+  generation_mode?: GenerationMode;
+  harness_template?: HarnessTemplate;
+}
+
+export interface AgentModeDeckVersion {
+  deck_version_id: string;
+  project_id: string;
+  status: string;
+  deck_plan: Record<string, any>;
+  visual_system?: Record<string, any> | null;
+  slides: Array<Record<string, any>>;
+}
+
+export const createAgentModePlan = async (data: AgentModeCreatePlanRequest): Promise<ApiResponse<AgentModeDeckVersion>> => {
+  const response = await apiClient.post<ApiResponse<AgentModeDeckVersion>>('/api/agent-mode/plans', data);
+  return response.data;
+};
+
+export const getAgentModePlan = async (projectId: string, deckVersionId: string): Promise<ApiResponse<AgentModeDeckVersion>> => {
+  const response = await apiClient.get<ApiResponse<AgentModeDeckVersion>>(`/api/agent-mode/projects/${projectId}/deck-versions/${deckVersionId}`);
+  return response.data;
+};
+
+export const updateAgentSlideContent = async (projectId: string, deckVersionId: string, slideVersionId: string, slidePlan: Record<string, any>): Promise<ApiResponse<Record<string, any>>> => {
+  const response = await apiClient.put<ApiResponse<Record<string, any>>>(`/api/agent-mode/projects/${projectId}/deck-versions/${deckVersionId}/slides/${slideVersionId}/content`, { slide_plan: slidePlan });
+  return response.data;
+};
+
+export const updateAgentSlideVisualPlan = async (projectId: string, deckVersionId: string, slideVersionId: string, visualPlan: Record<string, any>): Promise<ApiResponse<Record<string, any>>> => {
+  const response = await apiClient.put<ApiResponse<Record<string, any>>>(`/api/agent-mode/projects/${projectId}/deck-versions/${deckVersionId}/slides/${slideVersionId}/visual-plan`, { visual_plan: visualPlan });
+  return response.data;
+};
+
+export const setAgentSlideLock = async (projectId: string, deckVersionId: string, slideVersionId: string, locked: boolean): Promise<ApiResponse<Record<string, any>>> => {
+  const response = await apiClient.post<ApiResponse<Record<string, any>>>(`/api/agent-mode/projects/${projectId}/deck-versions/${deckVersionId}/slides/${slideVersionId}/lock`, { locked });
+  return response.data;
+};
+
+export const generateAgentStylePreview = async (projectId: string, deckVersionId: string, slideVersionIds?: string[]): Promise<ApiResponse<{ task_id: string; generation_jobs: Array<Record<string, any>>; page_ids: string[] }>> => {
+  const response = await apiClient.post<ApiResponse<{ task_id: string; generation_jobs: Array<Record<string, any>>; page_ids: string[] }>>(`/api/agent-mode/projects/${projectId}/deck-versions/${deckVersionId}/style-preview`, { slide_version_ids: slideVersionIds });
+  return response.data;
+};
+
+export const generateAgentRemainingSlides = async (projectId: string, deckVersionId: string): Promise<ApiResponse<{ task_id: string; generation_jobs: Array<Record<string, any>>; page_ids: string[] }>> => {
+  const response = await apiClient.post<ApiResponse<{ task_id: string; generation_jobs: Array<Record<string, any>>; page_ids: string[] }>>(`/api/agent-mode/projects/${projectId}/deck-versions/${deckVersionId}/generate-remaining`, {});
+  return response.data;
+};
 
 // ===== 访问口令 API =====
 
@@ -50,6 +103,31 @@ export const logout = async (): Promise<ApiResponse> => {
   return response.data;
 };
 
+export const getMyCredits = async (): Promise<ApiResponse<{
+  account: CreditAccount;
+  recent_entries: CreditLedgerEntry[];
+  pricing: Record<string, any>;
+}>> => {
+  const response = await apiClient.get<ApiResponse<{
+    account: CreditAccount;
+    recent_entries: CreditLedgerEntry[];
+    pricing: Record<string, any>;
+  }>>('/api/credits/me');
+  return response.data;
+};
+
+export const estimateCredits = async (data: {
+  operation: string;
+  project_id?: string;
+  page_count?: number;
+  reference_page_count?: number;
+  target_page_count?: number;
+  text?: string;
+}): Promise<ApiResponse<{ estimate: CreditEstimate }>> => {
+  const response = await apiClient.post<ApiResponse<{ estimate: CreditEstimate }>>('/api/credits/estimate', data);
+  return response.data;
+};
+
 export const checkAccessCode = async (): Promise<ApiResponse<{ enabled: boolean }>> => {
   const response = await apiClient.get<ApiResponse<{ enabled: boolean }>>('/api/access-code/check');
   return response.data;
@@ -80,6 +158,12 @@ export const createProject = async (data: CreateProjectRequest): Promise<ApiResp
     outline_text: data.outline_text,
     description_text: data.description_text,
     template_style: data.template_style,
+    generation_mode: data.generation_mode,
+    harness_template: data.harness_template,
+    harness_payload: data.harness_payload,
+    visual_strategy: data.visual_strategy,
+    external_style_skill_id: data.external_style_skill_id,
+    external_style_payload: data.external_style_payload,
     image_aspect_ratio: data.image_aspect_ratio,
     no_think_options: data.no_think_options,
   });
@@ -760,9 +844,9 @@ export const exportEditablePPTX = async (
   projectId: string,
   filename?: string,
   pageIds?: string[]
-): Promise<ApiResponse<{ task_id: string }>> => {
+): Promise<ApiResponse<{ task_id: string; credit_estimate?: CreditEstimate }>> => {
   const response = await apiClient.post<
-    ApiResponse<{ task_id: string }>
+    ApiResponse<{ task_id: string; credit_estimate?: CreditEstimate }>
   >(`/api/projects/${projectId}/export/editable-pptx`, {
     filename,
     page_ids: pageIds
