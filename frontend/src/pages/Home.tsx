@@ -145,6 +145,7 @@ const homeI18n = {
       messages: {
         enterContent: '请输入内容',
         filesParsing: '还有 {{count}} 个参考文件正在解析中，请等待解析完成',
+        filesParseFailed: '有 {{count}} 个参考文件解析失败，请删除或重新解析后再创建项目',
         projectCreateFailed: '项目创建失败',
         uploadingImage: '正在上传图片并识别内容...',
         imageUploadSuccess: '图片上传成功！已插入到光标位置',
@@ -281,6 +282,7 @@ const homeI18n = {
       messages: {
         enterContent: 'Please enter content',
         filesParsing: '{{count}} reference file(s) are still parsing, please wait',
+        filesParseFailed: '{{count}} reference file(s) failed to parse. Delete or reparse them before creating the project',
         projectCreateFailed: 'Failed to create project',
         uploadingImage: 'Uploading and recognizing image...',
         imageUploadSuccess: 'Image uploaded! Inserted at cursor position',
@@ -896,6 +898,15 @@ export const Home: React.FC = () => {
       show({
         message: t('home.messages.filesParsing', { count: parsingFiles.length }),
         type: 'info'
+      });
+      return;
+    }
+
+    const failedFiles = referenceFiles.filter(f => f.parse_status === 'failed');
+    if (failedFiles.length > 0) {
+      show({
+        message: t('home.messages.filesParseFailed', { count: failedFiles.length }),
+        type: 'error',
       });
       return;
     }
