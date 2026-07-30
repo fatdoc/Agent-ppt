@@ -14,6 +14,7 @@ const mockGetProject = vi.fn()
 const mockAssociateFileToProject = vi.fn()
 const mockUploadTemplate = vi.fn()
 const mockGenerateFromDescription = vi.fn()
+const mockDeleteProject = vi.fn()
 
 vi.mock('@/api/endpoints', () => ({
   createProject: (...args: any[]) => {
@@ -36,6 +37,7 @@ vi.mock('@/api/endpoints', () => ({
     callOrder.push('generateFromDescription')
     return mockGenerateFromDescription(...args)
   },
+  deleteProject: (...args: any[]) => mockDeleteProject(...args),
   // Other mocks needed by the store
   updatePage: vi.fn(),
   updatePageDescription: vi.fn(),
@@ -76,6 +78,7 @@ describe('initializeProject - reference file association', () => {
     })
     mockUploadTemplate.mockResolvedValue({ data: {} })
     mockGenerateFromDescription.mockResolvedValue({ data: {} })
+    mockDeleteProject.mockResolvedValue({ data: {} })
 
     // Reset store
     const { result } = renderHook(() => useProjectStore())
@@ -199,6 +202,41 @@ describe('initializeProject - reference file association', () => {
       }),
     }))
     expect(mockGenerateOutline).toHaveBeenCalledWith('proj-001')
+  })
+
+  it('should preserve a no-think project when generation times out', async () => {
+    const mockGenerateOutline = vi.mocked((await import('@/api/endpoints')).generateOutline)
+    mockGenerateOutline.mockRejectedValue(Object.assign(new Error('timeout of 300000ms exceeded'), {
+      code: 'ECONNABORTED',
+    }))
+
+    const { result } = renderHook(() => useProjectStore())
+
+    await expect(act(async () => {
+      await result.current.initializeProject('no_think', 'AI 工具入门')
+    })).rejects.toThrow('timeout')
+
+    expect(mockDeleteProject).not.toHaveBeenCalled()
+  })
+
+  it('should surface a project 404 instead of leaving the page in permanent loading', async () => {
+    mockGetProject.mockRejectedValue({
+      response: {
+        status: 404,
+        data: { error: { message: '项目不存在或无权访问' } },
+      },
+    })
+    localStorage.setItem('currentProjectId', 'missing-project')
+
+    const { result } = renderHook(() => useProjectStore())
+
+    await act(async () => {
+      await result.current.syncProject('missing-project')
+    })
+
+    expect(result.current.currentProject).toBeNull()
+    expect(result.current.error).toBe('项目不存在或无权访问')
+    expect(localStorage.getItem('currentProjectId')).toBeNull()
   })
 
   it('should pass external visual strategy without native template style', async () => {

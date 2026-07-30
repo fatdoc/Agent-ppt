@@ -30,6 +30,8 @@ from controllers.auth_controller import auth_bp
 from controllers.openai_oauth_controller import openai_oauth_bp
 from controllers.ppt_to_ppt_controller import ppt_to_ppt_bp
 from controllers.agent_mode_controller import agent_mode_bp
+from controllers.api_key_controller import api_key_bp
+from controllers.public_ppt_controller import public_ppt_bp
 from controllers import project_bp, page_bp, template_bp, user_template_bp, user_style_template_bp, export_bp, file_bp, style_bp
 
 
@@ -124,6 +126,8 @@ def create_app():
     app.register_blueprint(auth_bp)
     app.register_blueprint(openai_oauth_bp)
     app.register_blueprint(style_bp)
+    app.register_blueprint(api_key_bp)
+    app.register_blueprint(public_ppt_bp)
 
     with app.app_context():
         # Load settings from database and sync to app.config

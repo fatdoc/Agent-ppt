@@ -50,3 +50,14 @@ class TestImagePromptAspectRatio:
         assert "页面局部视觉说明" in prompt
         assert "<style_conflict_rule>" not in prompt
         assert "页面描述中的普通风格词" not in prompt
+
+    def test_image_prompt_prefers_sparse_slide_text_over_rendering_every_word(self):
+        prompt = get_image_generation_prompt(
+            page_desc="页面标题：闭环自动调控。页面要点：采集、判断、控制。",
+            outline_text="Test outline",
+            current_section="Section 1",
+        )
+
+        assert "不重不漏" not in prompt
+        assert "只呈现演示所需的核心文字" in prompt
+        assert "不得把提示词中的页面角色" in prompt

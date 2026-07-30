@@ -33,22 +33,27 @@ Agent 模式是当前项目最重要的工作流。它通过 `/api/agent-mode` �
 - 支持编辑页面标题、主张、reader takeaway 和构图描述。
 - 支持锁定页面，避免后续覆盖。
 - 支持先生成风格验证页，再确认批量生成剩余页面。
-- 当前内置 Harness 模板为 `paper_operators`。
+- 内置 Harness 场景包：`paper_operators`（纸片人）、`lecture_deck`（课程讲义）、`product_launch`（产品发布会）、`consulting_report`（咨询汇报）。
 
-### paper-operators 视觉策略
+### Harness 场景包（结构与视觉解耦）
 
-`paper_operators` 是当前内置的高质量视觉策略。它不是固定模板图，而是一套页面组织和视觉约束方法。
+每个场景包由两层组成，产品层默认绑定、架构层解耦：
 
-它会为页面生成：
+- **结构 Skill**：页面角色系统、叙事组织、构图骨架、素材策略和校验规则，对任何视觉来源都生效。
+- **默认视觉 Skill**：色板、材质、画风、字体气质，仅在用户未指定视觉来源时生效。
 
-- `source_anchor`：本页视觉和叙事的依据。
-- `reader_takeaway`：读者看完这一页要带走的判断。
-- `operator_required`：是否需要纸片人参与表达。
-- `operator_family`：纸片人的动作角色，例如牵线员、检视员、闸门员、权衡员。
-- `metaphor_world`：页面隐喻场景，例如档案桌、纸片小镇、软边界房间。
-- `composition`：16:9 页面构图要求。
-- `labels`：中文短标签。
-- `negative_prompts`：避免模板感、库存图标、机器人头、发光 AI 大脑等常见失真元素。
+视觉覆写规则（resolver 优先级）：用户模板图 > 用户风格文字 > 场景包默认视觉；外部风格 Skill 启用时锁定其他视觉来源。上传模板图会整体替换默认视觉，风格文字在默认视觉之上优先生效，页面结构与成图质量硬约束（4K、真实可读文字、无伪影乱码）始终保留。
+
+场景包会为页面生成：
+
+- `source_anchor` / `reader_takeaway`：本页叙事依据与读者收获。
+- `page_role`：页面角色（如概念页、例题页、hero 产品页、结论页）。
+- `composition`：与画风无关的构图骨架。
+- `structure_prompt` / `style_prompt`：结构指令与默认视觉指令分离存储。
+- `material_status`：产品发布会包在无真实产品图时标记 `concept_placeholder`（概念图占位，禁止虚构品牌标识）。
+- `labels` / `negative_prompts`：中文短标签与负面约束。
+
+`paper_operators` 的纸片人角色（牵线员、检视员、闸门员、权衡员等）在结构层是功能角色，默认视觉把它渲染成无脸折纸小人；替换视觉后角色叙事仍然保留。
 
 ### 混乱材料模式
 
@@ -316,7 +321,7 @@ pnpm build:check
 - `backend/services/agent_mode_service.py`：Agent Mode v1 主流程。
 - `backend/services/agent_mode_tools.py`：Agent 工具层，负责创建项目、页面和生成任务。
 - `backend/services/agent_mode_schemas.py`：结构化计划校验。
-- `backend/services/visual_strategies.py`：内置视觉策略，目前包含 `paper_operators`。
+- `backend/services/harness_skills/`：Harness 场景包（结构 Skill + 默认视觉 Skill + 注册表），内置 `paper_operators`、`lecture_deck`、`product_launch`、`consulting_report`。
 - `backend/services/harness_generation_service.py`：普通生成流程中的 Harness 增强。
 - `backend/controllers/agent_mode_controller.py`：Agent Mode API。
 - `backend/controllers/credit_controller.py`：积分接口。

@@ -1323,13 +1323,23 @@ def process_ppt_renovation_task(task_id: str, project_id: str, ai_service,
             page_pdfs = split_pdf_to_pages(pdf_path, split_dir)
             logger.info(f"Split PDF into {len(page_pdfs)} pages")
 
-            # Get existing pages
+            # Get existing pages and detach the immutable data needed by workers.
+            # SQLAlchemy model instances belong to the current scoped session and
+            # must not be shared across the worker app contexts below.
             pages = Page.query.filter_by(project_id=project_id).order_by(Page.order_index).all()
+            page_jobs = [
+                {
+                    "id": page.id,
+                    "cached_image_path": page.cached_image_path,
+                    "generated_image_path": page.generated_image_path,
+                }
+                for page in pages
+            ]
 
             # Ensure page count matches
             if len(pages) != len(page_pdfs):
                 logger.warning(f"Page count mismatch: {len(pages)} pages vs {len(page_pdfs)} PDFs. Using min.")
-            page_count = min(len(pages), len(page_pdfs))
+            page_count = min(len(page_jobs), len(page_pdfs))
             if page_count == 0:
                 raise ValueError("No pages to process")
 
@@ -1351,7 +1361,7 @@ def process_ppt_renovation_task(task_id: str, project_id: str, ai_service,
             extraction_errors = []
             content_results = {}  # index -> {title, points, description}
 
-            def process_single_page(idx, page_pdf_path):
+            def process_single_page(idx, page_pdf_path, page_job):
                 nonlocal completed, failed
                 with app.app_context():
                     try:
@@ -1359,7 +1369,7 @@ def process_ppt_renovation_task(task_id: str, project_id: str, ai_service,
                         filename = os.path.basename(page_pdf_path)
                         _batch_id, md_text, extract_id, error_msg, _failed = file_parser_service.parse_file(page_pdf_path, filename)
                         if error_msg:
-                            logger.warning(f"Page {idx} parse warning: {error_msg}")
+                            raise ValueError(f"Page {idx + 1} MinerU 解析失败: {error_msg}")
                         md_text = md_text or ''
 
                         # Supplement with header/footer from layout.json
@@ -1379,23 +1389,21 @@ def process_ppt_renovation_task(task_id: str, project_id: str, ai_service,
                         # Step C: Optional layout caption
                         if keep_layout and not error:
                             try:
-                                page_obj = pages[idx] if idx < len(pages) else None
-                                if page_obj:
-                                    image_path = None
-                                    if page_obj.cached_image_path:
-                                        image_path = file_service.get_absolute_path(page_obj.cached_image_path)
-                                    elif page_obj.generated_image_path:
-                                        image_path = file_service.get_absolute_path(page_obj.generated_image_path)
-                                    if image_path and Path(image_path).exists():
-                                        caption = ai_service.generate_layout_caption(image_path)
-                                        if caption:
-                                            content['description'] += f"\n\n{caption}"
+                                image_path = None
+                                if page_job["cached_image_path"]:
+                                    image_path = file_service.get_absolute_path(page_job["cached_image_path"])
+                                elif page_job["generated_image_path"]:
+                                    image_path = file_service.get_absolute_path(page_job["generated_image_path"])
+                                if image_path and Path(image_path).exists():
+                                    caption = ai_service.generate_layout_caption(image_path)
+                                    if caption:
+                                        content['description'] += f"\n\n{caption}"
                             except Exception as e:
                                 logger.error(f"Layout caption failed for page {idx}: {e}")
 
                         # Step D: Write to DB immediately
                         content_results[idx] = content
-                        page_obj = Page.query.get(pages[idx].id)
+                        page_obj = db.session.get(Page, page_job["id"])
                         if page_obj:
                             title = content.get('title', f'Page {idx + 1}')
                             points = content.get('points', [])
@@ -1427,6 +1435,7 @@ def process_ppt_renovation_task(task_id: str, project_id: str, ai_service,
 
                     except Exception as e:
                         logger.error(f"Pipeline failed for page {idx}: {e}")
+                        db.session.rollback()
                         with progress_lock:
                             failed += 1
                             extraction_errors.append(str(e))
@@ -1437,7 +1446,7 @@ def process_ppt_renovation_task(task_id: str, project_id: str, ai_service,
 
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 futures = [
-                    executor.submit(process_single_page, i, page_pdfs[i])
+                    executor.submit(process_single_page, i, page_pdfs[i], page_jobs[i])
                     for i in range(page_count)
                 ]
                 for future in as_completed(futures):
@@ -1668,6 +1677,7 @@ def export_editable_pptx_with_recursive_analysis_task(
     export_extractor_method: str = 'hybrid',
     export_inpaint_method: str = 'hybrid',
     enable_icon_subject_extraction: bool = True,
+    caption_ai_service=None,
     app=None
 ):
     """
@@ -1691,6 +1701,7 @@ def export_editable_pptx_with_recursive_analysis_task(
         max_workers: 并发处理数
         export_extractor_method: 组件提取方法 ('mineru' 或 'hybrid')
         export_inpaint_method: 背景修复方法 ('generative', 'baidu', 'hybrid')
+        caption_ai_service: 在提交请求时固定的当前用户图片识别服务
         app: Flask应用实例
     """
     logger.info(f"🚀 Task {task_id} started: export_editable_pptx_with_recursive_analysis (project={project_id}, depth={max_depth}, workers={max_workers}, extractor={export_extractor_method}, inpaint={export_inpaint_method}, icon_subject_extraction={enable_icon_subject_extraction})")
@@ -1812,7 +1823,9 @@ def export_editable_pptx_with_recursive_analysis_task(
             
             # Step 2: 创建文字属性提取器
             from services.image_editability import TextAttributeExtractorFactory
-            text_attribute_extractor = TextAttributeExtractorFactory.create_caption_model_extractor()
+            text_attribute_extractor = TextAttributeExtractorFactory.create_caption_model_extractor(
+                ai_service=caption_ai_service
+            )
             progress_callback("准备", "文字属性提取器已初始化", 5)
             
             # Step 3: 调用导出方法（使用项目的导出设置）
@@ -1831,7 +1844,8 @@ def export_editable_pptx_with_recursive_analysis_task(
                 export_extractor_method=export_extractor_method,
                 export_inpaint_method=export_inpaint_method,
                 enable_icon_subject_extraction=enable_icon_subject_extraction,
-                fail_fast=fail_fast
+                fail_fast=fail_fast,
+                ai_service=caption_ai_service,
             )
             
             logger.info(f"✓ 可编辑PPTX已创建: {output_path}")

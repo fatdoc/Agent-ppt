@@ -55,6 +55,11 @@ export default defineConfig(({ mode }) => {
           target: backendUrl,
           changeOrigin: true,
         },
+        // 版本化开放 API（大纲 -> 逐页描述 -> 图片）
+        '/v1': {
+          target: backendUrl,
+          changeOrigin: true,
+        },
         // 文件服务代理到后端
         '/files': {
           target: backendUrl,

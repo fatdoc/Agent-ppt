@@ -15,9 +15,10 @@ def make_genai_client(
     api_base: str = None,
     project_id: str = None,
     location: str = None,
+    timeout_seconds: float = None,
 ) -> genai.Client:
     """Construct a ``genai.Client`` for either AI Studio or Vertex AI."""
-    timeout_ms = int(get_config().GENAI_TIMEOUT * 1000)
+    timeout_ms = int((timeout_seconds or get_config().GENAI_TIMEOUT) * 1000)
 
     if vertexai:
         logger.info("Creating GenAI client (Vertex AI) — project=%s, location=%s", project_id, location)

@@ -36,7 +36,8 @@ from services.credit_service import (
     estimate_project_pages,
     reserve_credits,
 )
-from services.harness_generation_service import clear_harness_artifacts, enhance_project_context, ensure_page_visual_plans
+from services.harness_generation_service import clear_harness_artifacts, enhance_project_context, ensure_page_visual_plans, is_harness_project
+from services.harness_skills import list_scenario_pack_ids, normalize_pack_id
 from services.task_manager import (
     task_manager,
     generate_descriptions_task,
@@ -55,7 +56,7 @@ project_bp = Blueprint('projects', __name__, url_prefix='/api/projects')
 
 VALID_VISUAL_STRATEGIES = {'native', 'external_skill'}
 VALID_GENERATION_MODES = {'fast', 'harness'}
-VALID_HARNESS_TEMPLATES = {'paper_operators'}
+VALID_HARNESS_TEMPLATES = set(list_scenario_pack_ids())
 
 
 def _credit_error_response(exc: InsufficientCredits):
@@ -81,21 +82,12 @@ def _normalize_generation_mode(data: dict) -> str:
 
 
 def _normalize_harness_template(data: dict) -> str | None:
-    template = data.get('harness_template')
+    template = normalize_pack_id(data.get('harness_template'))
     if not template:
         return None
-    if template == 'paper-operators':
-        template = 'paper_operators'
     if template not in VALID_HARNESS_TEMPLATES:
-        raise ValueError("harness_template must be paper_operators")
+        raise ValueError(f"harness_template must be one of: {', '.join(sorted(VALID_HARNESS_TEMPLATES))}")
     return template
-
-
-def _is_paper_operators_harness(project: Project) -> bool:
-    return (
-        (project.generation_mode or 'fast') == 'harness'
-        and project.harness_template == 'paper_operators'
-    )
 
 
 def _apply_generation_mode_fields(project: Project, data: dict) -> None:
@@ -340,8 +332,15 @@ def create_project():
                 return bad_request(str(e))
 
         idea_prompt = data.get('idea_prompt')
+        quick_harness_style = None
         if creation_type == 'no_think':
             options = NoThinkOptions.from_dict(data.get('no_think_options'))
+            quick_harness_style = options.style_template
+            # A dedicated visual source owns style. Do not also leak the Quick
+            # Harness tendency into the content prompt, where it can conflict
+            # with a template, explicit style text, or an external style Skill.
+            if data.get('template_style') or data.get('visual_strategy') == 'external_skill':
+                options.style_template = None
             idea_prompt = NoThinkService().normalize_prompt(idea_prompt, options)
 
         try:
@@ -351,6 +350,17 @@ def create_project():
         except ValueError as e:
             return bad_request(str(e))
 
+        template_style = data.get('template_style')
+        if (
+            creation_type == 'no_think'
+            and not template_style
+            and visual_strategy != 'external_skill'
+            and quick_harness_style
+        ):
+            # An explicitly selected Quick Harness tendency is a user-owned
+            # visual source, not a weak hint for a scenario pack to reinterpret.
+            template_style = quick_harness_style
+
         # Create project
         project = Project(
             user_id=current_user_id(),
@@ -358,7 +368,7 @@ def create_project():
             idea_prompt=idea_prompt,
             outline_text=data.get('outline_text'),
             description_text=data.get('description_text'),
-            template_style=data.get('template_style'),
+            template_style=template_style,
             generation_mode=generation_mode,
             harness_template=harness_template if generation_mode == 'harness' else None,
             visual_strategy=visual_strategy,
@@ -1196,7 +1206,8 @@ def generate_images(project_id):
             ref_image_path = file_service.get_template_path(project_id)
         
         external_visual_strategy = (project.visual_strategy or 'native') == 'external_skill'
-        if not external_visual_strategy and not ref_image_path and not project.template_style and not _is_paper_operators_harness(project):
+        # Harness 场景包自带默认视觉系统，允许在无模板图/无风格描述时生图。
+        if not external_visual_strategy and not ref_image_path and not project.template_style and not is_harness_project(project):
             return bad_request("请先上传模板图片或添加风格描述。")
         
         # Reconstruct outline from pages with part structure
@@ -1575,6 +1586,7 @@ def create_ppt_renovation_project():
 
         # Create project
         project = Project(
+            user_id=current_user_id(),
             creation_type='ppt_renovation',
             template_style=template_style,
             status='DRAFT'
@@ -1764,6 +1776,12 @@ def create_ppt_renovation_project():
 
         app = current_app._get_current_object()
 
+        # Persist PROCESSING before the worker starts. A fast failure (for
+        # example, local MinerU refusing the connection) must be allowed to
+        # write the final DRAFT/FAILED state without this request overwriting it.
+        project.status = 'PROCESSING'
+        db.session.commit()
+
         # Submit async task
         task_manager.submit_task(
             task.id,
@@ -1777,9 +1795,6 @@ def create_ppt_renovation_project():
             app,
             language
         )
-
-        project.status = 'PROCESSING'
-        db.session.commit()
 
         return success_response({
             'project_id': project_id,

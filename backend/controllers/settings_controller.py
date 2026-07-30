@@ -10,9 +10,16 @@ from datetime import datetime, timezone
 from contextlib import contextmanager
 from flask import Blueprint, request, current_app
 from PIL import Image
-from models import db, Settings, Task
-from utils import success_response, error_response, bad_request
-from utils.auth import current_user_id
+from models import db, Settings, Task, User
+from utils import success_response, error_response, bad_request, not_found
+from utils.auth import (
+    ai_config_editable_for_user,
+    ai_config_self_service_enabled,
+    current_user,
+    current_user_id,
+    is_admin_user,
+    require_admin_user,
+)
 from config import Config, PROJECT_ROOT
 from services.ai_service import AIService
 from services.file_parser_service import FileParserService
@@ -24,6 +31,28 @@ from services.task_manager import task_manager
 
 logger = logging.getLogger(__name__)
 ALLOWED_PROVIDER_FORMATS = {"openai", "gemini", "lazyllm", "codex"} | LAZYLLM_VENDORS
+
+# 大模型相关字段：当 AI_CONFIG_SELF_SERVICE 关闭时，这些字段只能由管理员在数据库中维护
+# （每个用户在 settings 表中有一行，见 scripts/set_user_ai_config.py）
+AI_CONFIG_FIELDS = frozenset({
+    "ai_provider_format",
+    "api_base_url",
+    "api_key",
+    "text_model",
+    "image_model",
+    "image_caption_model",
+    "text_model_source",
+    "image_model_source",
+    "image_caption_model_source",
+    "text_api_key",
+    "text_api_base_url",
+    "image_api_key",
+    "image_api_base_url",
+    "image_caption_api_key",
+    "image_caption_api_base_url",
+    "lazyllm_api_keys",
+    "openai_image_api_protocol",
+})
 
 settings_bp = Blueprint(
     "settings", __name__, url_prefix="/api/settings"
@@ -165,7 +194,10 @@ def get_settings():
     """
     try:
         settings = Settings.get_settings()
-        return success_response(settings.to_dict())
+        data = settings.to_dict()
+        data['ai_config_editable'] = ai_config_editable_for_user(current_user())
+        data['current_user_is_admin'] = is_admin_user(current_user())
+        return success_response(data)
     except Exception as e:
         logger.error(f"Error getting settings: {str(e)}")
         return error_response(
@@ -192,6 +224,15 @@ def update_settings():
         data = request.get_json()
         if not data:
             return bad_request("Request body is required")
+
+        if not ai_config_editable_for_user(current_user()):
+            locked = sorted(set(data) & AI_CONFIG_FIELDS)
+            if locked:
+                return error_response(
+                    "AI_CONFIG_LOCKED",
+                    f"模型配置由管理员统一管理，无法在前端修改: {', '.join(locked)}",
+                    403,
+                )
 
         settings = Settings.get_settings()
 
@@ -396,17 +437,21 @@ def reset_settings():
     """
     try:
         settings = Settings.get_settings()
+        preserve_ai_config = not ai_config_self_service_enabled()
 
         # Reset all fields to NULL so .env defaults take over via to_dict()
-        settings.ai_provider_format = None
-        settings.api_base_url = None
-        settings.api_key = None
-        settings.text_model = None
-        settings.image_model = None
+        # 模型配置字段仅在允许自助配置时重置，否则保留管理员在数据库中维护的值
+        if not preserve_ai_config:
+            settings.ai_provider_format = None
+            settings.api_base_url = None
+            settings.api_key = None
+            settings.text_model = None
+            settings.image_model = None
         settings.mineru_api_base = None
         settings.mineru_provider = None
         settings.mineru_token = None
-        settings.image_caption_model = None
+        if not preserve_ai_config:
+            settings.image_caption_model = None
         settings.output_language = None
         settings.enable_text_reasoning = False
         settings.text_thinking_budget = 1024
@@ -419,14 +464,15 @@ def reset_settings():
         settings.elevenlabs_enabled = False
         settings.elevenlabs_api_key = None
         settings.elevenlabs_voice_id = None
-        settings.text_model_source = None
-        settings.image_model_source = None
-        settings.image_caption_model_source = None
-        settings.openai_image_api_protocol = None
-        settings.lazyllm_api_keys = None
-        for model_type in ('text', 'image', 'image_caption'):
-            setattr(settings, f'{model_type}_api_key', None)
-            setattr(settings, f'{model_type}_api_base_url', None)
+        if not preserve_ai_config:
+            settings.text_model_source = None
+            settings.image_model_source = None
+            settings.image_caption_model_source = None
+            settings.openai_image_api_protocol = None
+            settings.lazyllm_api_keys = None
+            for model_type in ('text', 'image', 'image_caption'):
+                setattr(settings, f'{model_type}_api_key', None)
+                setattr(settings, f'{model_type}_api_base_url', None)
         settings.image_resolution = None
         settings.image_aspect_ratio = None
         settings.max_description_workers = None
@@ -527,6 +573,221 @@ def get_active_config():
         "mineru_api_base": current_app.config.get("MINERU_API_BASE"),
         "mineru_local_api_base": current_app.config.get("MINERU_LOCAL_API_BASE"),
     })
+
+
+def _settings_payload(settings: Settings, *, managed_user: User | None = None) -> dict:
+    data = settings.to_dict()
+    data['ai_config_editable'] = ai_config_editable_for_user(current_user())
+    data['current_user_is_admin'] = is_admin_user(current_user())
+    if managed_user is not None:
+        data['managed_user'] = {
+            'id': managed_user.id,
+            'username': managed_user.username,
+            'email': managed_user.email,
+        }
+    return data
+
+
+def _get_user_settings_or_404(user_id: str) -> tuple[Settings | None, User | None, tuple | None]:
+    user = User.query.filter_by(id=user_id, is_active=True).first()
+    if not user:
+        return None, None, not_found('User')
+    settings = Settings.query.filter_by(user_id=user.id).first()
+    if settings is None:
+        settings = Settings(user_id=user.id)
+        db.session.add(settings)
+        db.session.flush()
+    return settings, user, None
+
+
+def _apply_ai_config_fields(settings: Settings, data: dict) -> tuple | None:
+    """Apply only AI model configuration fields. Returns an error response tuple on failure."""
+    if "ai_provider_format" in data:
+        provider_format = data["ai_provider_format"]
+        if provider_format not in ALLOWED_PROVIDER_FORMATS:
+            allowed_values = "', '".join(sorted(ALLOWED_PROVIDER_FORMATS))
+            return bad_request(f"AI provider format must be one of '{allowed_values}'")
+        settings.ai_provider_format = provider_format
+
+    if "api_base_url" in data:
+        raw_base_url = data["api_base_url"]
+        if raw_base_url is None:
+            settings.api_base_url = None
+        else:
+            value = str(raw_base_url).strip()
+            settings.api_base_url = value if value != "" else None
+
+    if "api_key" in data:
+        settings.api_key = data["api_key"]
+
+    if "text_model" in data:
+        settings.text_model = (data["text_model"] or "").strip() or None
+
+    if "image_model" in data:
+        settings.image_model = (data["image_model"] or "").strip() or None
+
+    if "image_caption_model" in data:
+        settings.image_caption_model = (data["image_caption_model"] or "").strip() or None
+
+    if "text_model_source" in data:
+        settings.text_model_source = (data["text_model_source"] or "").strip() or None
+
+    if "image_model_source" in data:
+        settings.image_model_source = (data["image_model_source"] or "").strip() or None
+
+    if "openai_image_api_protocol" in data:
+        protocol = data["openai_image_api_protocol"]
+        if protocol not in ("auto", "images", "chat"):
+            return bad_request("openai_image_api_protocol must be 'auto', 'images', or 'chat'")
+        settings.openai_image_api_protocol = protocol if protocol != "auto" else None
+
+    if "image_caption_model_source" in data:
+        settings.image_caption_model_source = (data["image_caption_model_source"] or "").strip() or None
+
+    for model_type in ('text', 'image', 'image_caption'):
+        key_field = f'{model_type}_api_key'
+        base_field = f'{model_type}_api_base_url'
+        if key_field in data:
+            setattr(settings, key_field, data[key_field] or None)
+        if base_field in data:
+            setattr(settings, base_field, (data[base_field] or "").strip() or None)
+
+    if "lazyllm_api_keys" in data:
+        keys_data = data["lazyllm_api_keys"]
+        if isinstance(keys_data, dict):
+            existing = settings.get_lazyllm_api_keys_dict()
+            for vendor, key in keys_data.items():
+                if key:
+                    existing[vendor] = key
+            settings.lazyllm_api_keys = json.dumps(existing) if existing else None
+        elif keys_data is None:
+            settings.lazyllm_api_keys = None
+
+    return None
+
+
+def _reset_ai_config_fields(settings: Settings) -> None:
+    settings.ai_provider_format = None
+    settings.api_base_url = None
+    settings.api_key = None
+    settings.text_model = None
+    settings.image_model = None
+    settings.image_caption_model = None
+    settings.text_model_source = None
+    settings.image_model_source = None
+    settings.image_caption_model_source = None
+    settings.openai_image_api_protocol = None
+    settings.lazyllm_api_keys = None
+    for model_type in ('text', 'image', 'image_caption'):
+        setattr(settings, f'{model_type}_api_key', None)
+        setattr(settings, f'{model_type}_api_base_url', None)
+
+
+@settings_bp.route("/admin/users", methods=["GET"], strict_slashes=False)
+def list_admin_managed_users():
+    """GET /api/settings/admin/users - List users for admin model-config management."""
+    auth_error = require_admin_user()
+    if auth_error:
+        return auth_error
+
+    users = User.query.filter_by(is_active=True).order_by(User.username).all()
+    return success_response({
+        'users': [
+            {
+                'id': user.id,
+                'username': user.username,
+                'email': user.email,
+                'is_admin': bool(user.is_admin),
+            }
+            for user in users
+        ],
+    })
+
+
+@settings_bp.route("/admin/users/<user_id>", methods=["GET"], strict_slashes=False)
+def get_admin_user_settings(user_id):
+    """GET /api/settings/admin/users/<user_id> - View another user's model settings."""
+    auth_error = require_admin_user()
+    if auth_error:
+        return auth_error
+
+    settings, user, error = _get_user_settings_or_404(user_id)
+    if error:
+        return error
+    return success_response(_settings_payload(settings, managed_user=user))
+
+
+@settings_bp.route("/admin/users/<user_id>", methods=["PUT"], strict_slashes=False)
+def update_admin_user_settings(user_id):
+    """PUT /api/settings/admin/users/<user_id> - Update another user's AI model config."""
+    auth_error = require_admin_user()
+    if auth_error:
+        return auth_error
+
+    data = request.get_json()
+    if not data:
+        return bad_request("Request body is required")
+
+    disallowed = sorted(set(data) - AI_CONFIG_FIELDS)
+    if disallowed:
+        return bad_request(f"Only AI model config fields are allowed: {', '.join(sorted(AI_CONFIG_FIELDS))}")
+
+    settings, user, error = _get_user_settings_or_404(user_id)
+    if error:
+        return error
+
+    try:
+        field_error = _apply_ai_config_fields(settings, data)
+        if field_error:
+            return field_error
+
+        settings.updated_at = datetime.now(timezone.utc)
+        db.session.commit()
+
+        if user.id == current_user_id():
+            _sync_settings_to_config(settings)
+
+        logger.info("Admin updated AI config for user %s (%s)", user.username, user.id)
+        return success_response(_settings_payload(settings, managed_user=user), "User AI settings updated successfully")
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error updating admin user settings: {str(e)}")
+        return error_response(
+            "UPDATE_ADMIN_USER_SETTINGS_ERROR",
+            f"Failed to update user AI settings: {str(e)}",
+            500,
+        )
+
+
+@settings_bp.route("/admin/users/<user_id>/reset-ai-config", methods=["POST"], strict_slashes=False)
+def reset_admin_user_ai_config(user_id):
+    """POST /api/settings/admin/users/<user_id>/reset-ai-config - Reset another user's AI model config."""
+    auth_error = require_admin_user()
+    if auth_error:
+        return auth_error
+
+    settings, user, error = _get_user_settings_or_404(user_id)
+    if error:
+        return error
+
+    try:
+        _reset_ai_config_fields(settings)
+        settings.updated_at = datetime.now(timezone.utc)
+        db.session.commit()
+
+        if user.id == current_user_id():
+            _sync_settings_to_config(settings)
+
+        logger.info("Admin reset AI config for user %s (%s)", user.username, user.id)
+        return success_response(_settings_payload(settings, managed_user=user), "User AI settings reset successfully")
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error resetting admin user AI config: {str(e)}")
+        return error_response(
+            "RESET_ADMIN_USER_SETTINGS_ERROR",
+            f"Failed to reset user AI settings: {str(e)}",
+            500,
+        )
 
 
 @settings_bp.route("/verify", methods=["POST"], strict_slashes=False)
@@ -1194,6 +1455,12 @@ def run_settings_test(test_name: str):
 
         # 应用前端发送的覆盖参数（如果有的话，用于测试未保存的配置）
         override_settings = request.get_json() or {}
+        if override_settings and not ai_config_editable_for_user(current_user()):
+            # 模型配置锁定时，忽略前端传来的模型相关覆盖，只允许测试数据库中已保存的配置
+            dropped = sorted(set(override_settings) & AI_CONFIG_FIELDS)
+            if dropped:
+                logger.info(f"AI config locked, dropping test overrides: {dropped}")
+            override_settings = {k: v for k, v in override_settings.items() if k not in AI_CONFIG_FIELDS}
         if override_settings:
             logger.info(f"Applying test setting overrides: {list(override_settings.keys())}")
             test_settings.update(override_settings)

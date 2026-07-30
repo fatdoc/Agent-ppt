@@ -25,6 +25,7 @@ def create_agent_plan():
             style=str(data.get('style') or '').strip(),
             generation_mode=str(data.get('generation_mode') or 'harness').strip(),
             harness_template=str(data.get('harness_template') or data.get('visual_strategy') or 'paper_operators').strip(),
+            harness_payload=data.get('harness_payload') if isinstance(data.get('harness_payload'), dict) else None,
         )
         return success_response(result, status_code=201)
     except ValueError as exc:

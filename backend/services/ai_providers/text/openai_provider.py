@@ -3,7 +3,7 @@ OpenAI SDK implementation for text generation
 """
 import base64
 import logging
-from typing import Generator
+from typing import Generator, Optional
 from openai import OpenAI
 from .base import TextProvider, strip_think_tags
 from config import get_config
@@ -14,7 +14,14 @@ logger = logging.getLogger(__name__)
 class OpenAITextProvider(TextProvider):
     """Text generation using OpenAI SDK (compatible with Gemini via proxy)"""
     
-    def __init__(self, api_key: str, api_base: str = None, model: str = "gemini-3-flash-preview"):
+    def __init__(
+        self,
+        api_key: str,
+        api_base: str = None,
+        model: str = "gemini-3-flash-preview",
+        timeout: Optional[float] = None,
+        max_retries: Optional[int] = None,
+    ):
         """
         Initialize OpenAI text provider
         
@@ -26,8 +33,8 @@ class OpenAITextProvider(TextProvider):
         self.client = OpenAI(
             api_key=api_key,
             base_url=api_base,
-            timeout=get_config().OPENAI_TIMEOUT,  # set timeout from config
-            max_retries=get_config().OPENAI_MAX_RETRIES  # set max retries from config
+            timeout=timeout if timeout is not None else get_config().TEXT_REQUEST_TIMEOUT,
+            max_retries=max_retries if max_retries is not None else get_config().TEXT_REQUEST_MAX_RETRIES,
         )
         self.model = model
     

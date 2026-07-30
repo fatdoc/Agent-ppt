@@ -8,6 +8,7 @@ from utils import success_response, error_response, not_found, bad_request
 from utils.auth import current_user_id, owned_project_or_404
 from services import FileService, ProjectContext
 from services.ai_service_manager import get_ai_service
+from services.harness_generation_service import is_harness_project
 from services.credit_service import (
     InsufficientCredits,
     attach_task_credit_progress,
@@ -27,13 +28,6 @@ import json
 logger = logging.getLogger(__name__)
 
 page_bp = Blueprint('pages', __name__, url_prefix='/api/projects')
-
-
-def _is_paper_operators_harness(project: Project) -> bool:
-    return (
-        (project.generation_mode or 'fast') == 'harness'
-        and project.harness_template == 'paper_operators'
-    )
 
 
 def _credit_error_response(exc: InsufficientCredits):
@@ -452,8 +446,8 @@ def generate_page_image(project_id, page_id):
             ref_image_path = file_service.get_template_path(project_id)
         
         # 检查是否有模板图片或风格描述
-        # 如果都没有，则返回错误
-        if not external_visual_strategy and not ref_image_path and not project.template_style and not _is_paper_operators_harness(project):
+        # Harness 场景包自带默认视觉系统，允许在无模板图/无风格描述时生图
+        if not external_visual_strategy and not ref_image_path and not project.template_style and not is_harness_project(project):
             return bad_request("No template image or style description found for project")
         
         # Generate prompt

@@ -19,9 +19,14 @@ const settingsI18n = {
         baiduOcr: "百度配置", serviceTest: "服务测试", lazyllmConfig: "LazyLLM 厂商配置",
         vendorApiKeys: "厂商 API Key 配置",
         advancedSettings: "高级设置",
-        elevenlabs: "ElevenLabs 语音合成"
+        elevenlabs: "ElevenLabs 语音合成",
+        managedAiConfig: "模型配置（管理员托管）",
+        adminUserSelect: "管理用户",
+        adminSelfLabel: "（自己）"
       },
       sectionDescriptions: {
+        managedAiConfig: "当前系统的大模型配置由管理员统一维护，并与你的账号绑定。如需更换模型或 API Key，请联系管理员。",
+        adminUserSelect: "选择要配置大模型的用户。管理员可修改自己或其他用户的模型配置。",
         apiConfig: "设置全局默认提供商与凭证。文本、图像或图片识别模型没有单独配置时，会回退到这里。",
         modelConfig: "分别指定三个核心模型角色。每个角色都可以单独选择提供商、Base URL 和 API Key。",
         mineruConfig: "用于解析上传的 PDF、PPTX、Word、Excel 等参考文件，影响素材理解质量。",
@@ -147,7 +152,11 @@ const settingsI18n = {
         resetTitle: "确认重置为默认配置", resetSuccess: "设置已重置", resetFailed: "重置设置失败",
         testServiceTip: "建议在本页底部进行服务测试，验证关键配置",
         resetConfirmBtn: "确定重置", resetCancelBtn: "取消", unknownError: "未知错误",
-        testSuccess: "测试成功"
+        testSuccess: "测试成功",
+        adminManagingOther: "正在为用户 {{username}} 配置大模型",
+        adminResetAiConfirm: "将把该用户的大模型配置恢复为环境默认值，确定继续吗？",
+        adminResetAiTitle: "确认重置用户模型配置",
+        adminResetAiSuccess: "用户模型配置已重置"
       }
     }
   },
@@ -165,9 +174,14 @@ const settingsI18n = {
         baiduOcr: "Baidu Configuration", serviceTest: "Service Test", lazyllmConfig: "LazyLLM Provider Configuration",
         vendorApiKeys: "Vendor API Key Configuration",
         advancedSettings: "Advanced Settings",
-        elevenlabs: "ElevenLabs Text-to-Speech"
+        elevenlabs: "ElevenLabs Text-to-Speech",
+        managedAiConfig: "Model Configuration (Managed)",
+        adminUserSelect: "Manage User",
+        adminSelfLabel: "(self)"
       },
       sectionDescriptions: {
+        managedAiConfig: "Model providers and API keys for this system are managed by the administrator and bound to your account. Contact the administrator to change models or API keys.",
+        adminUserSelect: "Select which user's model configuration to edit. Administrators can edit their own or other users' model settings.",
         apiConfig: "Set the global default provider and credentials. Text, image, and caption models fall back to this when no override is set.",
         modelConfig: "Configure the three core model roles separately. Each role can use its own provider, Base URL, and API key.",
         mineruConfig: "Parses uploaded PDF, PPTX, Word, Excel, and other reference files. This affects how well materials are understood.",
@@ -293,12 +307,17 @@ const settingsI18n = {
         resetTitle: "Confirm Reset to Default", resetSuccess: "Settings reset successfully", resetFailed: "Failed to reset settings",
         testServiceTip: "It's recommended to test services at the bottom of this page to verify configurations",
         resetConfirmBtn: "Confirm Reset", resetCancelBtn: "Cancel", unknownError: "Unknown error",
-        testSuccess: "Test passed"
+        testSuccess: "Test passed",
+        adminManagingOther: "Configuring model settings for {{username}}",
+        adminResetAiConfirm: "This will reset this user's model configuration to environment defaults. Continue?",
+        adminResetAiTitle: "Confirm Reset User Model Config",
+        adminResetAiSuccess: "User model configuration reset"
       }
     }
   }
 };
 import { Button, Input, Card, Loading, useToast, useConfirm } from '@/components/shared';
+import { ApiKeyManagement } from '@/components/settings/ApiKeyManagement';
 import * as api from '@/api/endpoints';
 import type { OutputLanguage } from '@/api/endpoints';
 import { OUTPUT_LANGUAGE_OPTIONS } from '@/api/endpoints';
@@ -361,6 +380,27 @@ const ALL_PROVIDER_SOURCES = [
 
 // 需要 API Key + Base URL 的提供商（非 LazyLLM 厂商）
 const API_KEY_PROVIDERS = new Set(['gemini', 'openai']);
+
+// 与后端 settings_controller.AI_CONFIG_FIELDS 对应：托管模式下不允许提交的大模型配置字段
+const AI_CONFIG_FIELD_KEYS = [
+  'ai_provider_format',
+  'api_base_url',
+  'api_key',
+  'text_model',
+  'image_model',
+  'image_caption_model',
+  'text_model_source',
+  'image_model_source',
+  'image_caption_model_source',
+  'text_api_key',
+  'text_api_base_url',
+  'image_api_key',
+  'image_api_base_url',
+  'image_caption_api_key',
+  'image_caption_api_base_url',
+  'lazyllm_api_keys',
+  'openai_image_api_protocol',
+] as const;
 
 // LazyLLM 厂商名集合
 const LAZYLLM_VENDOR_SET = new Set(LAZYLLM_SOURCES.map(s => s.value));
@@ -581,6 +621,17 @@ export const Settings: React.FC = () => {
   const [manualCallbackOpen, setManualCallbackOpen] = useState(false);
   const [manualCallbackSubmitting, setManualCallbackSubmitting] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [managedUsers, setManagedUsers] = useState<api.AdminManagedUser[]>([]);
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const [selfUserId, setSelfUserId] = useState<string | null>(null);
+
+  const isAdmin = settings?.current_user_is_admin === true;
+  const isManagingOtherUser = Boolean(
+    isAdmin && selectedUserId && selfUserId && selectedUserId !== selfUserId
+  );
+  const managedUser = isManagingOtherUser
+    ? managedUsers.find((user) => user.id === selectedUserId) || settings?.managed_user
+    : undefined;
 
   const handleOAuthLogin = async () => {
     setOauthConnecting(true);
@@ -663,6 +714,9 @@ export const Settings: React.FC = () => {
       setManualCallbackSubmitting(false);
     }
   };
+
+  // 大模型配置是否允许自助修改（后端 AI_CONFIG_SELF_SERVICE 关闭时为 false，由管理员在数据库中维护）
+  const aiConfigEditable = settings?.ai_config_editable !== false;
 
   // 配置驱动的表单区块定义（使用翻译）
   const settingsSections: SectionConfig[] = [
@@ -846,14 +900,20 @@ export const Settings: React.FC = () => {
     loadSettings();
   }, []);
 
-  const loadSettings = async () => {
+  const loadSettingsForUser = async (userId: string) => {
     setIsLoading(true);
     try {
-      const response = await api.getSettings();
+      const isOtherUser = Boolean(selfUserId && userId !== selfUserId);
+      const response = isOtherUser
+        ? await api.getAdminUserSettings(userId)
+        : await api.getSettings();
       if (response.data) {
         setSettings(response.data);
         setFormData(formDataFromSettings(response.data));
-        sessionStorage.setItem('banana-settings', JSON.stringify(response.data));
+        if (!isOtherUser) {
+          setSelfUserId(response.data.user_id || null);
+          sessionStorage.setItem('banana-settings', JSON.stringify(response.data));
+        }
       }
     } catch (error: any) {
       console.error('加载设置失败:', error);
@@ -866,9 +926,100 @@ export const Settings: React.FC = () => {
     }
   };
 
+  const loadManagedUsers = async (currentSettings: SettingsType) => {
+    if (!currentSettings.current_user_is_admin) return;
+    try {
+      const response = await api.listAdminManagedUsers();
+      if (response.data?.users) {
+        setManagedUsers(response.data.users);
+      }
+    } catch (error) {
+      console.error('加载用户列表失败:', error);
+    }
+  };
+
+  const loadSettings = async () => {
+    setIsLoading(true);
+    try {
+      const response = await api.getSettings();
+      if (response.data) {
+        setSettings(response.data);
+        setFormData(formDataFromSettings(response.data));
+        const currentUserId = response.data.user_id || null;
+        setSelfUserId(currentUserId);
+        setSelectedUserId(currentUserId);
+        sessionStorage.setItem('banana-settings', JSON.stringify(response.data));
+        await loadManagedUsers(response.data);
+      }
+    } catch (error: any) {
+      console.error('加载设置失败:', error);
+      show({
+        message: t('settings.messages.loadFailed') + ': ' + (error?.message || t('settings.messages.unknownError')),
+        type: 'error'
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleManagedUserChange = async (userId: string) => {
+    setSelectedUserId(userId);
+    await loadSettingsForUser(userId);
+  };
+
+  const buildAiConfigPayload = (source: typeof formData): Parameters<typeof api.updateSettings>[0] => {
+    const {
+      api_key, lazyllm_api_keys,
+      text_api_key, image_api_key, image_caption_api_key,
+      ...otherData
+    } = source;
+    const payload: Parameters<typeof api.updateSettings>[0] = {
+      ai_provider_format: otherData.ai_provider_format,
+      api_base_url: otherData.api_base_url,
+      text_model: otherData.text_model,
+      image_model: otherData.image_model,
+      image_caption_model: otherData.image_caption_model,
+      text_model_source: otherData.text_model_source,
+      image_model_source: otherData.image_model_source,
+      image_caption_model_source: otherData.image_caption_model_source,
+      text_api_base_url: otherData.text_api_base_url,
+      image_api_base_url: otherData.image_api_base_url,
+      image_caption_api_base_url: otherData.image_caption_api_base_url,
+      openai_image_api_protocol: otherData.openai_image_api_protocol,
+    };
+
+    if (api_key) payload.api_key = api_key;
+    if (text_api_key) payload.text_api_key = text_api_key;
+    if (image_api_key) payload.image_api_key = image_api_key;
+    if (image_caption_api_key) payload.image_caption_api_key = image_caption_api_key;
+
+    const nonEmptyKeys = Object.fromEntries(
+      Object.entries(lazyllm_api_keys).filter(([, v]) => v)
+    );
+    if (Object.keys(nonEmptyKeys).length > 0) {
+      payload.lazyllm_api_keys = nonEmptyKeys;
+    }
+
+    return payload;
+  };
+
   const handleSave = async () => {
     setIsSaving(true);
     try {
+      if (isManagingOtherUser && selectedUserId) {
+        const response = await api.updateAdminUserSettings(selectedUserId, buildAiConfigPayload(formData));
+        if (response.data) {
+          setSettings(response.data);
+          setFormData(prev => ({
+            ...prev,
+            api_key: '', lazyllm_api_keys: {},
+            text_api_key: '', image_api_key: '', image_caption_api_key: '',
+          }));
+          show({ message: t('settings.messages.saveSuccess'), type: 'success' });
+        }
+        return;
+      }
+
       const {
         api_key, mineru_token, baidu_api_key, elevenlabs_api_key, lazyllm_api_keys,
         text_api_key, image_api_key, image_caption_api_key,
@@ -894,6 +1045,13 @@ export const Settings: React.FC = () => {
       );
       if (Object.keys(nonEmptyKeys).length > 0) {
         payload.lazyllm_api_keys = nonEmptyKeys;
+      }
+
+      // 模型配置托管时，不提交大模型相关字段（后端会拒绝这些字段）
+      if (!aiConfigEditable) {
+        for (const key of AI_CONFIG_FIELD_KEYS) {
+          delete (payload as Record<string, unknown>)[key];
+        }
       }
 
       const response = await api.updateSettings(payload);
@@ -922,11 +1080,28 @@ export const Settings: React.FC = () => {
   };
 
   const handleReset = () => {
+    const resetMessage = isManagingOtherUser
+      ? t('settings.messages.adminResetAiConfirm')
+      : t('settings.messages.resetConfirm');
+    const resetTitle = isManagingOtherUser
+      ? t('settings.messages.adminResetAiTitle')
+      : t('settings.messages.resetTitle');
+
     confirm(
-      t('settings.messages.resetConfirm'),
+      resetMessage,
       async () => {
         setIsSaving(true);
         try {
+          if (isManagingOtherUser && selectedUserId) {
+            const response = await api.resetAdminUserAiConfig(selectedUserId);
+            if (response.data) {
+              setSettings(response.data);
+              setFormData(formDataFromSettings(response.data));
+              show({ message: t('settings.messages.adminResetAiSuccess'), type: 'success' });
+            }
+            return;
+          }
+
           const response = await api.resetSettings();
           if (response.data) {
             setSettings(response.data);
@@ -944,7 +1119,7 @@ export const Settings: React.FC = () => {
         }
       },
       {
-        title: t('settings.messages.resetTitle'),
+        title: resetTitle,
         confirmText: t('settings.messages.resetConfirmBtn'),
         cancelText: t('settings.messages.resetCancelBtn'),
         variant: 'warning',
@@ -1396,7 +1571,56 @@ export const Settings: React.FC = () => {
       <ToastContainer />
       {ConfirmDialog}
       <div className="space-y-6">
+        {/* 开放 API 密钥仅属于当前登录账号，不跟随管理员代配用户 */}
+        {!isManagingOtherUser && <ApiKeyManagement />}
+
+        {/* 管理员：选择要管理的用户 */}
+        {isAdmin && managedUsers.length > 0 && (
+          <SectionPanel
+            title={t('settings.sections.adminUserSelect')}
+            description={t('settings.sectionDescriptions.adminUserSelect')}
+            icon={<Key size={20} />}
+            tone="lime"
+            data-testid="admin-user-select-section"
+          >
+            <select
+              value={selectedUserId || ''}
+              onChange={(e) => handleManagedUserChange(e.target.value)}
+              className="w-full h-10 px-4 rounded-lg border border-gray-200 dark:border-border-primary bg-white dark:bg-background-secondary focus:outline-none focus:ring-2 focus:ring-banana-500 focus:border-transparent"
+            >
+              {managedUsers.map((user) => (
+                <option key={user.id} value={user.id}>
+                  {user.username}{user.is_admin ? ' (admin)' : ''}{user.id === selfUserId ? ` ${t('settings.sections.adminSelfLabel')}` : ''}
+                </option>
+              ))}
+            </select>
+            {isManagingOtherUser && managedUser && (
+              <p className="mt-3 text-sm text-amber-700 dark:text-amber-300">
+                {t('settings.messages.adminManagingOther', { username: managedUser.username })}
+              </p>
+            )}
+          </SectionPanel>
+        )}
+
+        {/* 模型配置托管提示（自助配置关闭时显示） */}
+        {!aiConfigEditable && (
+          <SectionPanel
+            title={t('settings.sections.managedAiConfig')}
+            description={t('settings.sectionDescriptions.managedAiConfig')}
+            icon={<Key size={20} />}
+            tone="slate"
+            data-testid="managed-ai-config-banner"
+          >
+            <div className="text-sm text-gray-600 dark:text-foreground-secondary space-y-1">
+              <p>{t('settings.fields.textModel')}: {settings?.text_model || '-'}</p>
+              <p>{t('settings.fields.imageModel')}: {settings?.image_model || '-'}</p>
+              <p>{t('settings.fields.imageCaptionModel')}: {settings?.image_caption_model || '-'}</p>
+            </div>
+          </SectionPanel>
+        )}
+
         {/* 默认 API 配置区块 */}
+        {aiConfigEditable && (
         <SectionPanel
           title={t('settings.sections.apiConfig')}
           description={t('settings.sectionDescriptions.apiConfig')}
@@ -1462,8 +1686,10 @@ export const Settings: React.FC = () => {
             )}
           </div>
         </SectionPanel>
+        )}
 
         {/* 模型配置区块 */}
+        {aiConfigEditable && (
         <SectionPanel
           title={t('settings.sections.modelConfig')}
           description={t('settings.sectionDescriptions.modelConfig')}
@@ -1474,8 +1700,10 @@ export const Settings: React.FC = () => {
             {modelConfigItems.map(renderModelConfigGroup)}
           </div>
         </SectionPanel>
+        )}
 
         {/* 其余配置区块（配置驱动，排除性能配置和推理模式） */}
+        {!isManagingOtherUser && (
         <div className="space-y-6">
           {settingsSections.filter((section) =>
             section.title !== t('settings.sections.performanceConfig') &&
@@ -1495,8 +1723,10 @@ export const Settings: React.FC = () => {
             </SectionPanel>
           ))}
         </div>
+        )}
 
         {/* 高级设置（折叠区域） */}
+        {!isManagingOtherUser && (
         <section className={`rounded-xl border p-5 shadow-sm md:p-6 ${SECTION_TONES.slate.panel}`}>
           <button
             type="button"
@@ -1524,6 +1754,7 @@ export const Settings: React.FC = () => {
           {advancedOpen && (
             <div className="mt-6 space-y-6 border-t border-gray-200 pt-6 dark:border-border-primary">
               {/* OpenAI OAuth 连接区块 */}
+              {aiConfigEditable && !isManagingOtherUser && (
               <div className={`rounded-lg border p-4 ${SECTION_TONES.green.soft} ${SECTION_TONES.green.accent}`}>
                 <h3 className="text-base font-semibold text-gray-900 dark:text-foreground-primary flex items-center gap-2">
                   <Link2 size={18} />
@@ -1598,6 +1829,7 @@ export const Settings: React.FC = () => {
                   )}
                 </div>
               </div>
+              )}
 
               {/* 并发性能配置 + 推理模式 */}
               {settingsSections.filter((section) =>
@@ -1621,8 +1853,10 @@ export const Settings: React.FC = () => {
             </div>
           )}
         </section>
+        )}
 
         {/* 服务测试区 */}
+        {!isManagingOtherUser && (
         <SectionPanel
           title={t('settings.serviceTest.title')}
           description={t('settings.sectionDescriptions.serviceTest')}
@@ -1721,6 +1955,7 @@ export const Settings: React.FC = () => {
             })}
           </div>
         </SectionPanel>
+        )}
 
         {/* 操作按钮 */}
         <div className="flex items-center justify-between pt-4 border-t border-gray-200 dark:border-border-primary">

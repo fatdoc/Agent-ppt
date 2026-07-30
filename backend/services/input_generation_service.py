@@ -215,7 +215,17 @@ class InputGenerationService:
                 )
             else:
                 outline = self.ai_service.parse_description_to_outline(project_context, language=options.language)
-        elif input_kind in {"idea", "no_think", "blueprint_topic"}:
+        elif input_kind in {"no_think", "blueprint_topic"}:
+            outline = []
+            stream_complete = False
+            for item in self.ai_service.generate_outline_stream(project_context, language=options.language):
+                if "__stream_complete__" in item:
+                    stream_complete = bool(item["__stream_complete__"])
+                else:
+                    outline.append(item)
+            if not stream_complete:
+                raise ValueError("流式大纲生成未正常结束，请重试。")
+        elif input_kind == "idea":
             outline = self.ai_service.generate_outline(project_context, language=options.language)
         else:
             raise ValueError(f"Unsupported input_kind: {input_kind}")
@@ -251,17 +261,29 @@ class InputGenerationService:
                 )
             return self.validate_page_descriptions(raw_descriptions, expected_count=len(pages))
 
-        descriptions = []
-        for page_index, page_outline in enumerate(pages, start=1):
-            desc = self.ai_service.generate_page_description(
-                project_context,
-                outline,
-                page_outline,
-                page_index,
-                language=options.language,
-                detail_level=options.detail_level or "default",
-            )
-            descriptions.append(desc)
+        # Generate every page description in one model call. The old path made one
+        # synchronous request per page, so a ten-page deck routinely exceeded the
+        # browser's five-minute timeout even when every individual call succeeded.
+        descriptions: list[dict[str, Any]] = []
+        stream_complete = False
+        for item in self.ai_service.generate_descriptions_stream(
+            project_context,
+            outline,
+            pages,
+            language=options.language,
+            detail_level=options.detail_level or "default",
+        ):
+            if "__stream_complete__" in item:
+                stream_complete = bool(item["__stream_complete__"])
+                continue
+
+            description = {"text": str(item.get("description_text") or "").strip()}
+            if isinstance(item.get("extra_fields"), dict) and item["extra_fields"]:
+                description["extra_fields"] = item["extra_fields"]
+            descriptions.append(description)
+
+        if not stream_complete:
+            raise ValueError("批量页面描述生成未正常结束，请重试。")
 
         return self.validate_page_descriptions(descriptions, expected_count=len(pages))
 

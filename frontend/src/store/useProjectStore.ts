@@ -261,6 +261,10 @@ const debouncedUpdatePage = debounce(
         throw new Error(t('store.createNoId'));
       }
 
+      // Persist the project as soon as it exists. If an upstream AI request times
+      // out, the user can retry from the project instead of losing the draft.
+      localStorage.setItem('currentProjectId', projectId);
+
       // 2. 关联参考文件到项目（在生成之前，确保 AI 能读取参考文件）
       if (referenceFileIds && referenceFileIds.length > 0) {
         try {
@@ -283,27 +287,47 @@ const debouncedUpdatePage = debounce(
         }
       }
 
-      // 4. 根据类型调用 AI 生成，失败时回滚项目
-      const generateWithRollback = async (fn: () => Promise<any>, label: string) => {
+      // 4. 根据类型调用 AI 生成；网络/上游错误保留项目，输入错误才回滚。
+      const generateWithRecovery = async (fn: () => Promise<any>, label: string) => {
         try {
           await fn();
           devLog(`[初始化项目] ${label}完成`);
         } catch (error: any) {
           console.error(`[初始化项目] ${label}失败:`, error);
-          try { await api.deleteProject(projectId); } catch (e: any) { console.error(`[初始化项目] 回滚失败，未能删除项目 ${projectId}:`, e); }
+          const status = Number(error?.response?.status || 0);
+          const retryable = (
+            error?.code === 'ECONNABORTED'
+            || error?.code === 'ERR_NETWORK'
+            || !error?.response
+            || [502, 503, 504].includes(status)
+          );
+
+          if (retryable) {
+            localStorage.setItem('currentProjectId', projectId);
+            console.warn(`[初始化项目] ${label}可重试，保留项目 ${projectId}`);
+          } else {
+            try {
+              await api.deleteProject(projectId);
+              if (localStorage.getItem('currentProjectId') === projectId) {
+                localStorage.removeItem('currentProjectId');
+              }
+            } catch (e: any) {
+              console.error(`[初始化项目] 回滚失败，未能删除项目 ${projectId}:`, e);
+            }
+          }
           throw error;
         }
       };
 
       if (type === 'outline' && trimmedPageDescriptions) {
-        await generateWithRollback(() => api.generateFromDescription(projectId, trimmedPageDescriptions), '从描述生成大纲和页面描述');
+        await generateWithRecovery(() => api.generateFromDescription(projectId, trimmedPageDescriptions), '从描述生成大纲和页面描述');
       } else if (type === 'outline' || type === 'no_think') {
-        await generateWithRollback(() => api.generateOutline(projectId), '生成大纲');
+        await generateWithRecovery(() => api.generateOutline(projectId), '生成大纲');
         if (type === 'outline' && generateDescriptionsFromOutline) {
-          await generateWithRollback(() => api.generateDescriptions(projectId), '生成描述');
+          await generateWithRecovery(() => api.generateDescriptions(projectId), '生成描述');
         }
       } else if (type === 'description') {
-        await generateWithRollback(() => api.generateFromDescription(projectId, content), '从描述生成大纲和页面描述');
+        await generateWithRecovery(() => api.generateFromDescription(projectId, content), '从描述生成大纲和页面描述');
       }
 
       // 5. 获取完整项目信息
@@ -351,7 +375,7 @@ const debouncedUpdatePage = debounce(
           pagesCount: project.pages?.length || 0,
           status: project.status
         });
-        set({ currentProject: project });
+        set({ currentProject: project, error: null });
         // 确保 localStorage 中保存了项目ID
         localStorage.setItem('currentProjectId', project.id!);
       }
@@ -390,7 +414,7 @@ const debouncedUpdatePage = debounce(
       if (shouldClearStorage) {
         console.warn('[syncProject] 项目不存在，清除localStorage');
         localStorage.removeItem('currentProjectId');
-        set({ currentProject: null });
+        set({ currentProject: null, error: normalizeErrorMessage(errorMessage) });
       } else {
         set({ error: normalizeErrorMessage(errorMessage) });
       }

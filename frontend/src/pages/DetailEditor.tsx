@@ -67,7 +67,10 @@ const detailI18n = {
         exportSuccess: "导出成功", importSuccess: "导入成功", importFailed: "导入失败，请检查文件格式", importEmpty: "文件中未找到有效页面",
         importContentEmpty: "请先粘贴内容或上传文件",
         importReadFailed: "读取文件失败，请重试",
-        loadingProject: "加载项目中..."
+        loadingProject: "加载项目中...",
+        projectLoadFailed: "项目加载失败",
+        retryLoad: "重试",
+        backHome: "返回首页"
       }
     }
   },
@@ -122,7 +125,10 @@ const detailI18n = {
         exportSuccess: "Export successful", importSuccess: "Import successful", importFailed: "Import failed, please check file format", importEmpty: "No valid pages found in file",
         importContentEmpty: "Paste some content or upload a file first",
         importReadFailed: "Failed to read file, please try again",
-        loadingProject: "Loading project..."
+        loadingProject: "Loading project...",
+        projectLoadFailed: "Failed to load project",
+        retryLoad: "Retry",
+        backHome: "Back to home"
       }
     }
   }
@@ -213,7 +219,9 @@ export const DetailEditor: React.FC = () => {
   const fromHistory = (location.state as any)?.from === 'history';
   const {
     currentProject,
+    error,
     syncProject,
+    setError,
     updatePageLocal,
     generateDescriptions,
     generatePageDescription,
@@ -589,6 +597,33 @@ export const DetailEditor: React.FC = () => {
       throw error;
     }
   }, [currentProject, projectId, syncProject, show, t]);
+
+  if (!currentProject && error) {
+    return (
+      <div className="fixed inset-0 bg-white dark:bg-background-primary flex items-center justify-center p-6">
+        <div role="alert" className="w-full max-w-md rounded-2xl border border-red-200 dark:border-red-900/60 bg-white dark:bg-background-secondary p-6 text-center shadow-lg">
+          <h1 className="text-xl font-semibold text-gray-900 dark:text-foreground-primary mb-2">
+            {t('detail.messages.projectLoadFailed')}
+          </h1>
+          <p className="text-sm text-gray-600 dark:text-foreground-secondary mb-6 break-words">{error}</p>
+          <div className="flex flex-col sm:flex-row gap-3 justify-center">
+            <Button
+              variant="primary"
+              onClick={() => {
+                setError(null);
+                void syncProject(projectId);
+              }}
+            >
+              {t('detail.messages.retryLoad')}
+            </Button>
+            <Button variant="secondary" onClick={() => navigate('/')}>
+              {t('detail.messages.backHome')}
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (!currentProject) {
     return <Loading fullscreen message={t('detail.messages.loadingProject')} />;

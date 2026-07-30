@@ -26,8 +26,8 @@ class AnthropicTextProvider(TextProvider):
         self.client = Anthropic(
             api_key=api_key,
             base_url=api_base,
-            timeout=get_config().OPENAI_TIMEOUT,
-            max_retries=get_config().OPENAI_MAX_RETRIES
+            timeout=get_config().TEXT_REQUEST_TIMEOUT,
+            max_retries=get_config().TEXT_REQUEST_MAX_RETRIES,
         )
         self.model = model
         self.max_tokens = get_config().ANTHROPIC_MAX_TOKENS

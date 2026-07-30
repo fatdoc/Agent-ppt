@@ -11,7 +11,13 @@ import requests
 from typing import List, Dict, Optional, Union
 from textwrap import dedent
 from PIL import Image
-from tenacity import retry, stop_after_attempt, retry_if_exception_type
+from tenacity import (
+    retry,
+    retry_if_exception,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 from .prompts import (
     get_outline_generation_prompt,
     get_outline_parsing_prompt,
@@ -34,6 +40,33 @@ from .ai_providers import get_text_provider, get_image_provider, get_caption_pro
 from config import get_config
 
 logger = logging.getLogger(__name__)
+
+
+def _is_retryable_caption_error(exc: BaseException) -> bool:
+    """Retry transient vision failures while leaving auth/config errors alone."""
+    if isinstance(exc, (json.JSONDecodeError, ValueError, TimeoutError)):
+        return True
+    if isinstance(exc, requests.exceptions.RequestException):
+        return True
+
+    status_code = getattr(exc, "status_code", None)
+    if status_code in {408, 409, 429} or (isinstance(status_code, int) and status_code >= 500):
+        return True
+
+    message = str(exc).lower()
+    transient_markers = (
+        "timed out",
+        "timeout",
+        "connection reset",
+        "connection refused",
+        "internal_server_error",
+        "server_error",
+        "error code: 500",
+        "error code: 502",
+        "error code: 503",
+        "error code: 504",
+    )
+    return any(marker in message for marker in transient_markers)
 
 
 class ProjectContext:
@@ -211,8 +244,9 @@ class AIService:
         return cleaned_text
     
     @retry(
-        stop=stop_after_attempt(3),
-        retry=retry_if_exception_type((json.JSONDecodeError, ValueError)),
+        stop=stop_after_attempt(get_config().CAPTION_REQUEST_MAX_RETRIES + 1),
+        wait=wait_exponential(multiplier=1, min=2, max=8),
+        retry=retry_if_exception(_is_retryable_caption_error),
         reraise=True
     )
     def generate_json(self, prompt: str, thinking_budget: int = 1000) -> Union[Dict, List]:
@@ -964,6 +998,19 @@ class AIService:
         Returns:
             PIL Image object or None if failed
         """
+        # Native image-edit APIs receive the current page as image 1 and user
+        # uploads after it. Make those roles explicit so replacement requests
+        # cannot treat the uploaded object as a vague style reference.
+        if additional_ref_images:
+            prompt = (
+                f"{prompt}\n\n"
+                "参考图角色（必须严格遵守）：图1是当前PPT页面，只能在图1上执行修改；"
+                "图2及后续图片是用户上传的替换素材。用户提到左上角、右侧等位置时，"
+                "指的是图1中的位置；用户提到参考图中的车辆、人物或物体时，指图2及后续图片。"
+                "如果指令要求替换，必须把参考素材中的目标对象真正替换到图1指定位置，"
+                "保留参考对象的关键外观特征，不得继续沿用图1原对象，也不得只修改背景。"
+            )
+
         # Build edit instruction with original description if available
         edit_instruction = get_image_edit_prompt(
             edit_instruction=prompt,

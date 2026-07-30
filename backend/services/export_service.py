@@ -1156,7 +1156,8 @@ class ExportService:
         export_extractor_method: str = 'hybrid',  # 组件提取方法: mineru, hybrid
         export_inpaint_method: str = 'hybrid',  # 背景修复方法: generative, baidu, hybrid
         enable_icon_subject_extraction: bool = False,  # 是否对小尺寸图标走百度智能抠图
-        fail_fast: bool = True  # 是否在遇到错误时立即停止（False则收集警告继续）
+        fail_fast: bool = True,  # 是否在遇到错误时立即停止（False则收集警告继续）
+        ai_service = None,  # 可选：任务级固定的 AI 服务，避免后台任务配置漂移
     ) -> Tuple[Optional[bytes], ExportWarnings]:
         """
         使用递归图片可编辑化服务创建可编辑PPTX
@@ -1226,6 +1227,7 @@ class ExportService:
                 extractor_method=export_extractor_method,
                 inpaint_method=export_inpaint_method,
                 enable_icon_subject_extraction=enable_icon_subject_extraction,
+                ai_service=ai_service,
             )
             editability_service = ImageEditabilityService(config)
             
@@ -1298,10 +1300,20 @@ class ExportService:
             
             if total_text_count > 0:
                 report_progress("样式提取", f"混合策略分析 {total_text_count} 个文本元素...", 50)
+                from config import get_config
+                style_workers = max(
+                    1,
+                    min(max_workers * 2, get_config().TEXT_STYLE_MAX_WORKERS),
+                )
+                logger.info(
+                    "文本样式提取并发已限制为 %d（请求值=%d）",
+                    style_workers,
+                    max_workers * 2,
+                )
                 text_styles_cache, failed_extractions = ExportService._batch_extract_text_styles_hybrid(
                     editable_images=editable_images,
                     text_attribute_extractor=text_attribute_extractor,
-                    max_workers=max_workers * 2,
+                    max_workers=style_workers,
                     fail_fast=fail_fast
                 )
                 

@@ -72,7 +72,8 @@ export type ExportInpaintMethod = 'generative' | 'baidu' | 'hybrid';
 // 视觉生成策略
 export type VisualStrategy = 'native' | 'external_skill';
 export type GenerationMode = 'fast' | 'harness';
-export type HarnessTemplate = 'paper_operators';
+// Harness 场景包：结构叙事 + 默认视觉打包；上传模板图/填写风格文字时只替换视觉层
+export type HarnessTemplate = 'paper_operators' | 'lecture_deck' | 'product_launch' | 'consulting_report';
 
 // 项目
 export interface Project {
@@ -249,6 +250,18 @@ export interface Settings {
   elevenlabs_enabled: boolean;
   elevenlabs_api_key_length: number;
   elevenlabs_voice_id?: string;
+  // 大模型配置是否允许用户在前端自助修改（false 时由管理员在数据库中统一维护）
+  ai_config_editable?: boolean;
+  // 当前登录用户是否为管理员
+  current_user_is_admin?: boolean;
+  // 设置所属用户（与当前登录用户一致时为本人配置）
+  user_id?: string | null;
+  // 管理员查看/编辑其他用户时返回
+  managed_user?: {
+    id: string;
+    username: string;
+    email?: string | null;
+  };
   created_at?: string;
   updated_at?: string;
 }

@@ -304,6 +304,23 @@ class TestNoThinkProject:
         assert '用途场景：内部培训' in project['idea_prompt']
         assert '色调感觉' not in project['idea_prompt']
         assert '页数倾向：5页' in project['idea_prompt']
+        assert project['template_style'] == '现代商务'
+
+    def test_no_think_explicit_style_source_beats_quick_harness_tendency(self, client):
+        response = client.post('/api/projects', json={
+            'creation_type': 'no_think',
+            'idea_prompt': 'AI 工具入门',
+            'template_style': '用户指定的黑金发布会风格',
+            'no_think_options': {
+                'style_template': '商务演示',
+            },
+        })
+
+        data = assert_success_response(response, 201)
+        project = assert_success_response(client.get(f"/api/projects/{data['data']['project_id']}"))['data']
+
+        assert project['template_style'] == '用户指定的黑金发布会风格'
+        assert '风格模板：商务演示' not in project['idea_prompt']
 
     def test_generate_outline_for_no_think_generates_descriptions(self, client, monkeypatch):
         from services.input_generation_service import InputGenerationResult

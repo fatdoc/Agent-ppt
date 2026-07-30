@@ -90,7 +90,7 @@ const formula = [
 const entries = [
   {
     icon: Wand2,
-    title: '快速 Harness',
+    title: '主题生成',
     description: '从一个主题开始，让 Agent 自动搭建结构、节奏与页面初稿。',
     cta: '启动链路',
   },
@@ -124,7 +124,7 @@ const references = [
 ];
 
 const footerLinks = [
-  { title: '入口', links: ['快速 Harness', '材料接入', '参考复用', '旧稿重构'] },
+  { title: '入口', links: ['主题生成', '材料接入', '参考复用', '旧稿重构'] },
   { title: '场景', links: ['创新创业比赛', '工作汇报', '教学课件', '融资路演'] },
   { title: '文化', links: ['Harness 工程', '校验优先', '来源留痕', '稳定交付'] },
   { title: '条款', links: ['隐私政策', '服务条款', '数据安全'] },

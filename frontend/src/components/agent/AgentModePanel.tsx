@@ -1,17 +1,26 @@
 import React, { useState } from 'react';
 import { createAgentModePlan, generateAgentRemainingSlides, generateAgentStylePreview, setAgentSlideLock, updateAgentSlideContent, updateAgentSlideVisualPlan, type AgentModeDeckVersion } from '@/api/endpoints';
 import { Button, useToast } from '@/components/shared';
+import type { HarnessTemplate } from '@/types';
 
 interface AgentModePanelProps {
   onOpenProject: (projectId: string) => void;
 }
+
+const HARNESS_PACKS: Array<{ id: HarnessTemplate; label: string }> = [
+  { id: 'paper_operators', label: '纸片人 Paper Operators' },
+  { id: 'lecture_deck', label: '课程讲义' },
+  { id: 'product_launch', label: '产品发布会' },
+  { id: 'consulting_report', label: '咨询汇报' },
+];
 
 export const AgentModePanel: React.FC<AgentModePanelProps> = ({ onOpenProject }) => {
   const { show } = useToast();
   const [topic, setTopic] = useState('AI 教育产品融资路演');
   const [audience, setAudience] = useState('投资人');
   const [pageCount, setPageCount] = useState(8);
-  const [style, setStyle] = useState('Paper Operators 纸片人，中文标签清晰，适合路演正文页');
+  const [harnessTemplate, setHarnessTemplate] = useState<HarnessTemplate>('paper_operators');
+  const [style, setStyle] = useState('');
   const [plan, setPlan] = useState<AgentModeDeckVersion | null>(null);
   const [loading, setLoading] = useState(false);
   const [previewTaskId, setPreviewTaskId] = useState<string | null>(null);
@@ -26,7 +35,7 @@ export const AgentModePanel: React.FC<AgentModePanelProps> = ({ onOpenProject })
         page_count: pageCount,
         style,
         generation_mode: 'harness',
-        harness_template: 'paper_operators',
+        harness_template: harnessTemplate,
       });
       if (response.data) {
         setPlan(response.data);
@@ -97,11 +106,30 @@ export const AgentModePanel: React.FC<AgentModePanelProps> = ({ onOpenProject })
           </label>
           <label className="block">
             <span className="text-xs font-medium text-gray-600 dark:text-foreground-tertiary">页数</span>
-            <input type="number" min={1} max={20} value={pageCount} onChange={(event) => setPageCount(Number(event.target.value))} className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm dark:border-border-primary dark:bg-background-elevated dark:text-white" />
+            <input
+              type="number"
+              min={1}
+              max={80}
+              value={pageCount}
+              onChange={(event) => setPageCount(Number(event.target.value))}
+              className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm disabled:opacity-60 dark:border-border-primary dark:bg-background-elevated dark:text-white"
+            />
           </label>
           <label className="block">
-            <span className="text-xs font-medium text-gray-600 dark:text-foreground-tertiary">风格</span>
-            <input value={style} onChange={(event) => setStyle(event.target.value)} className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm dark:border-border-primary dark:bg-background-elevated dark:text-white" />
+            <span className="text-xs font-medium text-gray-600 dark:text-foreground-tertiary">场景包</span>
+            <select
+              value={harnessTemplate}
+              onChange={(event) => setHarnessTemplate(event.target.value as HarnessTemplate)}
+              className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm dark:border-border-primary dark:bg-background-elevated dark:text-white"
+            >
+              {HARNESS_PACKS.map((pack) => (
+                <option key={pack.id} value={pack.id}>{pack.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="block md:col-span-2">
+            <span className="text-xs font-medium text-gray-600 dark:text-foreground-tertiary">风格提示（可选，默认使用场景包自带视觉系统）</span>
+            <input value={style} onChange={(event) => setStyle(event.target.value)} placeholder="例如：更暗的底色、品牌绿点缀" className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm dark:border-border-primary dark:bg-background-elevated dark:text-white" />
           </label>
         </div>
         <div className="mt-4 flex flex-wrap gap-2">
@@ -142,7 +170,14 @@ export const AgentModePanel: React.FC<AgentModePanelProps> = ({ onOpenProject })
                   <textarea value={slide.visual_plan?.reader_takeaway || ''} onChange={(event) => updateVisual(slide, { reader_takeaway: event.target.value })} rows={3} className="rounded-lg border border-gray-200 px-3 py-2 text-sm dark:border-border-primary dark:bg-background-secondary dark:text-white" />
                   <textarea value={slide.visual_plan?.composition || ''} onChange={(event) => updateVisual(slide, { composition: event.target.value })} rows={3} className="rounded-lg border border-gray-200 px-3 py-2 text-sm dark:border-border-primary dark:bg-background-secondary dark:text-white" />
                 </div>
-                <p className="mt-2 text-xs text-gray-500">纸片人：{slide.visual_plan?.operator_required ? slide.visual_plan?.operator_family : '本页不强制'} · 标签：{(slide.visual_plan?.labels || []).join('、')}</p>
+                <p className="mt-2 text-xs text-gray-500">
+                  {slide.visual_plan?.page_role_name ? `角色：${slide.visual_plan.page_role_name} · ` : ''}
+                  {slide.visual_plan?.operator_required !== undefined ? `纸片人：${slide.visual_plan?.operator_required ? slide.visual_plan?.operator_family : '本页不强制'} · ` : ''}
+                  标签：{(slide.visual_plan?.labels || []).join('、')}
+                  {slide.visual_plan?.material_status === 'concept_placeholder' && (
+                    <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">概念图占位，待替换真实产品图</span>
+                  )}
+                </p>
               </article>
             ))}
           </section>

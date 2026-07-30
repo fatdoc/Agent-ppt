@@ -16,6 +16,7 @@ from models import (
 )
 from services.agent_mode_schemas import (
     SchemaValidationError,
+    hard_qa_deck_page_plans,
     hard_qa_deck_plan,
     hard_qa_page_visual_plan,
     validate_deck_plan,
@@ -24,33 +25,52 @@ from services.agent_mode_schemas import (
 )
 from services.agent_mode_tools import AgentToolRegistry
 from services.ai_service_manager import get_ai_service
-from services.visual_strategies import PaperOperatorsStrategy
+from services.harness_skills import get_scenario_pack, list_scenario_pack_ids, normalize_pack_id
+from services.harness_skills.base import HARNESS_MAX_PAGE_COUNT
 from utils.auth import current_user_id
 
 
 class AgentModeService:
     """Stable v1 pipeline for planning first, image generation second."""
 
-    def create_agent_deck_plan(self, *, topic: str, audience: str, page_count: int, style: str, generation_mode: str, harness_template: str) -> dict[str, Any]:
+    def create_agent_deck_plan(
+        self,
+        *,
+        topic: str,
+        audience: str,
+        page_count: int,
+        style: str,
+        generation_mode: str,
+        harness_template: str,
+        harness_payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         if not topic.strip():
             raise ValueError("topic is required")
         if not audience.strip():
             raise ValueError("audience is required")
-        page_count = max(1, min(int(page_count or 8), 20))
+        page_count = max(1, min(int(page_count or 8), HARNESS_MAX_PAGE_COUNT))
         if generation_mode != "harness":
             raise ValueError("Agent Mode only supports generation_mode=harness")
-        if harness_template not in ("paper_operators", "paper-operators"):
-            raise ValueError("Agent Mode only supports harness_template=paper_operators")
-        harness_template = "paper_operators"
-
+        harness_template = normalize_pack_id(harness_template) or ""
+        pack = get_scenario_pack(harness_template)
+        if pack is None:
+            raise ValueError(f"harness_template must be one of: {', '.join(list_scenario_pack_ids())}")
         run = AgentRun(user_id=current_user_id(), run_type="agent_mode_v1", status="running")
-        run.set_input({"topic": topic, "audience": audience, "page_count": page_count, "style": style, "generation_mode": generation_mode, "harness_template": harness_template})
+        run.set_input({
+            "topic": topic,
+            "audience": audience,
+            "page_count": page_count,
+            "style": style,
+            "generation_mode": generation_mode,
+            "harness_template": harness_template,
+            "harness_payload": harness_payload,
+        })
         db.session.add(run)
         db.session.flush()
         tools = AgentToolRegistry(agent_run=run)
 
         try:
-            deck_plan = self._step(run, "generate_deck_plan", {"topic": topic, "audience": audience, "page_count": page_count}, lambda: self._generate_deck_plan(topic, audience, page_count))
+            deck_plan = self._step(run, "generate_deck_plan", {"topic": topic, "audience": audience, "page_count": page_count}, lambda: self._generate_deck_plan(topic, audience, page_count, pack, harness_payload))
             deck_plan = validate_deck_plan(deck_plan, page_count)
             deck_qa = hard_qa_deck_plan(deck_plan, page_count).to_dict()
             if not deck_qa["passed"]:
@@ -59,7 +79,7 @@ class AgentModeService:
             project = tools.create_project(topic=topic, audience=audience, page_count=page_count, generation_mode=generation_mode, harness_template=harness_template)
             run.project_id = project.id
             pages = tools.create_pages_from_slide_plans(project, deck_plan["slides"])
-            tools.set_harness_template(project, harness_template, {"style": style} if style else None)
+            tools.set_harness_template(project, harness_template, {**(harness_payload or {}), **({"style": style} if style else {})})
 
             deck_version = DeckVersion(project_id=project.id, version_number=1, status="pending_confirmation")
             deck_version.set_deck_plan(deck_plan)
@@ -67,14 +87,27 @@ class AgentModeService:
             db.session.add(deck_version)
             db.session.flush()
 
-            strategy = PaperOperatorsStrategy()
-            visual_system_data = strategy.deck_visual_system(topic, audience, style)
+            visual_system_data = pack.deck_visual_system(
+                topic,
+                audience,
+                style,
+                use_default_visual=not bool(style.strip()),
+            )
             visual_system_data = validate_deck_visual_system(visual_system_data)
             visual_system = DeckVisualSystem(project_id=project.id, deck_version_id=deck_version.id, strategy_id=harness_template)
             visual_system.set_system(visual_system_data)
             visual_system.set_qa_result({"passed": True, "issues": []})
             db.session.add(visual_system)
             db.session.flush()
+
+            page_ids = [pages[index].id for index in range(len(deck_plan["slides"]))]
+            page_plans = pack.build_deck_page_plans(
+                deck_plan["slides"],
+                visual_system_data,
+                topic=topic,
+                page_ids=page_ids,
+            )
+            deck_plans_qa = hard_qa_deck_page_plans(page_plans).to_dict()
 
             for index, slide in enumerate(deck_plan["slides"]):
                 page = pages[index]
@@ -85,9 +118,10 @@ class AgentModeService:
                 db.session.add(slide_version)
                 db.session.flush()
 
-                plan = strategy.build_page_plan(slide, visual_system_data, page_id=page.id)
+                plan = page_plans[index]
                 plan = validate_page_visual_plan(plan, {page.id})
-                plan_qa = hard_qa_page_visual_plan(plan).to_dict()
+                previous_plan = page_plans[index - 1] if index > 0 else None
+                plan_qa = hard_qa_page_visual_plan(plan, previous_plan=previous_plan).to_dict()
                 visual_plan = PageVisualPlan(
                     project_id=project.id,
                     page_id=page.id,
@@ -99,6 +133,11 @@ class AgentModeService:
                 visual_plan.set_plan(plan)
                 visual_plan.set_qa_result(plan_qa)
                 db.session.add(visual_plan)
+
+            deck_version.set_qa_result({
+                "passed": deck_qa["passed"],
+                "issues": [*deck_qa.get("issues", []), *deck_plans_qa.get("issues", [])],
+            })
 
             project.status = "AGENT_PLAN_PENDING_CONFIRMATION"
             db.session.flush()
@@ -132,7 +171,12 @@ class AgentModeService:
             return slides
         return [slides[0], slides[1]]
 
-    def _generate_deck_plan(self, topic: str, audience: str, page_count: int) -> dict[str, Any]:
+    def _generate_deck_plan(self, topic: str, audience: str, page_count: int, pack=None, harness_payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        pack_hint = ""
+        if pack is not None:
+            hint = pack.deck_plan_hint().strip()
+            if hint:
+                pack_hint = f"\n场景包「{pack.name}」的叙事组织要求：{hint}\n"
         prompt = f"""
 你是 Banana Slides 的 Presentation Planner。只输出 JSON，不要 Markdown。
 
@@ -140,7 +184,7 @@ class AgentModeService:
 主题：{topic}
 受众：{audience}
 页数：{page_count}
-
+{pack_hint}
 JSON schema:
 {{
   "title": "string",

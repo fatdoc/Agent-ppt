@@ -7,6 +7,7 @@ import { OutlineEditor } from './pages/OutlineEditor';
 import { DetailEditor } from './pages/DetailEditor';
 import { SlidePreview } from './pages/SlidePreview';
 import { SettingsPage } from './pages/Settings';
+import { ApiDocsPage } from './pages/ApiDocs';
 import { useProjectStore } from './store/useProjectStore';
 import { useToast, AccessCodeGuard, AuthGuard } from './components/shared';
 
@@ -40,6 +41,7 @@ function App() {
             <Route path="/landing" element={<Navigate to="/" replace />} />
             <Route path="/history" element={<History />} />
             <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/developer/api-docs" element={<ApiDocsPage />} />
             <Route path="/project/:projectId/outline" element={<OutlineEditor />} />
             <Route path="/project/:projectId/detail" element={<DetailEditor />} />
             <Route path="/project/:projectId/preview" element={<SlidePreview />} />

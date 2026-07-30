@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Sparkles, FileText, FileEdit, ImagePlus, Paperclip, Palette, Lightbulb, Search, Settings, FolderOpen, HelpCircle, Sun, Moon, Globe, Monitor, ChevronDown, Upload, RefreshCw } from 'lucide-react';
-import { Button, Card, useToast, MaterialGeneratorModal, MaterialCenterModal, MaterialSelector, ReferenceFileList, ReferenceFileSelector, FilePreviewModal, Footer, TextStyleSelector } from '@/components/shared';
+import { Sparkles, FileText, FileEdit, ImagePlus, Paperclip, Palette, Lightbulb, Settings, FolderOpen, HelpCircle, Sun, Moon, Globe, Monitor, ChevronDown, Upload, RefreshCw } from 'lucide-react';
+import { Button, useToast, MaterialGeneratorModal, MaterialCenterModal, MaterialSelector, ReferenceFileList, ReferenceFileSelector, FilePreviewModal, Footer, TextStyleSelector } from '@/components/shared';
 import { MarkdownTextarea, type MarkdownTextareaRef } from '@/components/shared/MarkdownTextarea';
 import { TemplateSelector, getTemplateFile } from '@/components/shared/TemplateSelector';
 import { AgentModePanel } from '@/components/agent';
@@ -51,13 +51,13 @@ const homeI18n = {
         export: '稳定交付 PPTX/PDF',
       },
       tabs: {
-        no_think: '混乱材料模式',
+        no_think: '主题生成',
         agent: 'Harness Agent',
         idea: '一句话生成',
-        outline: '大纲 PPT生成模式',
+        outline: '输入大纲',
         description: '从描述生成',
-        ppt_to_ppt: '借鉴生成',
-        ppt_renovation: '旧稿翻新',
+        ppt_to_ppt: 'PPT 仿写',
+        ppt_renovation: 'PPT 翻新',
       },
       tabDescriptions: {
         no_think: '输入主题和约束，兰台自动搭建结构、页面描述与视觉初稿',
@@ -80,17 +80,23 @@ const homeI18n = {
         descriptionLabel: '逐页描述（选填）',
         descriptionPlaceholder: '如果你已经有每页内容、布局、图表或素材说明，可以直接填到这里',
         descriptionHint: '逐页描述用于补充每页内容、布局、图表和素材说明；全局视觉风格由上方风格模板控制。',
-        emptyOutlineTip: '还没有大纲？可以使用快速 Harness 先生成完整结构',
+        emptyOutlineTip: '还没有大纲？可以先用“主题生成”自动生成完整结构',
         generateDescriptions: '根据大纲生成逐页描述',
       },
       generation: {
-        title: '生成模式',
-        fast: '快速生成',
-        fastHint: '更快进入大纲、描述和生图流程',
-        harness: 'Harness 高质量模式',
-        harnessHint: '接入标准化计划、校验和页面组织流程',
-        templateLabel: 'Harness 模板',
-        paperOperators: 'paper-operators',
+        title: '生成管线',
+        fast: '标准生成',
+        fastHint: '直接进入大纲、描述和生图流程，速度更快',
+        harness: '结构化 Harness',
+        harnessHint: '增加计划、校验和页面组织，质量更稳',
+        templateLabel: 'Harness 场景包',
+        packs: {
+          paper_operators: { label: '纸片人 Paper Operators', hint: '隐喻执行者叙事，默认纸模舞台视觉' },
+          lecture_deck: { label: '课程讲义', hint: '目标→概念→例题→小结的教学结构，默认讲义板书视觉' },
+          product_launch: { label: '产品发布会', hint: '产品图占主视觉的发布叙事，默认深色舞台视觉' },
+          consulting_report: { label: '咨询汇报', hint: '结论先行、图表主导，默认深蓝灰咨询版式' },
+        },
+        visualHint: '场景包视觉仅在未指定风格时兜底；模板图、文字风格或外部 Skill 会整体接管视觉，不与场景包风格混合。页面结构和质量校验始终保留。',
       },
       examples: {
         outline: '推荐输入格式（可直接复制）：\n\n第 1 页：AI 的起源\n- 1956 达特茅斯会议\n- 早期研究者的愿景\n\n第 2 页：机器学习的发展\n- 从规则驱动到数据驱动\n- 经典算法介绍\n\n第 3 页：未来展望\n- 趋势与挑战\n\n可只写页标题，AI 会按页头自动切分并转为结构化大纲；要点可选填，不影响解析。',
@@ -114,6 +120,8 @@ const homeI18n = {
         density: '内容密度',
         pageCount: 'PPT页数',
         styleTemplate: '风格倾向',
+        styleAuto: '不指定（按内容决定）',
+        styleControlled: '已由上方视觉来源接管，主题生成不再注入风格。',
         extraInstruction: '额外要求',
         extraPlaceholder: '例如：适合新员工，避免技术细节过深',
       },
@@ -188,13 +196,13 @@ const homeI18n = {
         export: 'Stable PPTX/PDF delivery',
       },
       tabs: {
-        no_think: 'Quick Harness',
+        no_think: 'Topic Builder',
         agent: 'Harness Agent',
         idea: 'From Idea',
-        outline: 'Material to PPT',
+        outline: 'Outline Input',
         description: 'From Description',
-        ppt_to_ppt: 'Reference Harness',
-        ppt_renovation: 'Legacy Deck Rebuild',
+        ppt_to_ppt: 'PPT Rewrite',
+        ppt_renovation: 'PPT Renovation',
       },
       tabDescriptions: {
         no_think: 'Enter a topic and constraints; Lantai builds structure, page descriptions, and a visual draft',
@@ -217,17 +225,23 @@ const homeI18n = {
         descriptionLabel: 'Slide descriptions (optional)',
         descriptionPlaceholder: 'Paste slide-by-slide content, layout, chart, or asset notes here',
         descriptionHint: 'Slide descriptions are for page content, layout, charts, and assets; the global visual style is controlled by the style template above.',
-        emptyOutlineTip: 'No outline yet? Use Quick Harness to generate a full structure first',
+        emptyOutlineTip: 'No outline yet? Use Topic Builder to generate a full structure first',
         generateDescriptions: 'Generate slide descriptions from outline',
       },
       generation: {
-        title: 'Generation Mode',
-        fast: 'Fast generation',
-        fastHint: 'Move quickly into outline, descriptions, and image generation',
-        harness: 'Harness high-quality mode',
-        harnessHint: 'Use a structured planning, QA, and page organization process',
-        templateLabel: 'Harness Template',
-        paperOperators: 'paper-operators',
+        title: 'Generation Pipeline',
+        fast: 'Standard generation',
+        fastHint: 'Go directly into outline, descriptions, and image generation',
+        harness: 'Structured Harness',
+        harnessHint: 'Add planning, QA, and page organization for steadier quality',
+        templateLabel: 'Harness Scenario Pack',
+        packs: {
+          paper_operators: { label: 'Paper Operators', hint: 'Metaphor-operator narrative with paper-craft stage visuals by default' },
+          lecture_deck: { label: 'Lecture Deck', hint: 'Goal → concept → example → recap teaching structure, handout-style visuals by default' },
+          product_launch: { label: 'Product Launch', hint: 'Product-image-led keynote narrative, dark stage visuals by default' },
+          consulting_report: { label: 'Consulting Report', hint: 'Conclusion-first, chart-driven, slate-blue executive layout by default' },
+        },
+        visualHint: 'Pack visuals are fallback-only. A template, style text, or external Skill fully owns the visual layer without mixing pack style. Page structure and QA always stay on.',
       },
       examples: {
         outline: 'Recommended input (click to insert):\n\nPage 1: AI Origins\n- 1956 Dartmouth Conference\n- Early researchers\' vision\n\nPage 2: Evolution of Machine Learning\n- Shift from rule-based to data-driven\n- Overview of classic algorithms\n\nPage 3: Future Outlook\n- Trends and opportunities\n- Challenges and risks\n\nPage titles only is also supported. The AI will split by page headers and build structured outlines.',
@@ -251,6 +265,8 @@ const homeI18n = {
         density: 'Content density',
         pageCount: 'PPT pages',
         styleTemplate: 'Style direction',
+        styleAuto: 'Unspecified (follow content)',
+        styleControlled: 'The visual source above owns style; Topic Builder will not inject another style.',
         extraInstruction: 'Extra instruction',
         extraPlaceholder: 'e.g., for new hires, keep technical details light',
       },
@@ -307,6 +323,8 @@ const homeI18n = {
   },
 };
 
+const HARNESS_PACK_IDS: HarnessTemplate[] = ['paper_operators', 'lecture_deck', 'product_launch', 'consulting_report'];
+
 type GenerationModePanelProps = {
   generationMode: GenerationMode;
   harnessTemplate: HarnessTemplate;
@@ -339,6 +357,7 @@ const GenerationModePanel: React.FC<GenerationModePanelProps> = ({
           <button
             key={option.value}
             type="button"
+            aria-label={option.label}
             aria-pressed={active}
             onClick={() => onGenerationModeChange(option.value)}
             className={`min-h-[72px] rounded-lg border px-3 py-2 text-left transition ${
@@ -354,18 +373,36 @@ const GenerationModePanel: React.FC<GenerationModePanelProps> = ({
       })}
     </div>
     {generationMode === 'harness' && (
-      <label className="mt-3 block">
+      <div className="mt-3">
         <span className="mb-1 block text-xs font-medium text-gray-500 dark:text-foreground-tertiary">
           {t('home.generation.templateLabel')}
         </span>
-        <select
-          value={harnessTemplate}
-          onChange={(event) => onHarnessTemplateChange(event.target.value as HarnessTemplate)}
-          className="h-9 w-full rounded-lg border border-gray-200 bg-white px-2 text-sm text-gray-800 outline-none transition focus:border-banana-400 focus:ring-2 focus:ring-banana-200 dark:border-border-primary dark:bg-background-elevated dark:text-foreground-primary dark:focus:border-banana"
-        >
-          <option value="paper_operators">{t('home.generation.paperOperators')}</option>
-        </select>
-      </label>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {HARNESS_PACK_IDS.map((packId) => {
+            const active = harnessTemplate === packId;
+            return (
+              <button
+                key={packId}
+                type="button"
+                aria-label={t(`home.generation.packs.${packId}.label`)}
+                aria-pressed={active}
+                onClick={() => onHarnessTemplateChange(packId)}
+                className={`min-h-[60px] rounded-lg border px-3 py-2 text-left transition ${
+                  active
+                    ? 'border-banana-400 bg-banana-50 text-gray-950 ring-2 ring-banana-100 dark:border-banana dark:bg-banana/10 dark:text-white dark:ring-banana/20'
+                    : 'border-gray-200 bg-white text-gray-700 hover:border-banana-300 dark:border-border-primary dark:bg-background-elevated dark:text-foreground-secondary dark:hover:border-banana/60'
+                }`}
+              >
+                <span className="block text-sm font-semibold">{t(`home.generation.packs.${packId}.label`)}</span>
+                <span className="mt-1 block text-xs leading-relaxed text-gray-500 dark:text-foreground-tertiary">{t(`home.generation.packs.${packId}.hint`)}</span>
+              </button>
+            );
+          })}
+        </div>
+        <p className="mt-2 text-xs leading-relaxed text-gray-500 dark:text-foreground-tertiary">
+          {t('home.generation.visualHint')}
+        </p>
+      </div>
     )}
   </div>
 );
@@ -406,7 +443,7 @@ export const Home: React.FC = () => {
   const [noThinkScenario, setNoThinkScenario] = useState(NO_THINK_SELECT_OPTIONS.scenario[0]);
   const [noThinkDensity, setNoThinkDensity] = useState(NO_THINK_SELECT_OPTIONS.density[0]);
   const [noThinkPageCount, setNoThinkPageCount] = useState('10');
-  const [noThinkStyleTemplate, setNoThinkStyleTemplate] = useState(NO_THINK_SELECT_OPTIONS.styleTemplate[0]);
+  const [noThinkStyleTemplate, setNoThinkStyleTemplate] = useState('');
   const [noThinkExtraInstruction, setNoThinkExtraInstruction] = useState('');
   const [renovationFile, setRenovationFile] = useState<File | null>(null);
   const [pptToPptReferenceFile, setPptToPptReferenceFile] = useState<File | null>(null);
@@ -837,8 +874,15 @@ export const Home: React.FC = () => {
 
   const canUseExternalStyleSkill = activeTab !== 'ppt_renovation' && activeTab !== 'ppt_to_ppt';
   const canUseGenerationMode = activeTab !== 'agent' && activeTab !== 'ppt_renovation' && activeTab !== 'ppt_to_ppt';
-  const usesHarnessVisualStyle = canUseGenerationMode && generationMode === 'harness' && harnessTemplate === 'paper_operators';
-  const externalStyleSkillEnabled = canUseExternalStyleSkill && useExternalStyleSkill && !usesHarnessVisualStyle;
+  // Any explicit user visual source fully owns style; Harness keeps only structure and QA.
+  const externalStyleSkillEnabled = canUseExternalStyleSkill && useExternalStyleSkill;
+  const topicBuilderStyleControlled = Boolean(
+    externalStyleSkillEnabled
+    || selectedTemplate
+    || selectedTemplateId
+    || selectedPresetTemplateId
+    || (useTemplateStyle && templateStyle.trim())
+  );
 
   const buildExternalStylePayload = () => {
     const raw = externalStylePrompt.trim();
@@ -1007,8 +1051,15 @@ export const Home: React.FC = () => {
       }
       
       // External style Skill is mutually exclusive with native template/style inputs.
-      const styleDesc = !externalStyleSkillEnabled && !usesHarnessVisualStyle && templateStyle.trim() ? templateStyle.trim() : undefined;
-      const templateForProject = externalStyleSkillEnabled || usesHarnessVisualStyle ? undefined : templateFile || undefined;
+      const styleDesc = !externalStyleSkillEnabled && useTemplateStyle && templateStyle.trim() ? templateStyle.trim() : undefined;
+      const templateForProject = externalStyleSkillEnabled ? undefined : templateFile || undefined;
+      const explicitVisualSourceSelected = Boolean(
+        externalStyleSkillEnabled
+        || templateForProject
+        || selectedTemplateId
+        || selectedPresetTemplateId
+        || styleDesc
+      );
       const visualOptions = externalStyleSkillEnabled
         ? {
             visual_strategy: 'external_skill' as const,
@@ -1032,7 +1083,9 @@ export const Home: React.FC = () => {
             scenario: noThinkScenario,
             density: noThinkDensity,
             page_count: noThinkPageCount.trim() ? `${noThinkPageCount.trim()}页` : undefined,
-            style_template: noThinkStyleTemplate,
+            style_template: !explicitVisualSourceSelected
+              ? noThinkStyleTemplate.trim() || undefined
+              : undefined,
             extra_instruction: noThinkExtraInstruction.trim() || undefined,
           }
         : undefined;
@@ -1134,12 +1187,6 @@ export const Home: React.FC = () => {
       onChange: setNoThinkDensity,
       options: NO_THINK_SELECT_OPTIONS.density,
     },
-    {
-      label: t('home.noThink.styleTemplate'),
-      value: noThinkStyleTemplate,
-      onChange: setNoThinkStyleTemplate,
-      options: NO_THINK_SELECT_OPTIONS.styleTemplate,
-    },
   ];
 
   const copyTextToClipboard = async (text: string, copiedMessage: string) => {
@@ -1190,203 +1237,230 @@ export const Home: React.FC = () => {
     <div className="app-surface min-h-screen dark:bg-background-primary relative overflow-hidden">
 
       {/* 导航栏 */}
-      <nav className="app-chrome relative z-50 h-16 md:h-18 border-b">
-
-        <div className="max-w-7xl mx-auto px-4 md:px-6 h-full flex items-center justify-between">
+      <nav className="app-chrome relative z-50 h-14 border-b">
+        <div className="mx-auto flex h-full max-w-7xl items-center justify-between px-4 md:px-6">
           <div className="flex min-w-0 items-center">
             <img
               src="/lantai-deck-agent-logo.png"
               alt="兰台 DeckAgent AI Presentation Agent Logo"
-              className="h-11 w-[178px] object-contain object-left md:h-14 md:w-[290px] lg:w-[360px]"
+              className="h-10 w-[170px] object-contain object-left md:w-[240px]"
             />
           </div>
-          <div className="flex items-center gap-2 md:gap-3">
-            {/* 桌面端：带文字的素材生成按钮 */}
-            <Button
-              variant="ghost"
-              size="sm"
-              icon={<ImagePlus size={16} className="md:w-[18px] md:h-[18px]" />}
-              onClick={handleOpenMaterialModal}
-              className="hidden sm:inline-flex hover:bg-banana-100/60 hover:shadow-sm hover:scale-105 transition-all duration-200 font-medium"
-            >
-              <span className="hidden md:inline">{t('nav.materialGenerate')}</span>
-            </Button>
-            {/* 手机端：仅图标的素材生成按钮 */}
-            <Button
-              variant="ghost"
-              size="sm"
-              icon={<ImagePlus size={16} />}
-              onClick={handleOpenMaterialModal}
-              className="sm:hidden hover:bg-banana-100/60 hover:shadow-sm hover:scale-105 transition-all duration-200"
-              title={t('nav.materialGenerate')}
-            />
-            {/* 桌面端：带文字的素材中心按钮 */}
-            <Button
-              variant="ghost"
-              size="sm"
-              icon={<FolderOpen size={16} className="md:w-[18px] md:h-[18px]" />}
-              onClick={() => setIsMaterialCenterOpen(true)}
-              className="hidden sm:inline-flex hover:bg-banana-100/60 hover:shadow-sm hover:scale-105 transition-all duration-200 font-medium"
-            >
-              <span className="hidden md:inline">{t('nav.materialCenter')}</span>
-            </Button>
-            {/* 手机端：仅图标的素材中心按钮 */}
-            <Button
-              variant="ghost"
-              size="sm"
-              icon={<FolderOpen size={16} />}
-              onClick={() => setIsMaterialCenterOpen(true)}
-              className="sm:hidden hover:bg-banana-100/60 hover:shadow-sm hover:scale-105 transition-all duration-200"
-              title={t('nav.materialCenter')}
-            />
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => navigate('/history')}
-              className="text-xs md:text-sm hover:bg-banana-100/60 hover:shadow-sm hover:scale-105 transition-all duration-200 font-medium"
-            >
-              <span className="hidden sm:inline">{t('nav.history')}</span>
-              <span className="sm:hidden">{t('nav.history')}</span>
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              icon={<Settings size={16} className="md:w-[18px] md:h-[18px]" />}
-              onClick={() => navigate('/settings')}
-              className="text-xs md:text-sm hover:bg-banana-100/60 hover:shadow-sm hover:scale-105 transition-all duration-200 font-medium"
-            >
-              <span className="hidden md:inline">{t('nav.settings')}</span>
-            </Button>
-            {/* 分隔线 */}
-            <div className="h-5 w-px bg-gray-300 dark:bg-border-primary mx-1" />
-            {/* 语言切换按钮 */}
-            <button
-              onClick={() => i18n.changeLanguage(i18n.language?.startsWith('zh') ? 'en' : 'zh')}
-              className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-gray-600 dark:text-foreground-tertiary hover:text-gray-900 dark:hover:text-gray-100 hover:bg-banana-100/60 dark:hover:bg-background-hover rounded-md transition-all"
-              title={t('settings.language.label')}
-            >
-              <Globe size={14} />
-              <span>{i18n.language?.startsWith('zh') ? 'EN' : '中'}</span>
-            </button>
-            {/* 主题切换按钮 */}
-            <div className="relative" ref={themeMenuRef}>
-              <button
-                onClick={() => setIsThemeMenuOpen(!isThemeMenuOpen)}
-                className="flex items-center gap-1 p-1.5 text-gray-600 dark:text-foreground-tertiary hover:text-gray-900 dark:hover:text-gray-100 hover:bg-banana-100/60 dark:hover:bg-background-hover rounded-md transition-all"
-                title={t('settings.theme.label')}
-              >
-                {theme === 'system' ? <Monitor size={16} /> : isDark ? <Moon size={16} /> : <Sun size={16} />}
-                <ChevronDown size={12} className={`transition-transform ${isThemeMenuOpen ? 'rotate-180' : ''}`} />
-              </button>
-              {/* 主题下拉菜单 */}
-              {isThemeMenuOpen && (
-                <>
-                  <div className="fixed inset-0 z-40" onClick={() => setIsThemeMenuOpen(false)} />
-                  <div className="absolute right-0 top-full mt-1 z-50 bg-white dark:bg-background-secondary border border-gray-200 dark:border-border-primary rounded-lg shadow-lg dark:shadow-none py-1 min-w-[120px]">
-                    <button
-                      onClick={() => { setTheme('light'); setIsThemeMenuOpen(false); }}
-                      className={`w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-background-hover transition-colors ${theme === 'light' ? 'text-banana' : 'text-gray-700 dark:text-foreground-secondary'}`}
-                    >
-                      <Sun size={14} />
-                      <span>{t('settings.theme.light')}</span>
-                    </button>
-                    <button
-                      onClick={() => { setTheme('dark'); setIsThemeMenuOpen(false); }}
-                      className={`w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-background-hover transition-colors ${theme === 'dark' ? 'text-banana' : 'text-gray-700 dark:text-foreground-secondary'}`}
-                    >
-                      <Moon size={14} />
-                      <span>{t('settings.theme.dark')}</span>
-                    </button>
-                    <button
-                      onClick={() => { setTheme('system'); setIsThemeMenuOpen(false); }}
-                      className={`w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-background-hover transition-colors ${theme === 'system' ? 'text-banana' : 'text-gray-700 dark:text-foreground-secondary'}`}
-                    >
-                      <Monitor size={14} />
-                      <span>{t('settings.theme.system')}</span>
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
+          <div className="flex items-center gap-2 text-xs font-medium text-gray-500 dark:text-foreground-tertiary">
+            <span className="rounded-md bg-gray-100 px-2 py-1 dark:bg-background-secondary">
+              {currentTabConfig.label}
+            </span>
+            <span className="hidden rounded-md bg-gray-100 px-2 py-1 dark:bg-background-secondary sm:inline">
+              {generationMode === 'harness' ? t('home.generation.harness') : t('home.generation.fast')}
+            </span>
           </div>
         </div>
       </nav>
 
       {/* 主内容 */}
-      <main className="relative max-w-5xl mx-auto px-3 md:px-4 py-8 md:py-12">
-        {/* Hero 标题区 */}
-        <div className="text-center mb-10 md:mb-16 space-y-4 md:space-y-6">
-          {/*<div className="inline-flex items-center gap-2 px-4 py-2 bg-[#121212] text-white dark:bg-background-secondary backdrop-blur-sm rounded-full shadow-sm dark:shadow-none mb-4">*/}
-          {/*  <span className="text-sm font-medium text-white/85 dark:text-foreground-secondary">{t('home.tagline')}</span>*/}
-          {/*</div>*/}
-
-          <h1 className="text-4xl md:text-6xl lg:text-7xl font-extrabold leading-tight">
-            <span className="bg-gradient-to-r from-[#121212] via-[#84cc16] to-[#AFFF00] dark:from-banana-dark dark:via-banana dark:to-banana-light bg-clip-text text-transparent dark:italic" style={{
-              backgroundSize: '200% auto',
-              animation: 'gradient 3s ease infinite',
-            }}>
-              {i18n.language?.startsWith('zh') ? `${t('home.title')} · PPT Agent` : 'Lantai PPT Agent'}
-            </span>
-          </h1>
-
-          <p className="text-lg md:text-xl text-gray-600 dark:text-foreground-secondary max-w-2xl mx-auto font-light">
-            {t('home.subtitle')}
-          </p>
-
-          {/* 特性标签 */}
-          <div className="flex flex-wrap items-center justify-center gap-2 md:gap-3 pt-4">
+      <main className="relative mx-auto max-w-7xl px-3 py-4 md:px-5 md:py-6">
+        <div className="mb-4 flex flex-col gap-3 border-b border-gray-200 pb-4 dark:border-border-primary md:flex-row md:items-end md:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400 dark:text-foreground-tertiary">
+              {t('home.tagline')}
+            </p>
+            <h1 className="mt-1 text-2xl font-semibold text-gray-950 dark:text-white md:text-3xl">
+              {i18n.language?.startsWith('zh') ? `${t('home.title')} 工作台` : 'Lantai Workspace'}
+            </h1>
+            <p className="mt-1 max-w-2xl text-sm text-gray-500 dark:text-foreground-tertiary">
+              {t('home.subtitle')}
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
             {[
-              { icon: <Sparkles size={14} className="text-yellow-600 dark:text-banana" />, label: t('home.features.oneClick') },
-              { icon: <FileEdit size={14} className="text-blue-500 dark:text-blue-400" />, label: t('home.features.naturalEdit') },
-              { icon: <Search size={14} className="text-orange-500 dark:text-orange-400" />, label: t('home.features.regionEdit') },
-
-              { icon: <Paperclip size={14} className="text-green-600 dark:text-green-400" />, label: t('home.features.export') },
-            ].map((feature, idx) => (
-              <span
-                key={idx}
-                className="inline-flex items-center gap-1 px-3 py-1.5 bg-white/70 dark:bg-background-secondary backdrop-blur-sm rounded-full text-xs md:text-sm text-gray-700 dark:text-foreground-secondary border border-gray-200/50 dark:border-border-primary shadow-sm dark:shadow-none hover:shadow-md dark:hover:border-border-hover transition-all hover:scale-105 cursor-default"
+              { label: t('home.features.oneClick'), value: referenceFiles.length ? `${referenceFiles.length}` : '0' },
+              { label: t('home.features.naturalEdit'), value: generationMode === 'harness' ? 'Harness' : t('home.generation.fast') },
+              { label: t('home.features.export'), value: aspectRatio },
+            ].map((item) => (
+              <div
+                key={item.label}
+                className="min-w-[112px] rounded-lg border border-gray-200 bg-white px-3 py-2 dark:border-border-primary dark:bg-background-secondary"
               >
-                {feature.icon}
-                {feature.label}
-              </span>
+                <p className="truncate text-[11px] text-gray-400 dark:text-foreground-tertiary">{item.label}</p>
+                <p className="mt-0.5 truncate text-sm font-semibold text-gray-900 dark:text-white">{item.value}</p>
+              </div>
             ))}
           </div>
         </div>
 
-        {/* 创建卡片 */}
-        <Card className="p-4 md:p-10 bg-white/90 dark:bg-background-secondary backdrop-blur-xl dark:backdrop-blur-none shadow-2xl dark:shadow-none border-0 dark:border dark:border-border-primary hover:shadow-3xl dark:hover:shadow-none transition-all duration-300 dark:rounded-2xl">
-          {/* 选项卡 */}
-          <div className="grid grid-cols-2 gap-1.5 rounded-2xl border border-gray-200/70 bg-gray-100/70 p-1.5 shadow-inner dark:border-border-primary dark:bg-background-tertiary/80 sm:grid-cols-4 md:gap-2 mb-6 md:mb-8">
-            {(Object.keys(tabConfig) as VisibleCreationType[]).map((type) => {
-              const config = tabConfig[type];
-              const isActive = activeTab === type;
-              return (
-                <button
-                  key={type}
-                  type="button"
-                  aria-pressed={isActive}
-                  onPointerDown={handleTabPointerDown}
-                  onClick={() => handleTabChange(type)}
-                  className={`home-mode-tab group relative flex min-h-[48px] items-center justify-center gap-1.5 overflow-hidden rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-300 ease-out touch-manipulation md:gap-2 md:px-4 md:py-3 md:text-base ${
-                    isActive
-                      ? 'bg-white text-gray-950 shadow-sm ring-1 ring-black/5 dark:bg-background-elevated dark:text-white dark:ring-white/10'
-                      : 'text-gray-600 hover:bg-white/70 hover:text-gray-950 dark:text-foreground-secondary dark:hover:bg-background-hover dark:hover:text-white'
-                  }`}
-                >
-                  <span
-                    className={`pointer-events-none absolute inset-x-3 top-1 h-0.5 origin-center rounded-full bg-banana-500 transition-all duration-300 dark:bg-banana ${
-                      isActive ? 'scale-x-100 opacity-100' : 'scale-x-0 opacity-0'
-                    }`}
-                  />
-                  <span className={`scale-90 transition-transform duration-300 md:scale-100 ${isActive ? 'text-banana-700 dark:text-banana' : 'group-hover:scale-100'}`}>
-                    {config.icon}
-                  </span>
-                  <span className="truncate">{config.label}</span>
-                </button>
-              );
-            })}
-          </div>
+        <section className="grid gap-4 lg:grid-cols-[260px_minmax(0,1fr)] xl:grid-cols-[280px_minmax(0,1fr)]">
+          <aside className="rounded-xl border border-gray-200 bg-white dark:border-border-primary dark:bg-background-secondary lg:sticky lg:top-20 lg:self-start">
+            <div className="border-b border-gray-100 px-4 py-3 dark:border-border-primary">
+              <p className="text-xs font-medium text-gray-400 dark:text-foreground-tertiary">Workspace</p>
+              <h2 className="mt-0.5 text-sm font-semibold text-gray-950 dark:text-white">兰台工作台</h2>
+            </div>
 
+            <div className="border-b border-gray-100 p-2 dark:border-border-primary">
+              <p className="px-2 pb-1 pt-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-400 dark:text-foreground-tertiary">
+                创建
+              </p>
+              <div className="grid gap-1 sm:grid-cols-2 lg:grid-cols-1">
+              {(Object.keys(tabConfig) as VisibleCreationType[]).map((type) => {
+                const config = tabConfig[type];
+                const isActive = activeTab === type;
+                return (
+                  <button
+                    key={type}
+                    type="button"
+                    aria-label={config.label}
+                    aria-pressed={isActive}
+                    onPointerDown={handleTabPointerDown}
+                    onClick={() => handleTabChange(type)}
+                    className={`home-mode-tab group relative flex min-h-[66px] items-start gap-3 rounded-lg px-3 py-3 text-left transition-all duration-200 touch-manipulation ${
+                      isActive
+                        ? 'bg-gray-950 text-white shadow-sm dark:bg-background-elevated dark:ring-1 dark:ring-white/10'
+                        : 'text-gray-600 hover:bg-gray-50 hover:text-gray-950 dark:text-foreground-secondary dark:hover:bg-background-hover dark:hover:text-white'
+                    }`}
+                  >
+                    <span className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md border transition-colors ${
+                      isActive
+                        ? 'border-banana-300 bg-banana-300 text-black'
+                        : 'border-gray-200 bg-white text-gray-500 group-hover:border-banana-300 dark:border-border-primary dark:bg-background-tertiary dark:text-foreground-tertiary'
+                    }`}>
+                      {config.icon}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-semibold">{config.label}</span>
+                      <span className={`mt-1 line-clamp-2 text-xs leading-relaxed ${
+                        isActive ? 'text-white/65' : 'text-gray-400 dark:text-foreground-tertiary'
+                      }`}>
+                        {config.description}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
+              </div>
+            </div>
+
+            <div className="border-b border-gray-100 p-2 dark:border-border-primary">
+              <p className="px-2 pb-1 pt-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-400 dark:text-foreground-tertiary">
+                资源
+              </p>
+              <div className="grid gap-1 sm:grid-cols-2 lg:grid-cols-1">
+                <button
+                  type="button"
+                  onClick={handleOpenMaterialModal}
+                  className="flex min-h-[44px] items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-950 dark:text-foreground-secondary dark:hover:bg-background-hover dark:hover:text-white"
+                >
+                  <ImagePlus size={16} className="text-gray-400 dark:text-foreground-tertiary" />
+                  <span>{t('nav.materialGenerate')}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsMaterialCenterOpen(true)}
+                  className="flex min-h-[44px] items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-950 dark:text-foreground-secondary dark:hover:bg-background-hover dark:hover:text-white"
+                >
+                  <FolderOpen size={16} className="text-gray-400 dark:text-foreground-tertiary" />
+                  <span>{t('nav.materialCenter')}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => navigate('/history')}
+                  className="flex min-h-[44px] items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-950 dark:text-foreground-secondary dark:hover:bg-background-hover dark:hover:text-white"
+                >
+                  <FileText size={16} className="text-gray-400 dark:text-foreground-tertiary" />
+                  <span>{t('nav.history')}</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="p-2">
+              <p className="px-2 pb-1 pt-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-400 dark:text-foreground-tertiary">
+                系统
+              </p>
+              <div className="grid gap-1 sm:grid-cols-2 lg:grid-cols-1">
+                <button
+                  type="button"
+                  onClick={() => navigate('/settings')}
+                  className="flex min-h-[44px] items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-950 dark:text-foreground-secondary dark:hover:bg-background-hover dark:hover:text-white"
+                >
+                  <Settings size={16} className="text-gray-400 dark:text-foreground-tertiary" />
+                  <span>{t('nav.settings')}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => i18n.changeLanguage(i18n.language?.startsWith('zh') ? 'en' : 'zh')}
+                  className="flex min-h-[44px] items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-950 dark:text-foreground-secondary dark:hover:bg-background-hover dark:hover:text-white"
+                  title={t('settings.language.label')}
+                >
+                  <Globe size={16} className="text-gray-400 dark:text-foreground-tertiary" />
+                  <span>{i18n.language?.startsWith('zh') ? '切换到 English' : 'Switch to 中文'}</span>
+                </button>
+                <div className="relative" ref={themeMenuRef}>
+                  <button
+                    type="button"
+                    onClick={() => setIsThemeMenuOpen(!isThemeMenuOpen)}
+                    className="flex min-h-[44px] w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-950 dark:text-foreground-secondary dark:hover:bg-background-hover dark:hover:text-white"
+                    title={t('settings.theme.label')}
+                  >
+                    <span className="flex items-center gap-3">
+                      {theme === 'system' ? <Monitor size={16} className="text-gray-400 dark:text-foreground-tertiary" /> : isDark ? <Moon size={16} className="text-gray-400 dark:text-foreground-tertiary" /> : <Sun size={16} className="text-gray-400 dark:text-foreground-tertiary" />}
+                      <span>{t('settings.theme.label')}</span>
+                    </span>
+                    <ChevronDown size={12} className={`transition-transform ${isThemeMenuOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  {isThemeMenuOpen && (
+                    <>
+                      <div className="fixed inset-0 z-40" onClick={() => setIsThemeMenuOpen(false)} />
+                      <div className="absolute left-3 right-3 top-full z-50 mt-1 rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-border-primary dark:bg-background-secondary dark:shadow-none">
+                        <button
+                          type="button"
+                          onClick={() => { setTheme('light'); setIsThemeMenuOpen(false); }}
+                          className={`flex w-full items-center gap-2 px-3 py-2 text-sm transition-colors hover:bg-gray-100 dark:hover:bg-background-hover ${theme === 'light' ? 'text-banana' : 'text-gray-700 dark:text-foreground-secondary'}`}
+                        >
+                          <Sun size={14} />
+                          <span>{t('settings.theme.light')}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setTheme('dark'); setIsThemeMenuOpen(false); }}
+                          className={`flex w-full items-center gap-2 px-3 py-2 text-sm transition-colors hover:bg-gray-100 dark:hover:bg-background-hover ${theme === 'dark' ? 'text-banana' : 'text-gray-700 dark:text-foreground-secondary'}`}
+                        >
+                          <Moon size={14} />
+                          <span>{t('settings.theme.dark')}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setTheme('system'); setIsThemeMenuOpen(false); }}
+                          className={`flex w-full items-center gap-2 px-3 py-2 text-sm transition-colors hover:bg-gray-100 dark:hover:bg-background-hover ${theme === 'system' ? 'text-banana' : 'text-gray-700 dark:text-foreground-secondary'}`}
+                        >
+                          <Monitor size={14} />
+                          <span>{t('settings.theme.system')}</span>
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+          </aside>
+
+          <section className="min-w-0 overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-border-primary dark:bg-background-secondary">
+            <div className="flex flex-col gap-3 border-b border-gray-100 px-4 py-4 dark:border-border-primary md:flex-row md:items-center md:justify-between">
+              <div className="min-w-0">
+                <p className="text-xs font-medium text-gray-400 dark:text-foreground-tertiary">Current workflow</p>
+                <h2 className="mt-0.5 flex items-center gap-2 text-lg font-semibold text-gray-950 dark:text-white">
+                  <span className="text-banana-700 dark:text-banana">{currentTabConfig.icon}</span>
+                  {currentTabConfig.label}
+                </h2>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <span className="rounded-md bg-gray-100 px-2 py-1 font-medium text-gray-600 dark:bg-background-tertiary dark:text-foreground-secondary">
+                  {generationMode === 'harness' ? t('home.generation.harness') : t('home.generation.fast')}
+                </span>
+                <span className="rounded-md bg-gray-100 px-2 py-1 font-medium text-gray-600 dark:bg-background-tertiary dark:text-foreground-secondary">
+                  {aspectRatio}
+                </span>
+              </div>
+            </div>
+
+            <div className="p-4 md:p-5">
           <div
             ref={modePanelRef}
             className="transition-[min-height] duration-300 ease-out"
@@ -1714,7 +1788,7 @@ export const Home: React.FC = () => {
                 <div className="mb-3 flex items-center gap-2">
                   <Sparkles size={16} className="text-banana-600 dark:text-banana" />
                   <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
-                    快速 Harness
+                    主题生成设置
                   </h3>
                 </div>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -1736,6 +1810,28 @@ export const Home: React.FC = () => {
                       </select>
                     </label>
                   ))}
+                  <label className="block">
+                    <span className="mb-1 block text-xs font-medium text-gray-500 dark:text-foreground-tertiary">
+                      {t('home.noThink.styleTemplate')}
+                    </span>
+                    <select
+                      aria-label={t('home.noThink.styleTemplate')}
+                      value={topicBuilderStyleControlled ? '' : noThinkStyleTemplate}
+                      disabled={topicBuilderStyleControlled}
+                      onChange={(event) => setNoThinkStyleTemplate(event.target.value)}
+                      className="h-9 w-full rounded-lg border border-gray-200 bg-white px-2 text-sm text-gray-800 outline-none transition focus:border-banana-400 focus:ring-2 focus:ring-banana-200 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400 dark:border-border-primary dark:bg-background-elevated dark:text-foreground-primary dark:focus:border-banana dark:disabled:bg-background-hover"
+                    >
+                      <option value="">{t('home.noThink.styleAuto')}</option>
+                      {NO_THINK_SELECT_OPTIONS.styleTemplate.map((option) => (
+                        <option key={option} value={option}>{option}</option>
+                      ))}
+                    </select>
+                    {topicBuilderStyleControlled && (
+                      <span className="mt-1 block text-xs text-gray-400 dark:text-foreground-tertiary">
+                        {t('home.noThink.styleControlled')}
+                      </span>
+                    )}
+                  </label>
                   <label className="block">
                     <span className="mb-1 block text-xs font-medium text-gray-500 dark:text-foreground-tertiary">
                       {t('home.noThink.pageCount')}
@@ -1844,7 +1940,7 @@ export const Home: React.FC = () => {
 
           {/* 模板选择 */}
           {(
-            activeTab !== 'agent' && !usesHarnessVisualStyle && (
+            activeTab !== 'agent' && (
               (activeTab !== 'ppt_renovation' && activeTab !== 'ppt_to_ppt') ||
               (activeTab === 'ppt_renovation' && renovationStyleSource === 'template') ||
               (activeTab === 'ppt_to_ppt' && pptToPptStyleSource === 'template')
@@ -1958,9 +2054,10 @@ export const Home: React.FC = () => {
             </div>
           )}
             </div>
-          </div>
-
-        </Card>
+            </div>
+            </div>
+          </section>
+        </section>
       </main>
       <ToastContainer />
       {/* 素材生成模态 - 在主页始终生成全局素材 */}

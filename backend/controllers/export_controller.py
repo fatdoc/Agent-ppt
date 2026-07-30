@@ -23,7 +23,7 @@ from services.credit_service import (
     estimate_operation,
     reserve_credits,
 )
-from services.ai_service_manager import get_ai_service
+from services.ai_service_manager import create_ai_service
 from services.prompts import normalize_narration_generation_config
 
 logger = logging.getLogger(__name__)
@@ -385,6 +385,11 @@ def export_editable_pptx(project_id):
         
         if not isinstance(max_workers, int) or max_workers < 1 or max_workers > 16:
             return bad_request("max_workers must be an integer between 1 and 16")
+
+        # Capture the authenticated user's providers now and pass the concrete
+        # service into the background job. This prevents a later request from
+        # another account changing global Flask model settings mid-export.
+        caption_ai_service = create_ai_service()
         
         # Create task record
         estimate = estimate_operation('editable_export', page_count=len(pages))
@@ -431,7 +436,7 @@ def export_editable_pptx(project_id):
             f"icon_subject_extraction={enable_icon_subject_extraction}"
         )
 
-        # 使用递归分析任务（不需要 ai_service，使用 ImageEditabilityService）
+        # 使用递归分析任务；图片识别服务在当前用户请求中固定下来。
         task_manager.submit_task(
             task.id,
             export_editable_pptx_with_recursive_analysis_task,
@@ -444,6 +449,7 @@ def export_editable_pptx(project_id):
             export_extractor_method=export_extractor_method,
             export_inpaint_method=export_inpaint_method,
             enable_icon_subject_extraction=enable_icon_subject_extraction,
+            caption_ai_service=caption_ai_service,
             app=app
         )
         

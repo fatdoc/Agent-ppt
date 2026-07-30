@@ -590,7 +590,13 @@ class ServiceConfig:
         parser_service = FileParserService(
             mineru_token=mineru_token,
             mineru_api_base=mineru_api_base,
-            mineru_provider=mineru_provider
+            mineru_provider=mineru_provider,
+            image_caption_model=(
+                current_app.config.get('IMAGE_CAPTION_MODEL')
+                if has_app_context() and current_app
+                else None
+            ) or 'gemini-3-flash-preview',
+            caption_provider=getattr(ai_service, 'caption_provider', None),
         )
         
         # 创建提取器注册表

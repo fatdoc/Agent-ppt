@@ -24,6 +24,43 @@ def auth_required_enabled() -> bool:
     return True
 
 
+def ai_config_self_service_enabled() -> bool:
+    """Return whether users may edit AI model config (provider/key/model) themselves.
+
+    When disabled, per-user model config lives only in the database and is
+    maintained by the operator (e.g. via scripts/set_user_ai_config.py).
+    """
+    raw = os.getenv('AI_CONFIG_SELF_SERVICE')
+    if raw is not None:
+        return raw.strip().lower() in {'1', 'true', 'yes', 'on'}
+    if current_app.config.get('TESTING'):
+        return True
+    if os.getenv('TESTING', '').strip().lower() in {'1', 'true', 'yes', 'on'}:
+        return True
+    return False
+
+
+def is_admin_user(user=None) -> bool:
+    """Return whether the given (or current) user is an administrator."""
+    user = user or current_user()
+    return bool(user and getattr(user, 'is_admin', False))
+
+
+def ai_config_editable_for_user(user=None) -> bool:
+    """Return whether the user may edit AI model config in the settings UI."""
+    return ai_config_self_service_enabled() or is_admin_user(user)
+
+
+def require_admin_user():
+    """Return an error response if the current user is not an admin."""
+    user = current_user()
+    if not user:
+        return error_response('AUTH_REQUIRED', 'Login required', 401)
+    if not is_admin_user(user):
+        return error_response('ADMIN_REQUIRED', 'Administrator access required', 403)
+    return None
+
+
 def token_serializer() -> URLSafeTimedSerializer:
     return URLSafeTimedSerializer(current_app.config['SECRET_KEY'], salt=TOKEN_SALT)
 
@@ -56,8 +93,10 @@ def get_bearer_token() -> str:
 def get_or_create_default_user() -> User:
     user = User.query.filter_by(username=DEFAULT_USERNAME).first()
     if user:
+        if not user.is_admin:
+            user.is_admin = True
         return user
-    user = User(username=DEFAULT_USERNAME, email=None)
+    user = User(username=DEFAULT_USERNAME, email=None, is_admin=True)
     user.set_password(os.getenv('DEFAULT_USER_PASSWORD', 'admin123'))
     db.session.add(user)
     db.session.flush()

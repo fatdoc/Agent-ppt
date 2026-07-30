@@ -9,6 +9,7 @@ export interface AgentModeCreatePlanRequest {
   style?: string;
   generation_mode?: GenerationMode;
   harness_template?: HarnessTemplate;
+  harness_payload?: Record<string, unknown>;
 }
 
 export interface AgentModeDeckVersion {
@@ -61,6 +62,7 @@ export interface AuthUser {
   id: string;
   username: string;
   email?: string | null;
+  is_admin?: boolean;
   created_at?: string;
 }
 
@@ -100,6 +102,48 @@ export const getCurrentUser = async (): Promise<ApiResponse<{ user: AuthUser }>>
 
 export const logout = async (): Promise<ApiResponse> => {
   const response = await apiClient.post<ApiResponse>('/api/auth/logout');
+  return response.data;
+};
+
+// ===== 开放 API 密钥管理 =====
+
+export interface ApiKeyRecord {
+  id: string;
+  name: string;
+  prefix: string;
+  scopes: string[];
+  is_active: boolean;
+  expires_at?: string | null;
+  last_used_at?: string | null;
+  created_at: string;
+  revoked_at?: string | null;
+}
+
+export interface CreatedApiKey {
+  api_key: ApiKeyRecord;
+  key: string;
+  warning: string;
+}
+
+export const createApiKey = async (
+  name: string,
+  expiresInDays?: number
+): Promise<ApiResponse<CreatedApiKey>> => {
+  const response = await apiClient.post<ApiResponse<CreatedApiKey>>('/api/api-keys', {
+    name,
+    scopes: ['ppt:generate'],
+    ...(expiresInDays ? { expires_in_days: expiresInDays } : {}),
+  });
+  return response.data;
+};
+
+export const listApiKeys = async (): Promise<ApiResponse<{ api_keys: ApiKeyRecord[] }>> => {
+  const response = await apiClient.get<ApiResponse<{ api_keys: ApiKeyRecord[] }>>('/api/api-keys');
+  return response.data;
+};
+
+export const revokeApiKey = async (apiKeyId: string): Promise<ApiResponse<{ api_key: ApiKeyRecord }>> => {
+  const response = await apiClient.delete<ApiResponse<{ api_key: ApiKeyRecord }>>(`/api/api-keys/${apiKeyId}`);
   return response.data;
 };
 
@@ -1394,11 +1438,63 @@ export const getStoredOutputLanguage = async (): Promise<OutputLanguage> => {
   }
 };
 
+export interface AdminManagedUser {
+  id: string;
+  username: string;
+  email?: string | null;
+  is_admin: boolean;
+  created_at?: string;
+}
+
 /**
  * 获取系统设置
  */
 export const getSettings = async (): Promise<ApiResponse<Settings>> => {
   const response = await apiClient.get<ApiResponse<Settings>>('/api/settings');
+  return response.data;
+};
+
+/**
+ * 管理员：列出可管理的用户
+ */
+export const listAdminManagedUsers = async (): Promise<ApiResponse<{ users: AdminManagedUser[] }>> => {
+  const response = await apiClient.get<ApiResponse<{ users: AdminManagedUser[] }>>('/api/settings/admin/users');
+  return response.data;
+};
+
+/**
+ * 管理员：获取指定用户的模型配置
+ */
+export const getAdminUserSettings = async (userId: string): Promise<ApiResponse<Settings>> => {
+  const response = await apiClient.get<ApiResponse<Settings>>(`/api/settings/admin/users/${userId}`);
+  return response.data;
+};
+
+/**
+ * 管理员：更新指定用户的模型配置
+ */
+export const updateAdminUserSettings = async (
+  userId: string,
+  data: Partial<Omit<Settings, 'id' | 'api_key_length' | 'mineru_token_length' | 'baidu_api_key_length' | 'elevenlabs_api_key_length' | 'created_at' | 'updated_at'>> & {
+    api_key?: string;
+    mineru_token?: string;
+    baidu_api_key?: string;
+    elevenlabs_api_key?: string;
+    text_api_key?: string;
+    image_api_key?: string;
+    image_caption_api_key?: string;
+    lazyllm_api_keys?: Record<string, string>;
+  }
+): Promise<ApiResponse<Settings>> => {
+  const response = await apiClient.put<ApiResponse<Settings>>(`/api/settings/admin/users/${userId}`, data);
+  return response.data;
+};
+
+/**
+ * 管理员：重置指定用户的模型配置
+ */
+export const resetAdminUserAiConfig = async (userId: string): Promise<ApiResponse<Settings>> => {
+  const response = await apiClient.post<ApiResponse<Settings>>(`/api/settings/admin/users/${userId}/reset-ai-config`);
   return response.data;
 };
 
