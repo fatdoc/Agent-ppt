@@ -19,12 +19,11 @@ describe('createProject API payload', () => {
       creation_type: 'no_think',
       idea_prompt: 'AI 工具入门',
       no_think_options: {
-        scenario: '内部培训',
-        color_tone: '蓝绿色',
-        density: '简洁',
-        page_count: '5页',
-        style_template: '现代商务',
-        extra_instruction: '适合新员工',
+        project_name: '智慧养老守护系统',
+        industry_or_track: '人工智能',
+        real_scene: '养老院',
+        target_user: '老人和护理员',
+        team_task_description: '四名学生分别负责评估、护理、记录和成果展示',
       },
     });
 
@@ -36,12 +35,11 @@ describe('createProject API payload', () => {
       template_style: undefined,
       image_aspect_ratio: undefined,
       no_think_options: {
-        scenario: '内部培训',
-        color_tone: '蓝绿色',
-        density: '简洁',
-        page_count: '5页',
-        style_template: '现代商务',
-        extra_instruction: '适合新员工',
+        project_name: '智慧养老守护系统',
+        industry_or_track: '人工智能',
+        real_scene: '养老院',
+        target_user: '老人和护理员',
+        team_task_description: '四名学生分别负责评估、护理、记录和成果展示',
       },
     });
   });

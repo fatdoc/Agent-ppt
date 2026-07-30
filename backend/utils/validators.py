@@ -56,6 +56,8 @@ def normalize_aspect_ratio(raw_value) -> str:
 # Project status states
 PROJECT_STATUSES = {
     'DRAFT', 
+    'UNDERSTOOD',
+    'GENERATING_OUTLINE',
     'OUTLINE_GENERATED', 
     'DESCRIPTIONS_GENERATED', 
     'GENERATING_IMAGES', 
@@ -111,4 +113,3 @@ def allowed_file(filename: str, allowed_extensions: Set[str]) -> bool:
     """Check if file extension is allowed"""
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in allowed_extensions
-

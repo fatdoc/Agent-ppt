@@ -1,6 +1,6 @@
 import { type ClassValue, clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import type { Project, Page } from '@/types';
+import type { Project, Page, PageStatus } from '@/types';
 
 /**
  * 合并 className (支持 Tailwind CSS)
@@ -25,11 +25,38 @@ export function normalizeProject(data: any): Project {
  * 标准化后端返回的页面数据
  */
 export function normalizePage(data: any): Page {
+  const generatedImagePath = data.generated_image_url || data.generated_image_path;
+
   return {
     ...data,
     id: data.page_id || data.id,
-    generated_image_path: data.generated_image_url || data.generated_image_path,
+    status: normalizePageStatus(data.status, data.description_content, generatedImagePath),
+    generated_image_path: generatedImagePath,
   };
+}
+
+function normalizePageStatus(
+  status: unknown,
+  descriptionContent: unknown,
+  generatedImagePath: unknown
+): PageStatus {
+  const validStatuses: PageStatus[] = [
+    'DRAFT',
+    'GENERATING_DESCRIPTION',
+    'DESCRIPTION_GENERATED',
+    'QUEUED',
+    'GENERATING',
+    'COMPLETED',
+    'FAILED',
+  ];
+
+  if (typeof status === 'string' && validStatuses.includes(status as PageStatus)) {
+    return status as PageStatus;
+  }
+
+  if (generatedImagePath) return 'COMPLETED';
+  if (descriptionContent) return 'DESCRIPTION_GENERATED';
+  return 'DRAFT';
 }
 
 /**

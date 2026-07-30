@@ -41,6 +41,9 @@
 !docs/superpowers/specs/*.md
 !docs/superpowers/plans/*.md
 !docs/superpowers/progress/*.md
+!docs/ui-reference-map.md
+!docs/ppt-platform-refactor-audit.md
+!docs/ppt-platform-refactor-result.md
 !.github/**/*.md
 *.pyc
 .env

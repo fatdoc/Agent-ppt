@@ -221,6 +221,32 @@ body {
   transform: scale(0.985);
 }
 
+.spec-field--empty .spec-field__input,
+.spec-field--empty .spec-list-field__row input {
+  color: var(--text-tertiary);
+  border-bottom: 1px dashed var(--border-hover);
+}
+
+.spec-field--soft .spec-field__input,
+.spec-field--soft .spec-list-field__row input {
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-hover);
+}
+
+.spec-field--locked .spec-field__input,
+.spec-field--locked .spec-list-field__row input {
+  color: var(--text-primary);
+  border-bottom: 2px solid var(--text-secondary);
+}
+
+.spec-field--locked .spec-field__unlock {
+  opacity: 0.4;
+}
+
+.spec-field--locked:hover .spec-field__unlock {
+  opacity: 1;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .home-mode-panel {
     animation: none;

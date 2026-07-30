@@ -5,6 +5,62 @@ from __future__ import annotations
 class VisualGuidanceService:
     """Build structured visual guidance for PPT page image prompts."""
 
+    _COMPETITION_NAMES = {
+        "wvcc": "世界职业院校技能大赛",
+        "challenge-cup": "挑战杯",
+        "innovation-competition": "中国国际大学生创新大赛",
+        "career-planning": "全国大学生职业规划大赛",
+        "teaching-ability": "职业院校技能大赛教学能力比赛",
+        "custom": "自定义赛事",
+    }
+    _TRACK_NAMES = {
+        "electronic-information": "电子信息",
+        "equipment-manufacturing": "装备制造",
+        "agriculture": "农林牧渔",
+        "healthcare": "医药卫生",
+        "eldercare": "康养服务",
+        "modern-agriculture": "现代农业",
+        "ai-application": "人工智能应用",
+        "other": "其他",
+        "custom": "自定义赛道",
+    }
+    _THEME_NAMES = {
+        "smart-manufacturing": "智能制造与产业升级",
+        "smart-agriculture": "智慧农业与乡村振兴",
+        "smart-eldercare": "智慧养老与健康服务",
+        "ai-industry": "人工智能赋能产业应用",
+        "custom": "自定义主题",
+    }
+
+    def build_asset_context(
+        self,
+        project,
+        *,
+        section: str = "",
+        page_purpose: str = "",
+        image_usage: str = "PPT 页面视觉素材",
+    ) -> str:
+        """Build trusted project context shared by page and standalone material generation."""
+        context = project.get_platform_context() if project and hasattr(project, "get_platform_context") else {}
+        context = context if isinstance(context, dict) else {}
+        competition_id = context.get("competitionId")
+        track_id = context.get("trackId")
+        theme_id = context.get("themeId")
+        custom_theme = context.get("customTheme")
+        style = context.get("style") or (getattr(project, "template_style", None) if project else None)
+        parts = [
+            f"赛事：{self._COMPETITION_NAMES.get(competition_id, competition_id or '通用项目')}",
+            f"赛道：{self._TRACK_NAMES.get(track_id, track_id or '未指定')}",
+            f"大赛主题：{custom_theme or self._THEME_NAMES.get(theme_id, theme_id or '未指定')}",
+            f"当前章节：{section or context.get('currentSectionId') or '未指定'}",
+            f"当前页面目的：{page_purpose or '服务当前页面信息表达'}",
+            f"视觉风格：{style or '遵循项目统一视觉系统'}",
+            f"图片用途：{image_usage}",
+        ]
+        if competition_id == "wvcc":
+            parts.append("评分语境：技能水平、职业素养、应用价值、团队合作、创新创意；只呈现有项目材料支撑的证据。")
+        return "\n".join(parts)
+
     def build_visual_guidance(
         self,
         project,
@@ -12,6 +68,7 @@ class VisualGuidanceService:
         has_template_image: bool,
         has_blueprint_page: bool,
         style_policy: str = "template_first",
+        page_data: dict | None = None,
     ) -> dict:
         template_style = (getattr(project, "template_style", None) or "").strip()
         extra_requirements = (getattr(project, "extra_requirements", None) or "").strip()
@@ -65,6 +122,17 @@ class VisualGuidanceService:
             global_visual_parts.append(f"项目级风格描述：{template_style}")
         if extra_requirements:
             global_visual_parts.append(f"用户额外要求：{extra_requirements}")
+        page_data = page_data or {}
+        page_title = page_data.get("title") or ""
+        global_visual_parts.append(
+            "项目业务上下文（生成内容必须与这些字段一致）：\n"
+            + self.build_asset_context(
+                project,
+                section=page_data.get("part") or "",
+                page_purpose=page_data.get("purpose") or page_title,
+                image_usage="当前 PPT 页的主视觉、图表或项目证据配图",
+            )
+        )
 
         return {
             "global_visual_system": "\n".join(global_visual_parts),

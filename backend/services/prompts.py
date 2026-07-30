@@ -64,8 +64,8 @@ DEFAULT_NARRATION_CONFIG = {
     'target_audience': 'the general public with no technical background',
     'speech_tone': 'analytical, data-driven, and highly professional',
     'presentation_topic': 'the main ideas and key takeaways of this presentation',
-    'min_words': 100,
-    'max_words': 200,
+    'min_words': 60,
+    'max_words': 120,
 }
 
 _NARRATION_MIN_WORDS_LOWER_BOUND = 30
@@ -117,6 +117,102 @@ def _get_previous_requirements_text(previous_requirements: Optional[List[str]]) 
         return ""
     prev_list = "\n".join([f"- {req}" for req in previous_requirements])
     return f"\n\n之前用户提出的修改要求：\n{prev_list}\n"
+
+
+def _get_harness_instructions(project_context: 'ProjectContext') -> str:
+    """Add deterministic high-quality planning constraints only in Harness mode."""
+    if getattr(project_context, "generation_mode", "fast") != "harness":
+        return ""
+    template = getattr(project_context, "harness_template", None) or "paper-operators"
+    return (
+        "\n\nHarness 高质量流程约束：\n"
+        f"- 当前流程模板：{template}。\n"
+        "- 每页必须明确唯一视觉锚点（anchor）和一句可复述结论（takeaway）。\n"
+        "- 明确页面内信息关系：流程、对比、层级、因果、时间或空间关系之一。\n"
+        "- 页面表达策略必须服务真实项目证据，完成后检查结构连续性、信息密度和讲解衔接。\n"
+    )
+
+
+def _join_items(items: Any, fallback: str = "待补充") -> str:
+    """Format list-like prompt values without inventing missing content."""
+    if isinstance(items, list):
+        values = []
+        for item in items:
+            text = str(item).strip()
+            if text:
+                values.append(text)
+        return "；".join(values) if values else fallback
+    text = str(items or "").strip()
+    return text or fallback
+
+
+def _format_competition_team_roles(roles: Any) -> str:
+    if not isinstance(roles, list) or not roles:
+        return "* 待补充：待补充；现场动作：待补充"
+
+    lines = []
+    for role in roles:
+        if not isinstance(role, dict):
+            continue
+        member = role.get("member") or role.get("name") or "成员"
+        role_name = role.get("role") or "待补充角色"
+        responsibility = role.get("responsibility") or role.get("负责内容") or "待补充负责内容"
+        onsite_action = role.get("onsite_action") or "待补充现场动作"
+        lines.append(f"* {member} {role_name}：{responsibility}；现场动作：{onsite_action}")
+    return "\n".join(lines) if lines else "* 待补充：待补充；现场动作：待补充"
+
+
+def _format_competition_skill_modules(modules: Any) -> str:
+    if not isinstance(modules, list) or not modules:
+        return "* 待补充技能模块：负责人 待补充；验证方式 待补充；现场演示动作 待补充"
+
+    lines = []
+    for module in modules:
+        if not isinstance(module, dict):
+            continue
+        skill_name = module.get("skill_name") or "待补充技能模块"
+        responsible_role = module.get("responsible_role") or "待补充"
+        verification_method = module.get("verification_method") or "待补充"
+        onsite_demo_action = module.get("onsite_demo_action") or "待补充"
+        lines.append(
+            f"* {skill_name}：负责人 {responsible_role}；"
+            f"验证方式 {verification_method}；现场演示动作 {onsite_demo_action}"
+        )
+    return "\n".join(lines) if lines else "* 待补充技能模块：负责人 待补充；验证方式 待补充；现场演示动作 待补充"
+
+
+def _format_competition_prompt_variables(
+    project_context: 'ProjectContext',
+    language: str = None,
+) -> Dict[str, Any]:
+    from services.competition_spec_state import unwrap_spec_state
+
+    spec = unwrap_spec_state(getattr(project_context, "competition_project_spec", None) or {})
+    positioning = spec.get("project_positioning") or {}
+    problem = spec.get("problem_definition") or {}
+    validation = spec.get("result_validation") or {}
+    value = spec.get("value_innovation") or {}
+
+    return {
+        "outline_json_format": _get_outline_json_format(),
+        "project_name": positioning.get("project_name") or "待补充",
+        "track_or_industry": positioning.get("track") or positioning.get("industry") or "待补充",
+        "real_scene": positioning.get("real_scene") or "待补充",
+        "service_object": positioning.get("service_object") or "待补充",
+        "final_deliverable": positioning.get("final_deliverable") or "待补充",
+        "one_sentence_intro": positioning.get("one_sentence_intro") or "待补充",
+        "pain_points": _join_items(problem.get("pain_points")),
+        "project_goal": problem.get("project_goal") or "待补充",
+        "team_roles": _format_competition_team_roles(spec.get("team_roles")),
+        "skill_modules": _format_competition_skill_modules(spec.get("skill_modules")),
+        "deliverables": _join_items(validation.get("deliverables")),
+        "evidence_materials": _join_items(validation.get("evidence_materials")),
+        "practical_value": value.get("practical_value") or "待补充",
+        "innovation_points": _join_items(value.get("innovation_points")),
+        "requirements": _format_requirements(project_context.outline_requirements),
+        "idea_prompt": project_context.idea_prompt or "",
+        "language_instruction": get_language_instruction(language),
+    }
 
 
 def _normalize_word_count(value: Any, default: int) -> int:
@@ -279,11 +375,22 @@ def get_outline_generation_prompt(project_context: 'ProjectContext', language: s
     """生成 PPT 大纲的 prompt（JSON 输出）"""
     idea_prompt = project_context.idea_prompt or ""
 
+    if project_context.creation_type == 'no_think' and getattr(project_context, "competition_project_spec", None):
+        prompt = prompt_registry.render(
+            "outline.competition_precise_generation_fast",
+            **_format_competition_prompt_variables(project_context, language),
+        )
+        return _build_prompt(
+            prompt,
+            project_context.reference_files_content,
+            tag='get_competition_precise_outline_generation_prompt',
+        )
+
     prompt = prompt_registry.render(
         "outline.generation",
         outline_json_format=_get_outline_json_format(),
         idea_prompt=idea_prompt,
-        requirements=_format_requirements(project_context.outline_requirements),
+        requirements=_format_requirements(project_context.outline_requirements) + _get_harness_instructions(project_context),
         language_instruction=get_language_instruction(language),
     )
 
@@ -294,10 +401,18 @@ def get_outline_generation_prompt_markdown(project_context: 'ProjectContext', la
     """生成 PPT 大纲的 prompt（Markdown 输出，用于流式生成）"""
     idea_prompt = project_context.idea_prompt or ""
 
+    if project_context.creation_type == 'no_think' and getattr(project_context, "competition_project_spec", None):
+        prompt = prompt_registry.render(
+            "outline.competition_precise_generation_markdown_fast",
+            **_format_competition_prompt_variables(project_context, language),
+        )
+        # 大赛结构化稿件已经吸收资料；流式大纲不再拼接参考文件全文，避免超长上下文。
+        return _build_prompt(prompt, [], tag='get_competition_precise_outline_generation_prompt_markdown')
+
     prompt = prompt_registry.render(
         "outline.generation_markdown",
         idea_prompt=idea_prompt,
-        requirements=_format_requirements(project_context.outline_requirements),
+        requirements=_format_requirements(project_context.outline_requirements) + _get_harness_instructions(project_context),
         language_instruction=get_language_instruction(language),
     )
 
@@ -312,7 +427,7 @@ def get_outline_parsing_prompt(project_context: 'ProjectContext', language: str 
         "outline.parsing",
         outline_text=outline_text,
         outline_json_format=_get_outline_json_format(),
-        language_instruction=get_language_instruction(language),
+        language_instruction=get_language_instruction(language) + _get_harness_instructions(project_context),
     )
 
     return _build_prompt(prompt, project_context.reference_files_content, tag='get_outline_parsing_prompt')
@@ -325,7 +440,7 @@ def get_outline_parsing_prompt_markdown(project_context: 'ProjectContext', langu
     prompt = prompt_registry.render(
         "outline.parsing_markdown",
         outline_text=outline_text,
-        language_instruction=get_language_instruction(language),
+        language_instruction=get_language_instruction(language) + _get_harness_instructions(project_context),
     )
 
     return _build_prompt(prompt, project_context.reference_files_content, tag='get_outline_parsing_prompt_markdown')
@@ -339,7 +454,7 @@ def get_description_to_outline_prompt(project_context: 'ProjectContext', languag
         "outline.from_description",
         description_text=description_text,
         outline_json_format=_get_outline_json_format(),
-        language_instruction=get_language_instruction(language),
+        language_instruction=get_language_instruction(language) + _get_harness_instructions(project_context),
     )
 
     return _build_prompt(prompt, project_context.reference_files_content, tag='get_description_to_outline_prompt')
@@ -352,7 +467,7 @@ def get_description_to_outline_prompt_markdown(project_context: 'ProjectContext'
     prompt = prompt_registry.render(
         "outline.from_description_markdown",
         description_text=description_text,
-        language_instruction=get_language_instruction(language),
+        language_instruction=get_language_instruction(language) + _get_harness_instructions(project_context),
     )
 
     return _build_prompt(prompt, project_context.reference_files_content, tag='get_description_to_outline_prompt_markdown')
@@ -374,7 +489,7 @@ def get_outline_refinement_prompt(current_outline: List[Dict], user_requirement:
         outline_text=outline_text,
         previous_requirements=_get_previous_requirements_text(previous_requirements),
         user_requirement=user_requirement,
-        language_instruction=get_language_instruction(language),
+        language_instruction=get_language_instruction(language) + _get_harness_instructions(project_context),
     )
 
     return _build_prompt(prompt, project_context.reference_files_content, tag='get_outline_refinement_prompt')
@@ -399,7 +514,7 @@ def get_page_description_prompt(project_context: 'ProjectContext', outline: list
         original_input=original_input,
         outline=outline,
         part_info=part_info,
-        requirements=_format_requirements(project_context.description_requirements, "description"),
+        requirements=_format_requirements(project_context.description_requirements, "description") + _get_harness_instructions(project_context),
         page_index=page_index,
         page_outline=page_outline,
         first_page_note=(
@@ -436,11 +551,11 @@ def get_all_descriptions_stream_prompt(project_context: 'ProjectContext',
         "description.all_stream",
         original_input=original_input,
         pages_outline_text=pages_outline_text,
-        requirements=_format_requirements(project_context.description_requirements, "description"),
+        requirements=_format_requirements(project_context.description_requirements, "description") + _get_harness_instructions(project_context),
         detail_level_spec=_get_detail_level_spec(detail_level),
         description_style_boundary=_get_description_style_boundary(),
         extra_field_instructions=_format_extra_field_instructions(extra_fields),
-        language_instruction=get_language_instruction(language),
+        language_instruction=get_language_instruction(language) + _get_harness_instructions(project_context),
     )
 
     return _build_prompt(prompt, project_context.reference_files_content, tag='get_all_descriptions_stream_prompt')
@@ -702,8 +817,7 @@ def get_narration_generation_prompt(
         language: 输出语言
         config: 可配置的演讲稿生成参数
     """
-    lang_cfg = LANGUAGE_CONFIG.get(language, LANGUAGE_CONFIG['zh'])
-    lang_instruction = lang_cfg['instruction']
+    lang_instruction = get_language_instruction(language)
     total_pages = len(pages)
     fallback_topic = ''
     if pages:

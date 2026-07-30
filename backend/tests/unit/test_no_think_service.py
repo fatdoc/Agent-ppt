@@ -5,40 +5,38 @@ def test_no_think_options_from_dict_normalizes_known_fields():
     from services.no_think_service import NoThinkOptions
 
     options = NoThinkOptions.from_dict({
-        "scenario": "路演汇报",
-        "color_tone": "冷色科技感",
-        "density": "信息密度高",
-        "page_count": "8页",
-        "style_template": "咨询风",
-        "extra_instruction": "突出商业价值",
+        "project_name": "智慧养老守护系统",
+        "industry_or_track": "人工智能",
+        "real_scene": "养老院",
+        "target_user": "老人和护理员",
+        "team_task_description": "四名学生分别负责评估、护理、记录和成果展示",
     })
 
-    assert options.scenario == "路演汇报"
-    assert options.color_tone == "冷色科技感"
-    assert options.density == "信息密度高"
-    assert options.page_count == "8页"
-    assert options.style_template == "咨询风"
-    assert options.extra_instruction == "突出商业价值"
+    assert options.project_name == "智慧养老守护系统"
+    assert options.industry_or_track == "人工智能"
+    assert options.real_scene == "养老院"
+    assert options.target_user == "老人和护理员"
+    assert options.team_task_description == "四名学生分别负责评估、护理、记录和成果展示"
 
 
 def test_normalize_prompt_combines_sparse_input_and_options():
     from services.no_think_service import NoThinkOptions, NoThinkService
 
     options = NoThinkOptions(
-        scenario="内部培训",
-        color_tone="蓝绿色",
-        density="简洁",
-        page_count="5页",
-        style_template="现代商务",
-        extra_instruction="适合新员工",
+        project_name="智慧养老守护系统",
+        industry_or_track="人工智能",
+        real_scene="养老院",
+        target_user="老人和护理员",
+        team_task_description="四名学生分别负责评估、护理、记录和成果展示",
     )
 
-    prompt = NoThinkService().normalize_prompt("AI 工具入门", options)
+    prompt = NoThinkService().normalize_prompt("解决老人跌倒风险", options)
 
-    assert "用户补充说明：AI 工具入门" in prompt
-    assert "用途场景：内部培训" in prompt
-    assert "色调感觉：蓝绿色" in prompt
-    assert "内容密度：简洁" in prompt
-    assert "页数倾向：5页" in prompt
-    assert "风格模板：现代商务" in prompt
-    assert "额外说明：适合新员工" in prompt
+    assert "职业教育争夺赛 PPT 生成需求" in prompt
+    assert "世界职业院校技能大赛/争夺赛" in prompt
+    assert "项目想法/项目简介：解决老人跌倒风险" in prompt
+    assert "项目名称：智慧养老守护系统" in prompt
+    assert "赛道/专业方向：人工智能" in prompt
+    assert "真实场景：养老院" in prompt
+    assert "服务对象/使用对象：老人和护理员" in prompt
+    assert "四名选手分工：四名学生分别负责评估、护理、记录和成果展示" in prompt

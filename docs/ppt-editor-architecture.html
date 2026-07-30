@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>/ppt-editor 技术架构可视化</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: rgba(15, 23, 42, 0.82);
+      --card: rgba(255, 255, 255, 0.08);
+      --line: rgba(148, 163, 184, 0.36);
+      --text: #e5e7eb;
+      --muted: #94a3b8;
+      --blue: #38bdf8;
+      --green: #34d399;
+      --orange: #fb923c;
+      --purple: #a78bfa;
+      --yellow: #facc15;
+      --radius: 22px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at 12% 8%, rgba(56, 189, 248, 0.22), transparent 28%),
+        radial-gradient(circle at 88% 10%, rgba(167, 139, 250, 0.2), transparent 30%),
+        radial-gradient(circle at 74% 92%, rgba(52, 211, 153, 0.15), transparent 30%),
+        var(--bg);
+      color: var(--text);
+      line-height: 1.65;
+    }
+    .page { max-width: 1440px; margin: 0 auto; padding: 36px 24px 72px; }
+    .hero, .section {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      box-shadow: 0 24px 70px rgba(0, 0, 0, 0.36);
+      backdrop-filter: blur(18px);
+    }
+    .hero { padding: 38px; border-radius: 32px; overflow: hidden; }
+    .section { margin-top: 28px; padding: 28px; border-radius: var(--radius); }
+    .eyebrow {
+      display: inline-flex;
+      padding: 7px 13px;
+      border: 1px solid rgba(56, 189, 248, 0.35);
+      border-radius: 999px;
+      color: #bae6fd;
+      background: rgba(56, 189, 248, 0.08);
+      font-size: 13px;
+      font-weight: 800;
+    }
+    h1 { margin: 20px 0 12px; font-size: clamp(32px, 5vw, 60px); line-height: 1.08; letter-spacing: -0.04em; }
+    h2 { margin: 0 0 6px; font-size: 27px; letter-spacing: -0.03em; }
+    h3 { margin: 0 0 8px; font-size: 17px; }
+    p { margin: 0; color: #cbd5e1; }
+    code { color: #a7f3d0; }
+    .sub { color: var(--muted); font-size: 14px; margin-bottom: 20px; }
+    .chips { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 26px; }
+    .chip {
+      padding: 9px 13px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.06);
+      color: #dbeafe;
+      font-size: 13px;
+      font-weight: 800;
+    }
+    .flow { display: grid; grid-template-columns: repeat(7, minmax(120px, 1fr)); gap: 12px; }
+    .flow-node {
+      position: relative;
+      min-height: 138px;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.075);
+    }
+    .flow-node:not(:last-child)::after {
+      content: "→";
+      position: absolute;
+      right: -15px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--blue);
+      font-size: 22px;
+      font-weight: 900;
+      z-index: 2;
+    }
+    .num {
+      display: inline-grid;
+      place-items: center;
+      width: 28px;
+      height: 28px;
+      margin-bottom: 10px;
+      border-radius: 999px;
+      background: rgba(56, 189, 248, 0.16);
+      color: #7dd3fc;
+      font-weight: 900;
+    }
+    .flow-node p, .card p, .mini p { font-size: 13px; color: #cbd5e1; }
+    .grid { display: grid; gap: 16px; }
+    .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .card, .mini {
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--card);
+    }
+    .tag { display: inline-block; margin-bottom: 10px; padding: 5px 9px; border-radius: 999px; font-size: 12px; font-weight: 900; }
+    .blue { color: #bae6fd; background: rgba(56, 189, 248, 0.12); border: 1px solid rgba(56, 189, 248, 0.28); }
+    .green { color: #bbf7d0; background: rgba(52, 211, 153, 0.12); border: 1px solid rgba(52, 211, 153, 0.28); }
+    .orange { color: #fed7aa; background: rgba(251, 146, 60, 0.12); border: 1px solid rgba(251, 146, 60, 0.28); }
+    .purple { color: #ddd6fe; background: rgba(167, 139, 250, 0.12); border: 1px solid rgba(167, 139, 250, 0.28); }
+    .yellow { color: #fef3c7; background: rgba(250, 204, 21, 0.12); border: 1px solid rgba(250, 204, 21, 0.28); }
+    .browser { border: 1px solid var(--line); border-radius: 20px; overflow: hidden; background: rgba(2, 6, 23, 0.58); }
+    .browser-top { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,0.05); }
+    .dot { width: 11px; height: 11px; border-radius: 999px; }
+    .red-dot { background: #fb7185; } .yellow-dot { background: #facc15; } .green-dot { background: #34d399; }
+    .url { margin-left: 10px; padding: 6px 12px; border-radius: 999px; background: rgba(15, 23, 42, 0.8); color: #cbd5e1; font-size: 12px; flex: 1; }
+    .browser-body { display: grid; grid-template-columns: 0.95fr 1.05fr; min-height: 430px; }
+    .chat-pane, .doc-pane { padding: 18px; }
+    .chat-pane { border-right: 1px solid var(--line); background: rgba(56, 189, 248, 0.04); }
+    .doc-pane { background: rgba(52, 211, 153, 0.04); }
+    .bubble { max-width: 88%; margin-bottom: 12px; padding: 11px 13px; border-radius: 16px; font-size: 13px; color: #e2e8f0; }
+    .bubble.user { margin-left: auto; background: rgba(56, 189, 248, 0.2); border: 1px solid rgba(56, 189, 248, 0.28); }
+    .bubble.ai { background: rgba(255,255,255,0.08); border: 1px solid var(--line); }
+    .doc-block { padding: 13px; border: 1px solid rgba(52, 211, 153, 0.24); border-radius: 15px; background: rgba(15, 23, 42, 0.48); margin-bottom: 12px; }
+    .doc-block h4 { margin: 0 0 7px; color: #bbf7d0; }
+    .doc-block ul { margin: 0; padding-left: 18px; color: #cbd5e1; font-size: 13px; }
+    .lane { display: grid; grid-template-columns: 180px 1fr; gap: 16px; margin-bottom: 14px; }
+    .lane-title { display: grid; place-items: center; padding: 16px; border: 1px solid var(--line); border-radius: 16px; background: rgba(255,255,255,0.06); font-weight: 900; text-align: center; }
+    .lane-content { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+    pre { margin: 0; padding: 18px; overflow: auto; border: 1px solid var(--line); border-radius: 16px; background: rgba(2, 6, 23, 0.72); color: #d1fae5; font-size: 13px; line-height: 1.55; }
+    .table-card { border: 1px solid var(--line); border-radius: 18px; overflow: hidden; background: rgba(255,255,255,0.06); }
+    .table-card header { padding: 14px 16px; background: rgba(255,255,255,0.08); border-bottom: 1px solid var(--line); font-weight: 900; }
+    .field { display: flex; justify-content: space-between; gap: 12px; padding: 11px 16px; border-bottom: 1px solid rgba(148, 163, 184, 0.18); color: #cbd5e1; font-size: 13px; }
+    .field:last-child { border-bottom: 0; }
+    .callout { padding: 18px; border: 1px solid rgba(250, 204, 21, 0.32); border-radius: 18px; background: rgba(250, 204, 21, 0.09); color: #fef9c3; }
+    @media (max-width: 1180px) {
+      .flow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .flow-node:not(:last-child)::after { display: none; }
+      .lane { grid-template-columns: 1fr; }
+      .lane-content, .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 760px) {
+      .page { padding: 18px 12px 44px; }
+      .hero, .section { padding: 20px; }
+      .grid-2, .grid-3, .grid-4, .browser-body, .lane-content, .flow { grid-template-columns: 1fr; }
+      .chat-pane { border-right: 0; border-bottom: 1px solid var(--line); }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="hero">
+      <div class="eyebrow">/ppt-editor · 聊天驱动 PPT 文档生成架构</div>
+      <h1>从聊天内容到修改文档，再到生成 PPT 大纲</h1>
+      <p>这个页面是一个语义编辑器：用户每轮输入都会被后端 LLM 转换成结构化 <strong>CompetitionProjectSpec</strong>，前端再把它渲染为右侧 Markdown 稿件。确认稿件后，系统基于结构化稿件生成 PPT 大纲页面。</p>
+      <div class="chips">
+        <span class="chip">React + TypeScript</span>
+        <span class="chip">SSE 流式交互</span>
+        <span class="chip">LLM 语义编辑</span>
+        <span class="chip">结构化 JSON 文档</span>
+        <span class="chip">Markdown 可视化稿件</span>
+        <span class="chip">Project / Page 持久化</span>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>一、核心工作流总览</h2>
+      <p class="sub">用户自然语言不会直接写入页面，而是先变成结构化稿件，再渲染成文档。</p>
+      <div class="flow">
+        <div class="flow-node"><div class="num">1</div><h3>用户聊天输入</h3><p>输入项目资料、补充信息、修改意见。</p></div>
+        <div class="flow-node"><div class="num">2</div><h3>前端组装上下文</h3><p>发送本轮输入、当前 spec、可选 Markdown 手动稿和 project_id。</p></div>
+        <div class="flow-node"><div class="num">3</div><h3>后端语义编辑</h3><p>CompetitionDocumentEditService 调 LLM，生成 updated_spec。</p></div>
+        <div class="flow-node"><div class="num">4</div><h3>结构化校验</h3><p>CompetitionUnderstandingService 清洗字段、补默认值、计算缺失项。</p></div>
+        <div class="flow-node"><div class="num">5</div><h3>项目持久化</h3><p>保存 Project.competition_project_spec、idea_prompt、status。</p></div>
+        <div class="flow-node"><div class="num">6</div><h3>前端刷新文档</h3><p>applyResponse 更新 spec，再用 buildDraftMarkdown 生成右侧 Markdown。</p></div>
+        <div class="flow-node"><div class="num">7</div><h3>确认并生成大纲</h3><p>确认稿件后调用 generateOutlineStream，生成 Page.outline_content。</p></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>二、页面可视化结构</h2>
+      <p class="sub">左侧聊天、右侧文档、底层结构化状态联动。</p>
+      <div class="browser">
+        <div class="browser-top"><span class="dot red-dot"></span><span class="dot yellow-dot"></span><span class="dot green-dot"></span><div class="url">http://localhost:3100/ppt-editor</div></div>
+        <div class="browser-body">
+          <div class="chat-pane">
+            <span class="tag blue">左侧聊天区</span>
+            <div class="bubble ai">把项目想法、基础资料或修改意见发给我。我会持续更新右侧结构化稿件。</div>
+            <div class="bubble user">把项目名称改成“智慧养老照护风险评估系统”，真实场景是养老院护理站。</div>
+            <div class="bubble ai">已把项目名称和真实场景同步进结构化稿件。接下来可继续补充四名选手分工和成果证据。</div>
+          </div>
+          <div class="doc-pane">
+            <span class="tag green">右侧 Markdown 稿件区</span>
+            <div class="doc-block"><h4># 智慧养老照护风险评估系统</h4><ul><li>赛道/专业方向：养老照护</li><li>真实场景：养老院护理站</li><li>服务对象：老人、护理员、机构管理人员</li></ul></div>
+            <div class="doc-block"><h4>## 三、四名选手分工</h4><ul><li>A 选手：待补充</li><li>B 选手：待补充</li><li>C 选手：待补充</li><li>D 选手：待补充</li></ul></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>三、分层技术架构</h2>
+      <p class="sub">从浏览器到后端服务，再到模型和数据库的职责划分。</p>
+      <div class="lane"><div class="lane-title">前端页面层</div><div class="lane-content"><div class="mini"><h3>路由入口</h3><code>frontend/src/App.tsx</code><p>/ppt-editor 映射到 PptEditor。</p></div><div class="mini"><h3>页面主体</h3><code>frontend/src/pages/PptEditor.tsx</code><p>维护聊天、spec、Markdown、确认状态。</p></div><div class="mini"><h3>API 封装</h3><code>frontend/src/api/endpoints.ts</code><p>封装 understand、upload、outline stream。</p></div><div class="mini"><h3>本地恢复</h3><code>localStorage</code><p>保存草稿和生成中状态。</p></div></div></div>
+      <div class="lane"><div class="lane-title">后端控制层</div><div class="lane-content"><div class="mini"><h3>普通理解接口</h3><code>POST /api/projects/understand</code><p>非流式保存结构化稿件。</p></div><div class="mini"><h3>流式理解接口</h3><code>POST /api/projects/understand/stream</code><p>SSE 返回 draft 和 assistant_delta。</p></div><div class="mini"><h3>大纲生成接口</h3><code>POST /api/projects/{id}/generate/outline/stream</code><p>SSE 按页返回大纲。</p></div><div class="mini"><h3>文件接口</h3><code>/api/reference-files/*</code><p>上传、解析、读取参考资料。</p></div></div></div>
+      <div class="lane"><div class="lane-title">领域服务层</div><div class="lane-content"><div class="mini"><h3>语义编辑</h3><code>CompetitionDocumentEditService</code><p>把聊天指令转成 updated_spec。</p></div><div class="mini"><h3>结构化校验</h3><code>CompetitionUnderstandingService</code><p>默认结构、字段清洗、缺失字段计算。</p></div><div class="mini"><h3>AI 调用</h3><code>AIService</code><p>generate_json 和 generate_outline_stream。</p></div><div class="mini"><h3>Prompt 组装</h3><code>services/prompts.py</code><p>根据 spec 注入大纲生成变量。</p></div></div></div>
+      <div class="lane"><div class="lane-title">数据持久层</div><div class="lane-content"><div class="mini"><h3>项目表</h3><code>Project</code><p>保存标题、idea_prompt、状态、competition_project_spec。</p></div><div class="mini"><h3>页面表</h3><code>Page</code><p>保存每页 outline_content、part、order_index。</p></div><div class="mini"><h3>参考文件表</h3><code>ReferenceFile</code><p>保存上传文件和解析后的 markdown_content。</p></div><div class="mini"><h3>本地草稿</h3><code>banana-ppt-editor-precise-draft</code><p>防刷新丢失。</p></div></div></div>
+    </section>
+
+    <section class="section">
+      <h2>四、关键接口与事件</h2>
+      <p class="sub">页面主要依赖两个 SSE 接口：理解文档、生成大纲。</p>
+      <div class="grid grid-2">
+        <div class="card"><span class="tag blue">聊天理解接口</span><h3>POST /api/projects/understand/stream</h3><p>把用户聊天内容转成结构化稿件，并流式返回聊天回复。</p><pre><code>{
+  "generation_mode": "precise",
+  "project_id": "可选，已有项目 ID",
+  "input_mode": "raw_text",
+  "raw_text": "用户本轮输入",
+  "structured_input": "当前 CompetitionProjectSpec",
+  "current_markdown": "可选，右侧手动稿件"
+}</code></pre></div>
+        <div class="card"><span class="tag green">理解接口 SSE</span><h3>返回事件</h3><pre><code>event: status
+data: {"message": "正在理解本轮输入"}
+
+event: draft
+data: {"competition_project_spec": {...}}
+
+event: assistant_delta
+data: {"text": "已把本轮内容同步..."}
+
+event: done
+data: {"project_id": "..."}</code></pre></div>
+        <div class="card"><span class="tag purple">大纲生成接口</span><h3>POST /api/projects/{id}/generate/outline/stream</h3><p>基于已确认的结构化稿件生成 PPT 大纲页面。</p><pre><code>{
+  "language": "zh",
+  "lock_page_count": false
+}</code></pre></div>
+        <div class="card"><span class="tag orange">大纲 SSE</span><h3>返回事件</h3><pre><code>event: page
+data: {
+  "index": 0,
+  "title": "封面",
+  "points": ["项目名称", "团队信息"],
+  "part": "开场"
+}
+
+event: done
+data: {"total": 36, "pages": [...]}</code></pre></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>五、核心数据模型</h2>
+      <p class="sub">系统的中心不是聊天记录，而是 CompetitionProjectSpec。</p>
+      <div class="grid grid-3">
+        <div class="table-card"><header>CompetitionProjectSpec</header><div class="field"><span>比赛上下文</span><code>competition_context</code></div><div class="field"><span>项目定位</span><code>project_positioning</code></div><div class="field"><span>问题定义</span><code>problem_definition</code></div><div class="field"><span>四名选手分工</span><code>team_roles</code></div><div class="field"><span>技能展示模块</span><code>skill_modules</code></div><div class="field"><span>成果验证</span><code>result_validation</code></div><div class="field"><span>价值创新</span><code>value_innovation</code></div></div>
+        <div class="table-card"><header>Project</header><div class="field"><span>项目标题</span><code>project_title</code></div><div class="field"><span>生成输入摘要</span><code>idea_prompt</code></div><div class="field"><span>创建类型</span><code>creation_type=no_think</code></div><div class="field"><span>项目状态</span><code>status</code></div><div class="field"><span>结构化稿件</span><code>competition_project_spec</code></div></div>
+        <div class="table-card"><header>Page</header><div class="field"><span>所属项目</span><code>project_id</code></div><div class="field"><span>页顺序</span><code>order_index</code></div><div class="field"><span>章节分组</span><code>part</code></div><div class="field"><span>页面大纲</span><code>outline_content</code></div><div class="field"><span>页面描述</span><code>description_content</code></div></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>六、结构化稿件到 Markdown 的映射</h2>
+      <p class="sub">右侧文档是 buildDraftMarkdown(spec) 的展示结果。</p>
+      <div class="grid grid-2">
+        <div class="card"><span class="tag purple">结构化 JSON</span><h3>系统真实状态</h3><pre><code>{
+  "project_positioning": {
+    "project_name": "智慧养老照护风险评估系统",
+    "track": "养老照护",
+    "real_scene": "养老院护理站",
+    "service_object": "老人、护理员"
+  },
+  "problem_definition": {
+    "pain_points": ["风险识别依赖经验", "记录归档不统一"],
+    "project_goal": "完成现场评估、干预建议和复核闭环"
+  }
+}</code></pre></div>
+        <div class="card"><span class="tag green">Markdown 稿件</span><h3>用户可见文档</h3><pre><code># 智慧养老照护风险评估系统
+
+## 一、项目定位
+- 项目名称：智慧养老照护风险评估系统
+- 赛道/专业方向：养老照护
+- 真实场景：养老院护理站
+- 服务对象：老人、护理员
+
+## 二、真实问题与目标
+### 痛点
+- 风险识别依赖经验
+- 记录归档不统一</code></pre></div>
+      </div>
+      <div class="callout" style="margin-top: 18px;"><strong>关键点：</strong>前端不是把聊天文本直接拼到 Markdown 中，而是先更新 spec，再重新渲染 Markdown，避免聊天内容、提示词、模板标题、待补充占位污染业务文档。</div>
+    </section>
+
+    <section class="section">
+      <h2>七、一句话总结</h2>
+      <div class="callout">/ppt-editor 是一个聊天驱动的结构化文档编辑系统。聊天只是输入方式，真正的文档状态是 <code>CompetitionProjectSpec</code>；Markdown 是它的可视化编辑层；PPT 大纲是基于确认后的结构化稿件生成出来的页面集合。</div>
+    </section>
+  </main>
+</body>
+</html>

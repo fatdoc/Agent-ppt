@@ -5,6 +5,7 @@ Revises: 020_add_mineru_provider
 Create Date: 2026-06-20 00:00:00.000000
 
 """
+import os
 import uuid
 
 import sqlalchemy as sa
@@ -43,7 +44,9 @@ def _column_exists(table_name: str, column_name: str) -> bool:
 
 def _ensure_default_user() -> str:
     bind = op.get_bind()
-    row = bind.execute(sa.text("SELECT id FROM users WHERE username = :username"), {"username": "default"}).fetchone()
+    default_username = os.getenv("DEFAULT_USERNAME", "default")
+    default_password = os.getenv("DEFAULT_USER_PASSWORD", "banana-slides-default")
+    row = bind.execute(sa.text("SELECT id FROM users WHERE username = :username"), {"username": default_username}).fetchone()
     if row:
         return row[0]
 
@@ -57,8 +60,8 @@ def _ensure_default_user() -> str:
         ),
         {
             "id": user_id,
-            "username": "default",
-            "password_hash": generate_password_hash("banana-slides-default"),
+            "username": default_username,
+            "password_hash": generate_password_hash(default_password),
         },
     )
     return user_id

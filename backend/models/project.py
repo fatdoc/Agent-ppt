@@ -25,7 +25,13 @@ class Project(db.Model):
     creation_type = db.Column(db.String(20), nullable=False, default='idea')  # idea|outline|descriptions
     template_image_path = db.Column(db.String(500), nullable=True)
     template_style = db.Column(db.Text, nullable=True)  # 风格描述文本（无模板图模式）
+    generation_mode = db.Column(db.String(20), nullable=False, server_default='fast', default='fast')
+    harness_template = db.Column(db.String(50), nullable=True)
     ppt_to_ppt_blueprint = db.Column(db.Text, nullable=True)
+    competition_project_spec = db.Column(db.Text, nullable=True)
+    platform_context = db.Column(db.Text, nullable=True)
+    outline_template_id = db.Column(db.String(36), nullable=True, index=True)
+    ppt_template_id = db.Column(db.String(36), nullable=True)
     # 导出设置
     export_extractor_method = db.Column(db.String(50), nullable=True, default='hybrid')  # 组件提取方法: mineru, hybrid
     export_inpaint_method = db.Column(db.String(50), nullable=True, default='hybrid')  # 背景图获取方法: generative, baidu, hybrid
@@ -70,7 +76,13 @@ class Project(db.Model):
             'creation_type': self.creation_type,
             'template_image_url': f'/files/{self.id}/template/{self.template_image_path.split("/")[-1]}' if self.template_image_path else None,
             'template_style': self.template_style,
+            'generation_mode': self.generation_mode or 'fast',
+            'harness_template': self.harness_template,
             'ppt_to_ppt_blueprint': self.get_ppt_to_ppt_blueprint(),
+            'competition_project_spec': self.get_competition_project_spec(),
+            'platform_context': self.get_platform_context(),
+            'outline_template_id': self.outline_template_id,
+            'ppt_template_id': self.ppt_template_id,
             'export_extractor_method': self.export_extractor_method or 'hybrid',
             'export_inpaint_method': self.export_inpaint_method or 'hybrid',
             'export_allow_partial': self.export_allow_partial or False,
@@ -102,6 +114,38 @@ class Project(db.Model):
             self.ppt_to_ppt_blueprint = json.dumps(data, ensure_ascii=False)
         else:
             self.ppt_to_ppt_blueprint = None
+
+    def get_competition_project_spec(self):
+        """Parse vocational competition project spec JSON."""
+        if self.competition_project_spec:
+            try:
+                return json.loads(self.competition_project_spec)
+            except json.JSONDecodeError:
+                return None
+        return None
+
+    def set_competition_project_spec(self, data):
+        """Store vocational competition project spec as JSON text."""
+        if data:
+            self.competition_project_spec = json.dumps(data, ensure_ascii=False)
+        else:
+            self.competition_project_spec = None
+
+    def get_platform_context(self):
+        """Parse competition and workflow context shared by all project pages."""
+        if self.platform_context:
+            try:
+                return json.loads(self.platform_context)
+            except json.JSONDecodeError:
+                return None
+        return None
+
+    def set_platform_context(self, data):
+        """Persist the unified competition/project context."""
+        if data:
+            self.platform_context = json.dumps(data, ensure_ascii=False)
+        else:
+            self.platform_context = None
     
     def __repr__(self):
         return f'<Project {self.id}: {self.status}>'

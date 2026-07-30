@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Sparkles, FileText, FileEdit, ImagePlus, Paperclip, Palette, Lightbulb, Search, Settings, FolderOpen, HelpCircle, Sun, Moon, Globe, Monitor, ChevronDown, Upload, RefreshCw } from 'lucide-react';
-import { Button, Card, useToast, MaterialGeneratorModal, MaterialCenterModal, MaterialSelector, ReferenceFileList, ReferenceFileSelector, FilePreviewModal, Footer, GithubRepoCard, TextStyleSelector } from '@/components/shared';
+import { Sparkles, FileText, FileEdit, ImagePlus, Paperclip, Palette, Lightbulb, Search, Settings, FolderOpen, HelpCircle, Sun, Moon, Globe, Monitor, ChevronDown, Upload, RefreshCw, Wand2, ShieldCheck, AlertTriangle } from 'lucide-react';
+import { Button, Card, useToast, MaterialGeneratorModal, MaterialCenterModal, MaterialSelector, ReferenceFileList, ReferenceFileSelector, FilePreviewModal, Footer, TextStyleSelector } from '@/components/shared';
 import { MarkdownTextarea, type MarkdownTextareaRef } from '@/components/shared/MarkdownTextarea';
 import { TemplateSelector, getTemplateFile } from '@/components/shared/TemplateSelector';
-import { listUserTemplates, type UserTemplate, uploadReferenceFile, type ReferenceFile, associateFileToProject, triggerFileParse, associateMaterialsToProject, createPptRenovationProject, createPptToPptProject } from '@/api/endpoints';
+import { listUserTemplates, type UserTemplate, uploadReferenceFile, type ReferenceFile, associateFileToProject, triggerFileParse, associateMaterialsToProject, createPptRenovationProject, createPptToPptProject, persistPlatformContext } from '@/api/endpoints';
 import { useProjectStore } from '@/store/useProjectStore';
 import { devLog } from '@/utils/logger';
 import { useTheme } from '@/hooks/useTheme';
@@ -13,29 +13,30 @@ import { useImagePaste, buildMaterialsMarkdown } from '@/hooks/useImagePaste';
 import type { Material } from '@/types';
 import { useT } from '@/hooks/useT';
 import { ASPECT_RATIO_OPTIONS } from '@/config/aspectRatio';
+import { usePlatform } from '@/platform';
 
 type CreationType = 'no_think' | 'idea' | 'outline' | 'description' | 'ppt_to_ppt' | 'ppt_renovation';
 type VisibleCreationType = 'no_think' | 'outline' | 'ppt_to_ppt' | 'ppt_renovation';
 type RenovationStyleSource = 'original' | 'template';
 type PptToPptStyleSource = 'original' | 'template';
+type GenerationMode = 'fast' | 'harness';
+type HarnessTemplate = 'paper-operators';
 
 // 支持作为参考文件上传的文档扩展名（与后端 file_parser_service 保持一致）
 const ALLOWED_DOC_EXTENSIONS = ['pdf', 'docx', 'pptx', 'doc', 'ppt', 'xlsx', 'xls', 'csv', 'txt', 'md'];
 
 const NO_THINK_SELECT_OPTIONS = {
-  scenario: ['工作汇报', '产品发布', '教学课件', '个人展示'],
-  colorTone: ['商务蓝', '科技紫', '温暖米', '清新绿'],
-  density: ['精炼要点版', '详细说明版'],
-  pageCount: ['短(5-7页)', '中(10-12页)', '长(15页以上)'],
-  styleTemplate: ['商务演示', '极简展示', '创意渐变'],
+  industryOrTrack: ['新一代信息技术', '人工智能', '智能制造', '现代农业', '养老照护', '文旅服务', '数字商贸', '交通运输'],
 };
+
+const APP_EDITION = import.meta.env.VITE_APP_EDITION || '职业教育版';
 
 // 页面特有翻译 - AI 可以直接看到所有文案，保留原始 key 结构
 const homeI18n = {
   zh: {
     nav: {
       materialGenerate: '素材生成', materialCenter: '素材中心',
-      history: '历史项目', settings: '设置'
+      preciseGenerate: '精准生成', history: '历史项目', settings: '设置'
     },
     settings: {
       language: { label: '界面语言' },
@@ -52,7 +53,7 @@ const homeI18n = {
         export: '一键导出 PPTX/PDF',
       },
       tabs: {
-        no_think: 'No Think PPT',
+        no_think: '快速开始',
         idea: '一句话生成',
         outline: '从内容生成 PPT',
         description: '从描述生成',
@@ -60,7 +61,7 @@ const homeI18n = {
         ppt_renovation: 'PPT 翻新',
       },
       tabDescriptions: {
-        no_think: '输入主题和偏好，AI 自动生成大纲和页面描述',
+        no_think: '简单说说你的项目，AI 会先理解项目，再生成争夺赛 PPT 初稿',
         idea: '输入你的想法，AI 将为你生成完整的 PPT',
         outline: '已有大纲？直接粘贴，逐页描述可选填写，也可以稍后由 AI 生成',
         description: '已有完整描述？AI 将自动解析并直接生成图片，跳过大纲步骤',
@@ -68,7 +69,7 @@ const homeI18n = {
         ppt_renovation: '上传已有的 PDF/PPTX 文件，AI 将解析内容并重新生成翻新后的PPT',
       },
       placeholders: {
-        no_think: '例如：AI 工具入门培训',
+        no_think: '例如：我们做一个智慧养老项目，场景是养老院，解决老人跌倒风险，四个学生分别负责评估、护理、记录和成果展示。',
         idea: '例如：生成一份关于 AI 发展史的演讲 PPT',
         outline: '粘贴你的 PPT 大纲（必填）...',
         description: '粘贴你的完整页面描述...',
@@ -93,14 +94,29 @@ const homeI18n = {
         title: '选择风格模板',
         useTextStyle: '使用文字描述风格',
       },
+      generationMode: {
+        title: '生成模式',
+        fast: '快速生成',
+        fastDesc: '沿用当前生成链路，适合快速出稿。',
+        harness: 'Harness 高质量模式',
+        harnessDesc: '使用流程模板强化大纲、逐页 anchor、takeaway、关系类型、表达策略和 QA。',
+        harnessTemplate: 'Harness 模板',
+        paperOperators: 'paper-operators',
+        paperOperatorsDesc: '学习 Paper Operators 的生成流程，不接管模板图、文字风格或页面视觉风格。',
+      },
       noThink: {
-        scenario: '使用场景',
-        colorTone: '色调',
-        density: '内容密度',
-        pageCount: '页数',
-        styleTemplate: '风格倾向',
-        extraInstruction: '额外要求',
-        extraPlaceholder: '例如：适合新员工，避免技术细节过深',
+        title: '场景定位',
+        subtitle: '固定绑定世界职业院校技能大赛/争夺赛主线，把项目任务、岗位现场和服务对象转成现场展示语义。',
+        projectDescription: '项目想法',
+        projectName: '项目名称',
+        projectNamePlaceholder: '可不填',
+        industryOrTrack: '赛道 / 专业方向',
+        realScene: '真实场景',
+        realScenePlaceholder: '养老院、温室大棚、数控车间...',
+        targetUser: '服务对象',
+        targetUserPlaceholder: '老人、种植户、设备操作员、游客...',
+        teamTaskDescription: '四名选手分工',
+        teamTaskPlaceholder: '可用自然语言描述，不要求结构化。',
       },
       actions: {
         selectFile: '选择参考文件',
@@ -154,7 +170,7 @@ const homeI18n = {
   en: {
     nav: {
       materialGenerate: 'Generate Material', materialCenter: 'Material Center',
-      history: 'History', settings: 'Settings'
+      preciseGenerate: 'Precise', history: 'History', settings: 'Settings'
     },
     settings: {
       language: { label: 'Interface Language' },
@@ -171,7 +187,7 @@ const homeI18n = {
         export: 'Export to PPTX/PDF',
       },
       tabs: {
-        no_think: 'No Think PPT',
+        no_think: 'Quick Start',
         idea: 'From Idea',
         outline: 'Generate from Content',
         description: 'From Description',
@@ -179,7 +195,7 @@ const homeI18n = {
         ppt_renovation: 'PPT Renovation',
       },
       tabDescriptions: {
-        no_think: 'Enter a topic and preferences; AI generates outline and slide descriptions automatically',
+        no_think: 'Describe the project briefly; AI first understands the task, then drafts a competition deck',
         idea: 'Enter your idea, AI will generate a complete PPT for you',
         outline: 'Have an outline? Paste it directly; slide descriptions are optional and can be generated later',
         description: 'Have detailed descriptions? AI will parse and generate images directly, skipping the outline step',
@@ -187,7 +203,7 @@ const homeI18n = {
         ppt_renovation: 'Upload an existing PDF/PPTX file, AI will parse its content and regenerate the renovated PPT',
       },
       placeholders: {
-        no_think: 'e.g., AI tools onboarding workshop',
+        no_think: 'e.g., A smart eldercare project for nursing homes that reduces fall risk; four students handle assessment, care, records, and result presentation.',
         idea: 'e.g., Generate a presentation about the history of AI',
         outline: 'Paste your PPT outline (required)...',
         description: 'Paste your complete page descriptions...',
@@ -212,14 +228,29 @@ const homeI18n = {
         title: 'Select Style Template',
         useTextStyle: 'Use text description for style',
       },
+      generationMode: {
+        title: 'Generation Mode',
+        fast: 'Fast generation',
+        fastDesc: 'Use the current generation path for quick drafts.',
+        harness: 'Harness high-quality mode',
+        harnessDesc: 'Use a process template to strengthen outline planning, slide anchors, takeaways, relationships, expression strategy, and QA.',
+        harnessTemplate: 'Harness Template',
+        paperOperators: 'paper-operators',
+        paperOperatorsDesc: 'Learns the Paper Operators workflow without taking over template images, text style, or page visual style.',
+      },
       noThink: {
-        scenario: 'Scenario',
-        colorTone: 'Color tone',
-        density: 'Content density',
-        pageCount: 'Pages',
-        styleTemplate: 'Style direction',
-        extraInstruction: 'Extra instruction',
-        extraPlaceholder: 'e.g., for new hires, keep technical details light',
+        title: 'Scenario Positioning',
+        subtitle: 'Bound to the World Vocational College Skills Competition storyline: project task, workplace site, and service object.',
+        projectDescription: 'Project idea',
+        projectName: 'Project name',
+        projectNamePlaceholder: 'Optional',
+        industryOrTrack: 'Track / Major Direction',
+        realScene: 'Real site',
+        realScenePlaceholder: 'Nursing home, greenhouse, CNC workshop...',
+        targetUser: 'Service object',
+        targetUserPlaceholder: 'Older adults, growers, equipment operators, tourists...',
+        teamTaskDescription: 'Four-player task division',
+        teamTaskPlaceholder: 'Natural language is fine; no structure required.',
       },
       actions: {
         selectFile: 'Select reference file',
@@ -272,13 +303,18 @@ const homeI18n = {
   },
 };
 
-export const Home: React.FC = () => {
+interface HomeProps {
+  embedded?: boolean;
+}
+
+export const Home: React.FC<HomeProps> = ({ embedded = false }) => {
   const navigate = useNavigate();
   const { i18n } = useTranslation();
   const t = useT(homeI18n); // 组件内翻译 + 自动 fallback 到全局
   const { theme, isDark, setTheme } = useTheme();
   const { initializeProject, isGlobalLoading } = useProjectStore();
   const { show, ToastContainer } = useToast();
+  const { competition, projectContext, updateProjectContext } = usePlatform();
   
   const [activeTab, setActiveTab] = useState<CreationType>('no_think');
   const [content, setContent] = useState('');
@@ -298,14 +334,15 @@ export const Home: React.FC = () => {
 
   const [useTemplateStyle, setUseTemplateStyle] = useState(false);
   const [templateStyle, setTemplateStyle] = useState('');
+  const [generationMode, setGenerationMode] = useState<GenerationMode>('fast');
+  const [harnessTemplate, setHarnessTemplate] = useState<HarnessTemplate>('paper-operators');
   const [aspectRatio, setAspectRatio] = useState('16:9');
   const [isAspectRatioOpen, setIsAspectRatioOpen] = useState(false);
-  const [noThinkScenario, setNoThinkScenario] = useState(NO_THINK_SELECT_OPTIONS.scenario[0]);
-  const [noThinkColorTone, setNoThinkColorTone] = useState(NO_THINK_SELECT_OPTIONS.colorTone[0]);
-  const [noThinkDensity, setNoThinkDensity] = useState(NO_THINK_SELECT_OPTIONS.density[0]);
-  const [noThinkPageCount, setNoThinkPageCount] = useState(NO_THINK_SELECT_OPTIONS.pageCount[1]);
-  const [noThinkStyleTemplate, setNoThinkStyleTemplate] = useState(NO_THINK_SELECT_OPTIONS.styleTemplate[0]);
-  const [noThinkExtraInstruction, setNoThinkExtraInstruction] = useState('');
+  const [noThinkProjectName, setNoThinkProjectName] = useState('');
+  const [noThinkIndustryOrTrack, setNoThinkIndustryOrTrack] = useState(NO_THINK_SELECT_OPTIONS.industryOrTrack[0]);
+  const [noThinkRealScene, setNoThinkRealScene] = useState('');
+  const [noThinkTargetUser, setNoThinkTargetUser] = useState('');
+  const [noThinkTeamTaskDescription, setNoThinkTeamTaskDescription] = useState('');
   const [renovationFile, setRenovationFile] = useState<File | null>(null);
   const [pptToPptReferenceFile, setPptToPptReferenceFile] = useState<File | null>(null);
   const [pptToPptStyleSource, setPptToPptStyleSource] = useState<PptToPptStyleSource>('original');
@@ -706,6 +743,29 @@ export const Home: React.FC = () => {
   };
 
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const generationBlocked = competition.supportLevel === 'COMING_SOON';
+
+  const bindProjectToPlatform = useCallback(async (projectId: string) => {
+    const nextContext = {
+      ...projectContext,
+      projectId,
+      projectName: noThinkProjectName.trim() || projectContext.projectName || content.trim().slice(0, 40),
+      pptTemplateId: selectedTemplateId || selectedPresetTemplateId || projectContext.pptTemplateId,
+    };
+    updateProjectContext(nextContext);
+    try {
+      await persistPlatformContext(projectId, nextContext);
+    } catch (error) {
+      console.warn('项目已创建，但赛事上下文暂未同步到服务端:', error);
+    }
+  }, [
+    content,
+    noThinkProjectName,
+    projectContext,
+    selectedPresetTemplateId,
+    selectedTemplateId,
+    updateProjectContext,
+  ]);
 
   const isPdfOrPptFile = (file: File | null) => {
     if (!file) return false;
@@ -727,6 +787,13 @@ export const Home: React.FC = () => {
   };
 
   const handleSubmit = async (eventOrOptions?: React.MouseEvent | { generateDescriptionsFromOutline?: boolean }) => {
+    if (generationBlocked) {
+      show({
+        message: competition.unsupportedMessage || '当前赛事正在建设专属能力，暂不能进入正式生成流程。',
+        type: 'info',
+      });
+      return;
+    }
     const generateDescriptionsFromOutline = Boolean(
       eventOrOptions &&
       'generateDescriptionsFromOutline' in eventOrOptions &&
@@ -753,6 +820,9 @@ export const Home: React.FC = () => {
       }
     } else if (activeTab === 'outline' && !content.trim()) {
       show({ message: t('home.content.emptyOutlineTip'), type: 'error' });
+      return;
+    } else if (activeTab === 'no_think' && !content.trim()) {
+      show({ message: t('home.messages.enterContent'), type: 'error' });
       return;
     } else if (activeTab !== 'no_think' && !content.trim()) {
       show({ message: t('home.messages.enterContent'), type: 'error' });
@@ -808,6 +878,7 @@ export const Home: React.FC = () => {
         if (taskId) {
           localStorage.setItem('renovationTaskId', taskId);
         }
+        await bindProjectToPlatform(projectId);
 
         // Clear draft
         sessionStorage.removeItem('home-draft-content');
@@ -848,6 +919,7 @@ export const Home: React.FC = () => {
         if (taskId) {
           localStorage.setItem('renovationTaskId', taskId);
         }
+        await bindProjectToPlatform(projectId);
 
         sessionStorage.removeItem('home-draft-content');
         sessionStorage.removeItem('home-draft-page-descriptions');
@@ -873,18 +945,15 @@ export const Home: React.FC = () => {
       const refFileIds = referenceFiles
         .filter(f => f.parse_status === 'completed')
         .map(f => f.id);
-      const submittedContent = activeTab === 'no_think' && !content.trim()
-        ? `${noThinkScenario} PPT`
-        : content;
+      const submittedContent = content;
 
       const noThinkOptions = activeTab === 'no_think'
         ? {
-            scenario: noThinkScenario,
-            color_tone: noThinkColorTone,
-            density: noThinkDensity,
-            page_count: noThinkPageCount,
-            style_template: noThinkStyleTemplate,
-            extra_instruction: noThinkExtraInstruction.trim() || undefined,
+            project_name: noThinkProjectName.trim() || undefined,
+            industry_or_track: noThinkIndustryOrTrack,
+            real_scene: noThinkRealScene.trim() || undefined,
+            target_user: noThinkTargetUser.trim() || undefined,
+            team_task_description: noThinkTeamTaskDescription.trim() || undefined,
           }
         : undefined;
 
@@ -897,7 +966,9 @@ export const Home: React.FC = () => {
         aspectRatio,
         noThinkOptions,
         activeTab === 'outline' ? pageDescriptions : undefined,
-        activeTab === 'outline' ? generateDescriptionsFromOutline : false
+        activeTab === 'outline' ? generateDescriptionsFromOutline : false,
+        generationMode,
+        generationMode === 'harness' ? harnessTemplate : null
       );
       
       // 根据类型跳转到不同页面
@@ -906,6 +977,7 @@ export const Home: React.FC = () => {
         show({ message: t('home.messages.projectCreateFailed'), type: 'error' });
         return;
       }
+      await bindProjectToPlatform(projectId);
       
       // 关联未完成解析的参考文件（已完成的在 initializeProject 中关联）
       if (referenceFiles.length > 0) {
@@ -964,39 +1036,6 @@ export const Home: React.FC = () => {
     }
   };
 
-  const noThinkSelects = [
-    {
-      label: t('home.noThink.scenario'),
-      value: noThinkScenario,
-      onChange: setNoThinkScenario,
-      options: NO_THINK_SELECT_OPTIONS.scenario,
-    },
-    {
-      label: t('home.noThink.colorTone'),
-      value: noThinkColorTone,
-      onChange: setNoThinkColorTone,
-      options: NO_THINK_SELECT_OPTIONS.colorTone,
-    },
-    {
-      label: t('home.noThink.density'),
-      value: noThinkDensity,
-      onChange: setNoThinkDensity,
-      options: NO_THINK_SELECT_OPTIONS.density,
-    },
-    {
-      label: t('home.noThink.pageCount'),
-      value: noThinkPageCount,
-      onChange: setNoThinkPageCount,
-      options: NO_THINK_SELECT_OPTIONS.pageCount,
-    },
-    {
-      label: t('home.noThink.styleTemplate'),
-      value: noThinkStyleTemplate,
-      onChange: setNoThinkStyleTemplate,
-      options: NO_THINK_SELECT_OPTIONS.styleTemplate,
-    },
-  ];
-
   const copyTextToClipboard = async (text: string, copiedMessage: string) => {
     try {
       if (!text) return;
@@ -1042,9 +1081,10 @@ export const Home: React.FC = () => {
   };
 
   return (
-    <div className="app-surface min-h-screen dark:bg-background-primary relative overflow-hidden">
+    <div className={`${embedded ? 'min-h-0 bg-transparent' : 'app-surface min-h-screen'} dark:bg-background-primary relative overflow-hidden`}>
 
       {/* 导航栏 */}
+      {!embedded && (
       <nav className="app-chrome relative z-50 h-16 md:h-18 border-b">
 
         <div className="max-w-7xl mx-auto px-4 md:px-6 h-full flex items-center justify-between">
@@ -1058,6 +1098,9 @@ export const Home: React.FC = () => {
             </div>
             <span className="brand-wordmark text-xl md:text-2xl font-black text-[#AFFF00]">
               启发
+            </span>
+            <span className="hidden rounded-full border border-[#AFFF00]/40 px-2 py-0.5 text-xs font-semibold text-gray-700 dark:text-foreground-secondary sm:inline-flex">
+              {APP_EDITION}
             </span>
           </div>
           <div className="flex items-center gap-2 md:gap-3">
@@ -1099,6 +1142,15 @@ export const Home: React.FC = () => {
               className="sm:hidden hover:bg-banana-100/60 hover:shadow-sm hover:scale-105 transition-all duration-200"
               title={t('nav.materialCenter')}
             />
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={<Wand2 size={16} className="md:w-[18px] md:h-[18px]" />}
+              onClick={() => navigate('/ppt-editor')}
+              className="text-xs md:text-sm hover:shadow-sm hover:scale-105 transition-all duration-200 font-medium"
+            >
+              {t('nav.preciseGenerate')}
+            </Button>
             <Button
               variant="ghost"
               size="sm"
@@ -1171,10 +1223,52 @@ export const Home: React.FC = () => {
           </div>
         </div>
       </nav>
+      )}
 
       {/* 主内容 */}
-      <main className="relative max-w-5xl mx-auto px-3 md:px-4 py-8 md:py-12">
+      <main className={`relative max-w-5xl mx-auto px-3 md:px-4 ${embedded ? 'py-5 md:py-7' : 'py-8 md:py-12'}`}>
         {/* Hero 标题区 */}
+        {embedded ? (
+          <div className="mb-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-border-primary dark:bg-background-secondary md:p-6">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-blue-700 dark:text-blue-300">
+                  {competition.supportLevel === 'FULL' ? <ShieldCheck size={17} /> : <AlertTriangle size={17} />}
+                  AI 生成 · {competition.shortName}
+                </div>
+                <h1 className="text-2xl font-bold tracking-tight text-slate-950 dark:text-white">
+                  从项目资料生成参赛 PPT
+                </h1>
+                <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600 dark:text-foreground-secondary">
+                  {competition.supportLevel === 'FULL'
+                    ? `已启用世职赛专属提示词、五项评分维度、逐页讲解稿与 ${competition.recommendedPageCount ?? 39} 页页面规划。`
+                    : competition.supportLevel === 'GENERIC'
+                      ? '当前赛事暂未配置专属规则与案例，将使用通用 PPT 生成模式。'
+                      : competition.unsupportedMessage || '当前赛事正在建设专属能力，暂不能进入正式生成流程。'}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2 text-xs">
+                <span className={`rounded-full px-3 py-1.5 font-semibold ${
+                  competition.supportLevel === 'FULL'
+                    ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
+                    : competition.supportLevel === 'GENERIC'
+                      ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300'
+                      : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'
+                }`}>
+                  {competition.supportLevel === 'FULL' ? '完整支持' : competition.supportLevel === 'GENERIC' ? '通用支持' : '建设中'}
+                </span>
+                <span className="rounded-full bg-blue-50 px-3 py-1.5 font-medium text-blue-700 dark:bg-blue-950/40 dark:text-blue-300">
+                  目标 {projectContext.targetPageCount} 页
+                </span>
+                {competition.scoreDimensions?.map((dimension) => (
+                  <span key={dimension.id} className="rounded-full bg-slate-100 px-3 py-1.5 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                    {dimension.name}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+        ) : (
         <div className="text-center mb-10 md:mb-16 space-y-4 md:space-y-6">
           {/*<div className="inline-flex items-center gap-2 px-4 py-2 bg-[#121212] text-white dark:bg-background-secondary backdrop-blur-sm rounded-full shadow-sm dark:shadow-none mb-4">*/}
           {/*  <span className="text-sm font-medium text-white/85 dark:text-foreground-secondary">{t('home.tagline')}</span>*/}
@@ -1185,7 +1279,7 @@ export const Home: React.FC = () => {
               backgroundSize: '200% auto',
               animation: 'gradient 3s ease infinite',
             }}>
-              {i18n.language?.startsWith('zh') ? `${t('home.title')} · Banana Slides` : 'Banana Slides'}
+              {i18n.language?.startsWith('zh') ? `${t('home.title')} · ${APP_EDITION}` : APP_EDITION}
             </span>
           </h1>
 
@@ -1212,6 +1306,7 @@ export const Home: React.FC = () => {
             ))}
           </div>
         </div>
+        )}
 
         {/* 创建卡片 */}
         <Card className="p-4 md:p-10 bg-white/90 dark:bg-background-secondary backdrop-blur-xl dark:backdrop-blur-none shadow-2xl dark:shadow-none border-0 dark:border dark:border-border-primary hover:shadow-3xl dark:hover:shadow-none transition-all duration-300 dark:rounded-2xl">
@@ -1361,7 +1456,7 @@ export const Home: React.FC = () => {
                       size="sm"
                       onClick={handleSubmit}
                       loading={isSubmitting || isGlobalLoading}
-                      disabled={!pptToPptReferenceFile}
+                      disabled={generationBlocked || !pptToPptReferenceFile}
                       className="shadow-sm dark:shadow-background-primary/30 text-xs md:text-sm px-3 md:px-4"
                     >
                       {t('common.next')}
@@ -1461,7 +1556,7 @@ export const Home: React.FC = () => {
                     size="sm"
                     onClick={handleSubmit}
                     loading={isSubmitting || isGlobalLoading}
-                    disabled={!renovationFile}
+                    disabled={generationBlocked || !renovationFile}
                     className="shadow-sm dark:shadow-background-primary/30 text-xs md:text-sm px-3 md:px-4"
                   >
                     {t('common.next')}
@@ -1489,6 +1584,11 @@ export const Home: React.FC = () => {
                   {t('home.examples.copyOutline')}
                 </Button>
               </div>
+            )}
+            {activeTab === 'no_think' && (
+              <label className="mb-2 block text-sm font-semibold text-gray-800 dark:text-foreground-primary">
+                {t('home.noThink.projectDescription')}
+              </label>
             )}
             <MarkdownTextarea
               ref={textareaRef}
@@ -1547,6 +1647,7 @@ export const Home: React.FC = () => {
                   onClick={handleSubmit}
                   loading={isSubmitting || isGlobalLoading}
                   disabled={
+                    generationBlocked ||
                     isUploadingImage ||
                     referenceFiles.some(f => f.parse_status === 'pending' || f.parse_status === 'parsing')
                   }
@@ -1559,42 +1660,86 @@ export const Home: React.FC = () => {
               }
             />
             {activeTab === 'no_think' && (
-              <div className="mt-4 rounded-xl border border-gray-100 bg-white/60 p-3 dark:border-border-primary dark:bg-background-tertiary/60">
-                <div className="mb-3 flex items-center gap-2">
-                  <Sparkles size={16} className="text-banana-600 dark:text-banana" />
-                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
-                    NoThink PPT
-                  </h3>
+              <div className="mt-4 border-t border-gray-100 pt-5 dark:border-border-primary">
+                <div className="mb-4">
+                  <div className="flex items-center gap-2">
+                    <Sparkles size={16} className="text-banana-600 dark:text-banana" />
+                    <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
+                      {t('home.noThink.title')}
+                    </h3>
+                  </div>
+                  <p className="mt-1 text-xs leading-relaxed text-gray-500 dark:text-foreground-tertiary">
+                    {t('home.noThink.subtitle')}
+                  </p>
                 </div>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
-                  {noThinkSelects.map((field) => (
-                    <label key={field.label} className="block">
-                      <span className="mb-1 block text-xs font-medium text-gray-500 dark:text-foreground-tertiary">
-                        {field.label}
-                      </span>
-                      <select
-                        value={field.value}
-                        onChange={(event) => field.onChange(event.target.value)}
-                        className="h-9 w-full rounded-lg border border-gray-200 bg-white px-2 text-sm text-gray-800 outline-none transition focus:border-banana-400 focus:ring-2 focus:ring-banana-200 dark:border-border-primary dark:bg-background-elevated dark:text-foreground-primary dark:focus:border-banana"
-                      >
-                        {field.options.map((option) => (
-                          <option key={option} value={option}>
-                            {option}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  ))}
-                  <label className="block sm:col-span-2 lg:col-span-5">
-                    <span className="mb-1 block text-xs font-medium text-gray-500 dark:text-foreground-tertiary">
-                      {t('home.noThink.extraInstruction')}
+
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <label className="block md:col-span-1">
+                    <span className="mb-1.5 block text-sm font-semibold text-gray-800 dark:text-foreground-primary">
+                      {t('home.noThink.projectName')}
                     </span>
                     <input
                       type="text"
-                      value={noThinkExtraInstruction}
-                      onChange={(event) => setNoThinkExtraInstruction(event.target.value)}
-                      placeholder={t('home.noThink.extraPlaceholder')}
-                      className="h-9 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-800 outline-none transition placeholder:text-gray-400 focus:border-banana-400 focus:ring-2 focus:ring-banana-200 dark:border-border-primary dark:bg-background-elevated dark:text-foreground-primary dark:placeholder:text-foreground-tertiary dark:focus:border-banana"
+                      value={noThinkProjectName}
+                      onChange={(event) => setNoThinkProjectName(event.target.value)}
+                      placeholder={t('home.noThink.projectNamePlaceholder')}
+                      className="h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-800 outline-none transition placeholder:text-gray-400 focus:border-banana-400 focus:ring-2 focus:ring-banana-200 dark:border-border-primary dark:bg-background-elevated dark:text-foreground-primary dark:placeholder:text-foreground-tertiary dark:focus:border-banana"
+                    />
+                  </label>
+
+                  <label className="block md:col-span-1">
+                    <span className="mb-1.5 block text-sm font-semibold text-gray-800 dark:text-foreground-primary">
+                      {t('home.noThink.industryOrTrack')}
+                    </span>
+                    <select
+                      value={noThinkIndustryOrTrack}
+                      onChange={(event) => setNoThinkIndustryOrTrack(event.target.value)}
+                      className="h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-800 outline-none transition focus:border-banana-400 focus:ring-2 focus:ring-banana-200 dark:border-border-primary dark:bg-background-elevated dark:text-foreground-primary dark:focus:border-banana"
+                    >
+                      {NO_THINK_SELECT_OPTIONS.industryOrTrack.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="block md:col-span-1">
+                    <span className="mb-1.5 block text-sm font-semibold text-gray-800 dark:text-foreground-primary">
+                      {t('home.noThink.realScene')}
+                    </span>
+                    <input
+                      type="text"
+                      value={noThinkRealScene}
+                      onChange={(event) => setNoThinkRealScene(event.target.value)}
+                      placeholder={t('home.noThink.realScenePlaceholder')}
+                      className="h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-800 outline-none transition placeholder:text-gray-400 focus:border-banana-400 focus:ring-2 focus:ring-banana-200 dark:border-border-primary dark:bg-background-elevated dark:text-foreground-primary dark:placeholder:text-foreground-tertiary dark:focus:border-banana"
+                    />
+                  </label>
+
+                  <label className="block md:col-span-1">
+                    <span className="mb-1.5 block text-sm font-semibold text-gray-800 dark:text-foreground-primary">
+                      {t('home.noThink.targetUser')}
+                    </span>
+                    <input
+                      type="text"
+                      value={noThinkTargetUser}
+                      onChange={(event) => setNoThinkTargetUser(event.target.value)}
+                      placeholder={t('home.noThink.targetUserPlaceholder')}
+                      className="h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-800 outline-none transition placeholder:text-gray-400 focus:border-banana-400 focus:ring-2 focus:ring-banana-200 dark:border-border-primary dark:bg-background-elevated dark:text-foreground-primary dark:placeholder:text-foreground-tertiary dark:focus:border-banana"
+                    />
+                  </label>
+
+                  <label className="block md:col-span-2">
+                    <span className="mb-1.5 block text-sm font-semibold text-gray-800 dark:text-foreground-primary">
+                      {t('home.noThink.teamTaskDescription')}
+                    </span>
+                    <textarea
+                      value={noThinkTeamTaskDescription}
+                      onChange={(event) => setNoThinkTeamTaskDescription(event.target.value)}
+                      placeholder={t('home.noThink.teamTaskPlaceholder')}
+                      rows={4}
+                      className="w-full resize-y rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none transition placeholder:text-gray-400 focus:border-banana-400 focus:ring-2 focus:ring-banana-200 dark:border-border-primary dark:bg-background-elevated dark:text-foreground-primary dark:placeholder:text-foreground-tertiary dark:focus:border-banana"
                     />
                   </label>
                 </div>
@@ -1617,6 +1762,7 @@ export const Home: React.FC = () => {
                     onClick={() => handleSubmit({ generateDescriptionsFromOutline: true })}
                     loading={isSubmitting || isGlobalLoading}
                     disabled={
+                      generationBlocked ||
                       isUploadingImage ||
                       referenceFiles.some(f => f.parse_status === 'pending' || f.parse_status === 'parsing')
                     }
@@ -1676,6 +1822,52 @@ export const Home: React.FC = () => {
             className="mb-4"
             showToast={show}
           />
+
+          {activeTab !== 'ppt_renovation' && activeTab !== 'ppt_to_ppt' && (
+            <div className="mb-6 md:mb-8 rounded-2xl border border-gray-100 bg-gray-50/70 p-4 dark:border-border-primary dark:bg-background-elevated/40">
+              <div className="mb-3 flex items-center gap-2">
+                <Wand2 size={18} className="text-orange-600 dark:text-banana" />
+                <h3 className="text-base md:text-lg font-semibold text-gray-900 dark:text-white">
+                  {t('home.generationMode.title')}
+                </h3>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => setGenerationMode('fast')}
+                  className={`rounded-xl border p-4 text-left transition ${generationMode === 'fast' ? 'border-banana-400 bg-white shadow-sm ring-2 ring-banana-100 dark:border-banana dark:bg-background-elevated dark:ring-banana/20' : 'border-gray-200 bg-white/60 hover:border-gray-300 dark:border-border-primary dark:bg-background-secondary/40 dark:hover:border-border-hover'}`}
+                >
+                  <div className="font-medium text-gray-900 dark:text-white">{t('home.generationMode.fast')}</div>
+                  <div className="mt-1 text-sm leading-relaxed text-gray-600 dark:text-foreground-tertiary">{t('home.generationMode.fastDesc')}</div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setGenerationMode('harness')}
+                  className={`rounded-xl border p-4 text-left transition ${generationMode === 'harness' ? 'border-banana-400 bg-white shadow-sm ring-2 ring-banana-100 dark:border-banana dark:bg-background-elevated dark:ring-banana/20' : 'border-gray-200 bg-white/60 hover:border-gray-300 dark:border-border-primary dark:bg-background-secondary/40 dark:hover:border-border-hover'}`}
+                >
+                  <div className="font-medium text-gray-900 dark:text-white">{t('home.generationMode.harness')}</div>
+                  <div className="mt-1 text-sm leading-relaxed text-gray-600 dark:text-foreground-tertiary">{t('home.generationMode.harnessDesc')}</div>
+                </button>
+              </div>
+              {generationMode === 'harness' && (
+                <div className="mt-4 rounded-xl border border-banana-200 bg-banana-50/70 p-4 dark:border-banana/30 dark:bg-banana/10">
+                  <label className="mb-2 block text-sm font-medium text-gray-900 dark:text-white">
+                    {t('home.generationMode.harnessTemplate')}
+                  </label>
+                  <select
+                    value={harnessTemplate}
+                    onChange={(event) => setHarnessTemplate(event.target.value as HarnessTemplate)}
+                    className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-banana-400 focus:ring-2 focus:ring-banana-200 dark:border-border-primary dark:bg-background-elevated dark:text-white"
+                  >
+                    <option value="paper-operators">{t('home.generationMode.paperOperators')}</option>
+                  </select>
+                  <p className="mt-2 text-sm leading-relaxed text-gray-600 dark:text-foreground-tertiary">
+                    {t('home.generationMode.paperOperatorsDesc')}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* 模板选择 */}
           {(
@@ -1772,7 +1964,7 @@ export const Home: React.FC = () => {
       
       <FilePreviewModal fileId={previewFileId} onClose={() => setPreviewFileId(null)} />
       {/* Footer */}
-      <Footer />
+      {!embedded && <Footer />}
     </div>
   );
 };

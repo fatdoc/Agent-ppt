@@ -16,7 +16,7 @@ from flask_migrate import Migrate
 # Load environment variables from project root .env file
 _project_root = Path(__file__).parent.parent
 _env_file = _project_root / '.env'
-load_dotenv(dotenv_path=_env_file, override=True)
+load_dotenv(dotenv_path=_env_file, override=False)
 
 from flask import Flask
 from flask_cors import CORS
@@ -25,10 +25,9 @@ from config import Config
 from controllers.material_controller import material_bp, material_global_bp
 from controllers.reference_file_controller import reference_file_bp
 from controllers.settings_controller import settings_bp
-from controllers.auth_controller import auth_bp
 from controllers.openai_oauth_controller import openai_oauth_bp
 from controllers.ppt_to_ppt_controller import ppt_to_ppt_bp
-from controllers import project_bp, page_bp, template_bp, user_template_bp, user_style_template_bp, export_bp, file_bp, style_bp
+from controllers import project_bp, page_bp, template_bp, user_template_bp, user_style_template_bp, export_bp, file_bp, style_bp, platform_bp, outline_template_bp
 
 
 # Enable SQLite WAL mode for all connections
@@ -117,9 +116,10 @@ def create_app():
     app.register_blueprint(material_global_bp)
     app.register_blueprint(reference_file_bp, url_prefix='/api/reference-files')
     app.register_blueprint(settings_bp)
-    app.register_blueprint(auth_bp)
     app.register_blueprint(openai_oauth_bp)
     app.register_blueprint(style_bp)
+    app.register_blueprint(platform_bp)
+    app.register_blueprint(outline_template_bp)
 
     with app.app_context():
         # Load settings from database and sync to app.config
@@ -130,8 +130,6 @@ def create_app():
         from flask import g, request
         from utils.auth import authenticate_request
         if request.path in ('/', '/health'):
-            return
-        if request.path in ('/api/auth/config', '/api/auth/login', '/api/auth/register'):
             return
         if request.path.startswith('/api/access-code/'):
             return
@@ -155,8 +153,6 @@ def create_app():
             return  # non-API routes (health, static, etc.)
         if request.path.startswith('/api/access-code/'):
             return  # allow check/verify endpoints
-        if request.path in ('/api/auth/config', '/api/auth/login', '/api/auth/register'):
-            return  # allow login/register endpoints
         code = request.headers.get('X-Access-Code', '')
         if hmac.compare_digest(code, expected):
             return
@@ -204,10 +200,12 @@ def create_app():
     # Root endpoint
     @app.route('/')
     def index():
+        app_edition = os.getenv('APP_EDITION', 'Banana Slides')
         return {
-            'name': 'Banana Slides API',
+            'name': f'{app_edition} API',
+            'edition': app_edition,
             'version': '1.0.0',
-            'description': 'AI-powered PPT generation service',
+            'description': f'{app_edition} AI-powered PPT generation service',
             'endpoints': {
                 'health': '/health',
                 'api_docs': '/api',

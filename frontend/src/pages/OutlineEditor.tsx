@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
-import { ArrowLeft, Save, ArrowRight, Plus, FileText, Sparkle, Download, Upload, PanelLeftClose, PanelLeftOpen, ChevronDown, Settings2 } from 'lucide-react';
+import { ArrowLeft, Save, ArrowRight, Plus, FileText, Sparkle, Download, Upload, PanelLeftClose, PanelLeftOpen, ChevronDown, Settings2, LayoutTemplate, ShieldCheck } from 'lucide-react';
 import { useT } from '@/hooks/useT';
 import PresetCapsules from '@/components/shared/PresetCapsules';
 
@@ -114,13 +114,17 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { Button, Loading, useConfirm, useToast, AiRefineInput, FilePreviewModal, ReferenceFileList, MaterialSelector, ImportMarkdownModal } from '@/components/shared';
 import { MarkdownTextarea, type MarkdownTextareaRef } from '@/components/shared/MarkdownTextarea';
+import { TemplateSelector, getTemplateFile } from '@/components/shared/TemplateSelector';
+import { TextStyleSelector } from '@/components/shared/TextStyleSelector';
 import { OutlineCard } from '@/components/outline/OutlineCard';
 import { useProjectStore } from '@/store/useProjectStore';
-import { refineOutline, updateProject, addPage } from '@/api/endpoints';
+import { refineOutline, updateProject, addPage, listUserTemplates, uploadTemplate } from '@/api/endpoints';
 import { useImagePaste, buildMaterialsMarkdown } from '@/hooks/useImagePaste';
 import type { Material } from '@/types';
 import { exportProjectToMarkdown, parseMarkdownPages } from '@/utils/projectUtils';
 import type { Page } from '@/types';
+import { useOutlineTemplateRepository, usePlatform, type OutlineTemplate } from '@/platform';
+import { StandaloneAgentLauncher } from '@/components/platform';
 
 // 可排序的卡片包装器
 const SortableCard: React.FC<{
@@ -193,6 +197,65 @@ export const OutlineEditor: React.FC = () => {
   }, [isOutlineStreaming]);
   const { confirm, ConfirmDialog } = useConfirm();
   const { show, ToastContainer } = useToast();
+  const { competition, projectContext, updateProjectContext } = usePlatform();
+  const { templates: outlineTemplates, createTemplate } = useOutlineTemplateRepository();
+  const activeOutlineTemplate = outlineTemplates.find((template) => template.id === projectContext.outlineTemplateId);
+
+  useEffect(() => {
+    if (projectId && projectContext.projectId !== projectId) {
+      updateProjectContext({ projectId });
+    }
+  }, [projectContext.projectId, projectId, updateProjectContext]);
+
+  const saveCurrentOutlineAsTemplate = useCallback(async () => {
+    if (!currentProject?.pages.length) {
+      show({ message: '当前项目还没有可保存的大纲页面。', type: 'info' });
+      return;
+    }
+    const now = new Date().toISOString();
+    const template: OutlineTemplate = {
+      id: `project-outline-${Date.now()}`,
+      name: `${currentProject.project_title || projectContext.projectName || '当前项目'}大纲模板`,
+      description: `由项目“大纲规划”保存，共 ${currentProject.pages.length} 页。`,
+      competitionId: competition.id,
+      competitionTypeId: projectContext.competitionTypeId,
+      trackId: projectContext.trackId,
+      themeId: projectContext.themeId,
+      supportScope: 'PRIVATE',
+      status: 'DRAFT',
+      version: 1,
+      targetPageCount: currentProject.pages.length,
+      styleTags: [competition.shortName, '项目大纲'],
+      sections: currentProject.pages.map((page, index) => ({
+        id: `page-${index + 1}`,
+        title: page.outline_content?.title || `第 ${index + 1} 页`,
+        description: page.outline_content?.points?.join('；'),
+        recommendedPageCount: 1,
+        purpose: page.outline_content?.points?.join('；') || '根据项目材料完善本页内容',
+        scoreDimensions: competition.supportLevel === 'FULL'
+          ? projectContext.activeScoreDimensionIds
+          : [],
+        materialRequirements: ['与本页内容直接相关的项目真实材料'],
+      })),
+      versions: [],
+      createdBy: 'CURRENT_USER',
+      createdAt: now,
+      updatedAt: now,
+    };
+    const created = await createTemplate(template);
+    updateProjectContext({
+      outlineTemplateId: created.id,
+      targetPageCount: currentProject.pages.length,
+    });
+    show({ message: `已保存为模板“${created.name}”`, type: 'success' });
+  }, [
+    competition,
+    createTemplate,
+    currentProject,
+    projectContext,
+    show,
+    updateProjectContext,
+  ]);
 
   // 左侧可编辑文本区域 — desktop and mobile use separate refs to avoid
   // the shared-ref bug where insertAtCursor targets the wrong (hidden) instance.
@@ -215,6 +278,12 @@ export const OutlineEditor: React.FC = () => {
   const reqTextareaRef = useRef<MarkdownTextareaRef>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsRef = useRef<HTMLDivElement>(null);
+  const [useTemplateStyle, setUseTemplateStyle] = useState(false);
+  const [selectedTemplate, setSelectedTemplate] = useState<File | null>(null);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
+  const [selectedPresetTemplateId, setSelectedPresetTemplateId] = useState<string | null>(null);
+  const [templateStyle, setTemplateStyle] = useState('');
+  const [isSavingStyle, setIsSavingStyle] = useState(false);
 
   const [isMaterialSelectorOpen, setIsMaterialSelectorOpen] = useState(false);
   const [activeMaterialTarget, setActiveMaterialTarget] = useState<'input' | 'requirements'>('input');
@@ -252,6 +321,8 @@ export const OutlineEditor: React.FC = () => {
       setIsInputDirty(false);
       setOutlineRequirements(currentProject.outline_requirements || '');
       setIsRequirementsDirty(false);
+      setTemplateStyle(currentProject.template_style || '');
+      setUseTemplateStyle(Boolean(currentProject.template_style));
     }
   }, [currentProject?.id]);
 
@@ -304,6 +375,81 @@ export const OutlineEditor: React.FC = () => {
     setInputText(text);
     setIsInputDirty(true);
   }, []);
+
+  const handleTemplateSelect = useCallback((templateFile: File | null, templateId?: string) => {
+    if (templateFile) {
+      setSelectedTemplate(templateFile);
+    }
+
+    if (templateId) {
+      if (templateId.length <= 3 && /^\d+$/.test(templateId)) {
+        setSelectedPresetTemplateId(templateId);
+        setSelectedTemplateId(null);
+      } else {
+        setSelectedTemplateId(templateId);
+        setSelectedPresetTemplateId(null);
+      }
+    } else {
+      setSelectedTemplateId(null);
+      setSelectedPresetTemplateId(null);
+    }
+  }, []);
+
+  const persistStyleForProject = useCallback(async () => {
+    if (!projectId) return;
+
+    if (useTemplateStyle) {
+      await updateProject(projectId, { template_style: templateStyle.trim() });
+      await syncProject(projectId);
+      return;
+    }
+
+    await updateProject(projectId, { template_style: '' });
+
+    let templateFile = selectedTemplate;
+    if (!templateFile && (selectedTemplateId || selectedPresetTemplateId)) {
+      const templateId = selectedTemplateId || selectedPresetTemplateId;
+      const templatesResponse = await listUserTemplates();
+      templateFile = await getTemplateFile(templateId!, templatesResponse.data?.templates || []);
+    }
+
+    if (templateFile) {
+      await uploadTemplate(projectId, templateFile);
+    }
+
+    await syncProject(projectId);
+  }, [
+    projectId,
+    selectedPresetTemplateId,
+    selectedTemplate,
+    selectedTemplateId,
+    syncProject,
+    templateStyle,
+    useTemplateStyle,
+  ]);
+
+  const handleNextAfterStyle = useCallback(async () => {
+    if (!projectId || !currentProject) return;
+
+    setIsSavingStyle(true);
+    try {
+      if (isInputDirty) {
+        const field = currentProject.creation_type === 'outline'
+          ? 'outline_text'
+          : currentProject.creation_type === 'descriptions'
+            ? 'description_text'
+            : 'idea_prompt';
+        await updateProject(projectId, { [field]: inputText } as any);
+      }
+      await persistStyleForProject();
+      navigate(`/project/${projectId}/detail`);
+    } catch (error: any) {
+      console.error('保存风格失败:', error);
+      show({ message: error?.response?.data?.error?.message || '保存风格失败，请稍后重试', type: 'error' });
+    } finally {
+      setIsSavingStyle(false);
+    }
+  }, [currentProject, inputText, isInputDirty, navigate, persistStyleForProject, projectId, show]);
 
   const insertAtCursor = useCallback((markdown: string) => {
     // Prefer the desktop ref (visible at md+), fall back to mobile
@@ -519,21 +665,9 @@ export const OutlineEditor: React.FC = () => {
               variant="primary"
               size="sm"
               icon={<ArrowRight size={16} className="md:w-[18px] md:h-[18px]" />}
-              onClick={async () => {
-                if (isInputDirty && projectId && currentProject) {
-                  const field = currentProject.creation_type === 'outline'
-                    ? 'outline_text'
-                    : currentProject.creation_type === 'descriptions'
-                      ? 'description_text'
-                      : 'idea_prompt';
-                  try {
-                    await updateProject(projectId, { [field]: inputText } as any);
-                  } catch (e) {
-                    console.error('自动保存失败:', e);
-                  }
-                }
-                navigate(`/project/${projectId}/detail`);
-              }}
+              onClick={handleNextAfterStyle}
+              loading={isSavingStyle}
+              disabled={isSavingStyle}
               className="text-xs md:text-sm"
             >
               <span className="hidden sm:inline">{t('common.next')}</span>
@@ -553,6 +687,36 @@ export const OutlineEditor: React.FC = () => {
           />
         </div>
       </header>
+
+      <section className="border-b border-slate-200 bg-slate-50/90 px-3 py-3 dark:border-border-primary dark:bg-background-primary md:px-6">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1.5 font-semibold text-blue-700 dark:bg-blue-950/40 dark:text-blue-300">
+              <ShieldCheck size={14} /> {competition.name}
+            </span>
+            <span className="rounded-full bg-white px-3 py-1.5 font-medium text-slate-600 ring-1 ring-slate-200 dark:bg-background-secondary dark:text-foreground-secondary dark:ring-border-primary">
+              {activeOutlineTemplate?.name || '未选择大纲模板'}
+            </span>
+            <span className="rounded-full bg-white px-3 py-1.5 font-medium text-slate-600 ring-1 ring-slate-200 dark:bg-background-secondary dark:text-foreground-secondary dark:ring-border-primary">
+              目标 {projectContext.targetPageCount} 页
+            </span>
+            {competition.scoreDimensions?.map((dimension) => (
+              <span key={dimension.id} className="rounded-full bg-white px-3 py-1.5 text-slate-500 ring-1 ring-slate-200 dark:bg-background-secondary dark:text-foreground-tertiary dark:ring-border-primary">
+                {dimension.name}
+              </span>
+            ))}
+          </div>
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={<LayoutTemplate size={16} />}
+            onClick={saveCurrentOutlineAsTemplate}
+            disabled={!currentProject.pages.length}
+          >
+            保存当前大纲为模板
+          </Button>
+        </div>
+      </section>
 
       {/* 操作栏 - 与 DetailEditor 风格一致 */}
       <div className="bg-white dark:bg-background-secondary border-b border-gray-200 dark:border-border-primary px-3 md:px-6 py-3 md:py-4 flex-shrink-0">
@@ -771,6 +935,64 @@ export const OutlineEditor: React.FC = () => {
 
         {/* 右侧：大纲列表 */}
         <div className="flex-1 min-w-0">
+          {currentProject.pages.length > 0 && !isOutlineStreaming && (
+            <section className="mb-4 rounded-xl border border-banana-200 bg-white p-4 shadow-sm dark:border-banana/30 dark:bg-background-secondary">
+              <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h2 className="text-base font-black text-gray-900 dark:text-foreground-primary">下一步：选择 PPT 风格</h2>
+                  <p className="mt-1 text-xs leading-5 text-gray-500 dark:text-foreground-tertiary">
+                    大纲已生成后再确定模板或文字风格，保存后进入页面描述和生成环节。
+                  </p>
+                </div>
+                <label className="flex cursor-pointer items-center gap-2 text-sm font-bold text-gray-600 dark:text-foreground-secondary">
+                  <input
+                    type="checkbox"
+                    checked={useTemplateStyle}
+                    onChange={(event) => {
+                      setUseTemplateStyle(event.target.checked);
+                      if (event.target.checked) {
+                        setSelectedTemplate(null);
+                        setSelectedTemplateId(null);
+                        setSelectedPresetTemplateId(null);
+                      }
+                    }}
+                  />
+                  使用文字描述风格
+                </label>
+              </div>
+
+              <div className="rounded-lg border border-gray-100 bg-gray-50 p-3 dark:border-border-primary dark:bg-background-primary">
+                {useTemplateStyle ? (
+                  <TextStyleSelector value={templateStyle} onChange={setTemplateStyle} onToast={show} />
+                ) : (
+                  <TemplateSelector
+                    onSelect={handleTemplateSelect}
+                    selectedTemplateId={selectedTemplateId}
+                    selectedPresetTemplateId={selectedPresetTemplateId}
+                    showUpload={true}
+                    projectId={projectId}
+                  />
+                )}
+              </div>
+
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-xs text-gray-500 dark:text-foreground-tertiary">
+                  不选择模板时会按系统默认视觉生成；也可以在详情页继续调整。
+                </p>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  icon={<ArrowRight size={16} />}
+                  loading={isSavingStyle}
+                  disabled={isSavingStyle}
+                  onClick={handleNextAfterStyle}
+                >
+                  保存风格并进入下一步
+                </Button>
+              </div>
+            </section>
+          )}
+
           {currentProject.pages.length === 0 && !isOutlineStreaming ? (
             <div className="text-center py-12 md:py-20">
               <div className="flex justify-center mb-4">
@@ -871,6 +1093,7 @@ export const OutlineEditor: React.FC = () => {
         onSelect={activeMaterialTarget === 'input' ? handleInputMaterialSelect : handleReqMaterialSelect}
         multiple
       />
+      <StandaloneAgentLauncher />
     </div>
   );
 };

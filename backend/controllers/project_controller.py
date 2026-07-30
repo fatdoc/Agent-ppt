@@ -18,6 +18,8 @@ from werkzeug.utils import secure_filename
 
 from models import db, Project, Page, Task, ReferenceFile
 from services import (
+    CompetitionDocumentEditService,
+    CompetitionUnderstandingService,
     FileService,
     InputGenerationOptions,
     InputGenerationService,
@@ -26,6 +28,7 @@ from services import (
     ProjectContext,
 )
 from services.ai_service_manager import get_ai_service
+from services.competition_spec_state import merge_plain_values_into_state, normalize_spec_state, unwrap_spec_state
 from services.task_manager import (
     task_manager,
     generate_descriptions_task,
@@ -41,6 +44,162 @@ from utils.auth import current_user_id, owned_project_or_404
 logger = logging.getLogger(__name__)
 
 project_bp = Blueprint('projects', __name__, url_prefix='/api/projects')
+
+
+def _is_ai_auth_error(error: Exception) -> bool:
+    status_code = getattr(error, "status_code", None) or getattr(error, "http_status", None)
+    if status_code == 401:
+        return True
+
+    message = str(error).lower()
+    auth_markers = (
+        "invalid api key",
+        "incorrect api key",
+        "unauthorized",
+        "401",
+        "authentication",
+        "api key",
+    )
+    return any(marker in message for marker in auth_markers)
+
+
+def _ai_generation_error_response(error: Exception):
+    if _is_ai_auth_error(error):
+        provider = current_app.config.get("AI_PROVIDER_FORMAT") or "unknown"
+        return error_response(
+            "AI_SERVICE_AUTH_ERROR",
+            f"AI 服务认证失败：当前模型配置（{provider}）的 API Key 无效或已过期。请在设置页更新密钥，或修改 .env 后重启后端。",
+            503,
+        )
+
+    return error_response("AI_SERVICE_ERROR", str(error), 503)
+
+
+def _build_competition_idea_prompt(spec: dict) -> str:
+    spec = unwrap_spec_state(spec)
+    positioning = spec.get('project_positioning') or {}
+    problem = spec.get('problem_definition') or {}
+    team_roles = spec.get('team_roles') or []
+    skill_modules = spec.get('skill_modules') or []
+    validation = spec.get('result_validation') or {}
+    value = spec.get('value_innovation') or {}
+
+    lines = [
+        "职业教育争夺赛 PPT 生成需求",
+        "固定主线：世界职业院校技能大赛/争夺赛",
+        "生成目标：1小时现场技能展示作战稿",
+        f"项目名称：{positioning.get('project_name') or '未命名项目'}",
+        f"赛道/专业方向：{positioning.get('track') or positioning.get('industry') or '待补充'}",
+        f"真实场景：{positioning.get('real_scene') or '待补充'}",
+        f"服务对象：{positioning.get('service_object') or '待补充'}",
+        f"最终成果形态：{positioning.get('final_deliverable') or '待补充'}",
+        f"一句话介绍：{positioning.get('one_sentence_intro') or '待补充'}",
+        f"真实问题：{'；'.join(problem.get('pain_points') or []) or '待补充'}",
+        f"项目目标：{problem.get('project_goal') or '待补充'}",
+        "四名选手分工：",
+    ]
+    for role in team_roles:
+        lines.append(
+            f"- {role.get('member') or ''} {role.get('role') or '待补充'}："
+            f"{role.get('responsibility') or '待补充'}；现场动作：{role.get('onsite_action') or '待补充'}"
+        )
+    lines.append("技能展示模块：")
+    for module in skill_modules:
+        lines.append(
+            f"- {module.get('skill_name') or '待补充'}：负责人 {module.get('responsible_role') or '待补充'}；"
+            f"验证方式 {module.get('verification_method') or '待补充'}；"
+            f"现场演示动作 {module.get('onsite_demo_action') or '待补充'}"
+        )
+    lines.extend([
+        f"成果清单：{'；'.join(validation.get('deliverables') or []) or '待补充'}",
+        f"证据材料：{'；'.join(validation.get('evidence_materials') or []) or '待补充'}",
+        f"实用性：{value.get('practical_value') or '待补充'}",
+        f"创新点：{'；'.join(value.get('innovation_points') or []) or '待补充'}",
+        "表达约束：不要写营销路演、融资汇报或虚构收益；每页应服务于现场可演示的任务、动作、证据和评委理解。",
+    ])
+    return "\n".join(lines)
+
+
+def _build_competition_dialogue_reply_prompt(source_text: str, draft_payload: dict) -> str:
+    spec = unwrap_spec_state(draft_payload.get('competition_project_spec') or {})
+    positioning = spec.get('project_positioning') or {}
+    problem = spec.get('problem_definition') or {}
+    missing_fields = draft_payload.get('missing_fields') or []
+    risk_flags = draft_payload.get('risk_flags') or []
+    latest_user_input = _extract_latest_user_instruction(source_text)
+    missing_labels = _competition_missing_field_labels(missing_fields)
+
+    return "\n".join([
+        "你是一个大赛文档对话共创助手，正在和用户一起完善职业院校技能大赛项目文档。",
+        "请根据本轮用户修改意见和已经生成的结构化稿件，给用户一个真实、简短、自然的对话回复。",
+        "当前结构化结果是唯一可信状态；不要被本轮输入里出现的 Markdown 模板、待补充占位、历史脏内容误导。",
+        "要求：",
+        "1. 只输出聊天回复，不输出 JSON、代码块、完整结构化稿件。",
+        "2. 语气像正在共同改稿的助手，说明本轮已经吸收了什么。",
+        "3. 如果信息还缺，只能从【仍缺字段】里最多点出 2 个下一轮最该补充的问题。",
+        "4. 控制在 80-140 个中文字符。",
+        "5. 不使用 Markdown 加粗、标题、编号列表或项目符号，像聊天气泡里的自然短句。",
+        "6. 不要建议用户补充当前结构化结果里已经有值的字段。",
+        "",
+        "【本轮用户修改意见】",
+        (latest_user_input or "")[:1200],
+        "",
+        "【当前结构化结果摘要】",
+        f"项目名称：{positioning.get('project_name') or '待补充'}",
+        f"赛道/方向：{positioning.get('track') or positioning.get('industry') or '待补充'}",
+        f"真实场景：{positioning.get('real_scene') or '待补充'}",
+        f"服务对象：{positioning.get('service_object') or '待补充'}",
+        f"项目目标：{problem.get('project_goal') or '待补充'}",
+        f"痛点：{'；'.join(problem.get('pain_points') or []) or '待补充'}",
+        f"仍缺字段：{'、'.join(missing_labels) if missing_labels else '无'}",
+        f"风险提示：{'；'.join(risk_flags) if risk_flags else '无'}",
+    ])
+
+
+def _extract_latest_user_instruction(source_text: str) -> str:
+    if not source_text:
+        return ""
+    marker = "【用户本轮修改意见或新增资料】"
+    if marker in source_text:
+        return source_text.rsplit(marker, 1)[-1].strip()
+    return source_text.strip()
+
+
+def _competition_missing_field_labels(missing_fields: list[str]) -> list[str]:
+    label_map = {
+        'project_positioning.project_name': '项目名称',
+        'project_positioning.track_or_industry': '赛道/专业方向',
+        'project_positioning.real_scene': '真实场景',
+        'project_positioning.service_object': '服务对象',
+        'project_positioning.final_deliverable': '最终成果形态',
+        'problem_definition.pain_points': '真实痛点',
+        'problem_definition.project_goal': '项目目标',
+        'skill_modules': '技能展示模块',
+        'result_validation.deliverables': '成果清单',
+        'result_validation.evidence_materials': '证据材料',
+        'value_innovation.practical_value_or_innovation_points': '实用性或创新点',
+    }
+    labels: list[str] = []
+    for field in missing_fields:
+        if field.startswith('team_roles.'):
+            label = '四名选手分工'
+        elif field.startswith('skill_modules.'):
+            label = '技能展示模块'
+        else:
+            label = label_map.get(field, field)
+        if label not in labels:
+            labels.append(label)
+    return labels
+
+
+def _build_competition_dialogue_fallback_reply(draft_payload: dict) -> str:
+    spec = unwrap_spec_state(draft_payload.get('competition_project_spec') or {})
+    positioning = spec.get('project_positioning') or {}
+    project_name = positioning.get('project_name') or draft_payload.get('project_title') or '当前项目'
+    missing_fields = draft_payload.get('missing_fields') or []
+    if missing_fields:
+        return f"已把本轮内容同步进《{project_name}》的结构化稿件。接下来建议继续补充真实场景、选手动作和成果证据，方便后续生成 PPT 大纲。"
+    return f"已把本轮内容同步进《{project_name}》的结构化稿件。当前核心信息比较完整，可以确认稿子后生成 PPT 大纲。"
 
 
 def _get_project_reference_files_content(project_id: str) -> list:
@@ -252,6 +411,13 @@ def create_project():
             options = NoThinkOptions.from_dict(data.get('no_think_options'))
             idea_prompt = NoThinkService().normalize_prompt(idea_prompt, options)
 
+        generation_mode = data.get('generation_mode') or 'fast'
+        if generation_mode not in ['fast', 'harness']:
+            return bad_request("Invalid generation_mode")
+        harness_template = data.get('harness_template') if generation_mode == 'harness' else None
+        if harness_template and harness_template not in ['paper-operators']:
+            return bad_request("Invalid harness_template")
+
         # Create project
         project = Project(
             user_id=current_user_id(),
@@ -260,6 +426,8 @@ def create_project():
             outline_text=data.get('outline_text'),
             description_text=data.get('description_text'),
             template_style=data.get('template_style'),
+            generation_mode=generation_mode,
+            harness_template=harness_template,
             image_aspect_ratio=image_aspect_ratio,
             status='DRAFT'
         )
@@ -283,6 +451,284 @@ def create_project():
         db.session.rollback()
         error_trace = traceback.format_exc()
         logger.error(f"create_project failed: {str(e)}", exc_info=True)
+        return error_response('SERVER_ERROR', str(e), 500)
+
+
+@project_bp.route('/understand', methods=['POST'])
+def understand_project():
+    """
+    POST /api/projects/understand - Normalize precise vocational competition inputs.
+
+    Request body:
+    {
+        "generation_mode": "precise",
+        "project_id": "optional existing draft id",
+        "input_mode": "raw_text|uploaded_file|structured_input",
+        "raw_text": "...",
+        "file_id": "...",
+        "structured_input": {...}
+    }
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return bad_request("Request body is required")
+
+        if data.get('generation_mode') != 'precise':
+            return bad_request("generation_mode must be precise")
+
+        input_mode = data.get('input_mode')
+        service = CompetitionUnderstandingService()
+        project_id = data.get('project_id')
+        project = owned_project_or_404(project_id) if project_id else None
+        if project_id and not project:
+            return not_found('Project')
+        base_spec = project.get_competition_project_spec() if project else None
+
+        if input_mode == 'structured_input':
+            incoming_state = normalize_spec_state(data.get('structured_input') or base_spec or {})
+            result = service.build_from_structured_input(unwrap_spec_state(incoming_state))
+            result.spec = merge_plain_values_into_state(incoming_state, result.spec, source="ai")
+        elif input_mode == 'patch':
+            edit_service = CompetitionDocumentEditService(get_ai_service())
+            result = edit_service.apply_user_patch(
+                data.get('structured_input') or base_spec or {},
+                data.get('patch_ops') or [],
+            )
+        elif input_mode == 'raw_text':
+            raw_text = data.get('raw_text') or ''
+            if not raw_text.strip():
+                return bad_request("raw_text is required")
+            edit_service = CompetitionDocumentEditService(get_ai_service())
+            result = edit_service.build_from_user_message(
+                raw_text,
+                current_spec=data.get('structured_input') or base_spec,
+            )
+        elif input_mode == 'uploaded_file':
+            file_id = data.get('file_id')
+            if not file_id:
+                return bad_request("file_id is required")
+            query = ReferenceFile.query.filter_by(id=file_id)
+            user_id = current_user_id()
+            if user_id:
+                query = query.filter(ReferenceFile.user_id == user_id)
+            reference_file = query.first()
+            if not reference_file:
+                return not_found('Reference file')
+            edit_service = CompetitionDocumentEditService(get_ai_service())
+            result = edit_service.build_from_reference_text(
+                reference_file.markdown_content or '',
+                current_spec=data.get('structured_input') or base_spec,
+                filename=reference_file.filename or '',
+            )
+        else:
+            return bad_request("input_mode must be raw_text, uploaded_file, structured_input, or patch")
+
+        spec = result.spec
+        plain_spec = unwrap_spec_state(spec)
+        positioning = plain_spec.get('project_positioning') or {}
+        project_title = positioning.get('project_name') or '职业教育争夺赛项目'
+        idea_prompt = _build_competition_idea_prompt(spec)
+
+        if project is None:
+            project = Project(
+                user_id=current_user_id(),
+                creation_type='no_think',
+                status='UNDERSTOOD',
+            )
+            db.session.add(project)
+
+        project.project_title = project_title
+        project.idea_prompt = idea_prompt
+        project.status = 'UNDERSTOOD'
+        project.set_competition_project_spec(spec)
+        db.session.commit()
+
+        return success_response({
+            'project_id': project.id,
+            'generation_mode': 'precise',
+            'input_mode': input_mode,
+            'project_title': project.project_title,
+            'competition_project_spec': spec,
+            'missing_fields': result.missing_fields,
+            'risk_flags': result.risk_flags,
+            'confidence': result.confidence,
+            'input_quality': result.input_quality,
+            'next_action': 'edit_structured_spec',
+            'reply': getattr(result, 'reply', ''),
+            'change_summary': getattr(result, 'change_summary', []),
+            'destructive_changes': getattr(result, 'destructive_changes', []),
+            'needs_confirmation': getattr(result, 'needs_confirmation', False),
+            'questions': getattr(result, 'questions', []),
+            'ops': getattr(result, 'ops', []),
+            'rejected_ops': getattr(result, 'rejected_ops', []),
+        }, status_code=201)
+
+    except ValueError as e:
+        db.session.rollback()
+        return bad_request(str(e))
+
+    except BadRequest:
+        db.session.rollback()
+        return bad_request("Invalid JSON in request body")
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"understand_project failed: {str(e)}", exc_info=True)
+        if _is_ai_auth_error(e):
+            return _ai_generation_error_response(e)
+        return error_response('SERVER_ERROR', str(e), 500)
+
+
+@project_bp.route('/understand/stream', methods=['POST'])
+def understand_project_stream():
+    """
+    POST /api/projects/understand/stream - Stream dialogue reply and draft updates via SSE.
+
+    SSE events:
+    - status: current workflow stage
+    - draft: persisted structured draft
+    - assistant_delta: assistant reply text delta from the configured model
+    - done: stream finished
+    - error: recoverable stream error
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return bad_request("Request body is required")
+
+        if data.get('generation_mode') != 'precise':
+            return bad_request("generation_mode must be precise")
+
+        input_mode = data.get('input_mode')
+        if input_mode not in ('raw_text', 'uploaded_file', 'structured_input'):
+            return bad_request("input_mode must be raw_text, uploaded_file, or structured_input")
+
+        if input_mode == 'raw_text' and not (data.get('raw_text') or '').strip():
+            return bad_request("raw_text is required")
+        if input_mode == 'uploaded_file' and not data.get('file_id'):
+            return bad_request("file_id is required")
+
+        project_id = data.get('project_id')
+        existing_project = owned_project_or_404(project_id) if project_id else None
+        if project_id and not existing_project:
+            return not_found('Project')
+        base_spec = existing_project.get_competition_project_spec() if existing_project else None
+
+        user_id = current_user_id()
+
+        def sse_generate():
+            try:
+                yield _sse_event('status', {'message': '正在理解本轮输入'})
+
+                if input_mode == 'structured_input':
+                    service = CompetitionUnderstandingService()
+                    incoming_state = normalize_spec_state(data.get('structured_input') or base_spec or {})
+                    result = service.build_from_structured_input(unwrap_spec_state(incoming_state))
+                    result.spec = merge_plain_values_into_state(incoming_state, result.spec, source="ai")
+                    source_for_reply = json.dumps(unwrap_spec_state(incoming_state), ensure_ascii=False)
+                elif input_mode == 'raw_text':
+                    source_for_reply = data.get('raw_text') or ''
+                    edit_service = CompetitionDocumentEditService(get_ai_service())
+                    result = edit_service.build_from_user_message(
+                        source_for_reply,
+                        current_spec=data.get('structured_input') or base_spec,
+                    )
+                else:
+                    file_id = data.get('file_id')
+                    query = ReferenceFile.query.filter_by(id=file_id)
+                    if user_id:
+                        query = query.filter(ReferenceFile.user_id == user_id)
+                    reference_file = query.first()
+                    if not reference_file:
+                        yield _sse_event('error', {'message': 'Reference file not found'})
+                        return
+                    source_for_reply = reference_file.markdown_content or reference_file.filename or ''
+                    edit_service = CompetitionDocumentEditService(get_ai_service())
+                    result = edit_service.build_from_reference_text(
+                        reference_file.markdown_content or '',
+                        current_spec=data.get('structured_input') or base_spec,
+                        filename=reference_file.filename or '',
+                    )
+
+                spec = result.spec
+                plain_spec = unwrap_spec_state(spec)
+                positioning = plain_spec.get('project_positioning') or {}
+                project_title = positioning.get('project_name') or '职业教育争夺赛项目'
+                idea_prompt = _build_competition_idea_prompt(spec)
+
+                project = existing_project
+                if project is None:
+                    project = Project(
+                        user_id=user_id,
+                        creation_type='no_think',
+                        status='UNDERSTOOD',
+                    )
+                    db.session.add(project)
+
+                project.project_title = project_title
+                project.idea_prompt = idea_prompt
+                project.status = 'UNDERSTOOD'
+                project.set_competition_project_spec(spec)
+                db.session.commit()
+
+                draft_payload = {
+                    'project_id': project.id,
+                    'generation_mode': 'precise',
+                    'input_mode': input_mode,
+                    'project_title': project.project_title,
+                    'competition_project_spec': spec,
+                    'missing_fields': result.missing_fields,
+                    'risk_flags': result.risk_flags,
+                    'confidence': result.confidence,
+                    'input_quality': result.input_quality,
+                    'next_action': 'edit_structured_spec',
+                    'reply': getattr(result, 'reply', ''),
+                    'change_summary': getattr(result, 'change_summary', []),
+                    'destructive_changes': getattr(result, 'destructive_changes', []),
+                    'needs_confirmation': getattr(result, 'needs_confirmation', False),
+                    'questions': getattr(result, 'questions', []),
+                    'ops': getattr(result, 'ops', []),
+                    'rejected_ops': getattr(result, 'rejected_ops', []),
+                }
+                yield _sse_event('draft', draft_payload)
+                yield _sse_event('status', {'message': '正在生成本轮对话回复'})
+
+                reply_text = getattr(result, 'reply', '') or _build_competition_dialogue_fallback_reply(draft_payload)
+                yield _sse_event('assistant_delta', {'text': reply_text})
+
+                yield _sse_event('done', {'project_id': project.id})
+
+            except ValueError as e:
+                db.session.rollback()
+                yield _sse_event('error', {'message': str(e)})
+            except Exception as e:
+                db.session.rollback()
+                logger.error(f"understand_project_stream failed: {str(e)}", exc_info=True)
+                if _is_ai_auth_error(e):
+                    yield _sse_event('error', {
+                        'code': 'AI_SERVICE_AUTH_ERROR',
+                        'message': 'AI 服务密钥无效或已过期。请先到设置页更新模型 API Key，或修改 .env 后重启后端。',
+                    })
+                else:
+                    yield _sse_event('error', {'message': '流式对话生成失败'})
+
+        return Response(
+            stream_with_context(sse_generate()),
+            mimetype='text/event-stream',
+            headers={
+                'Cache-Control': 'no-cache, no-transform',
+                'X-Accel-Buffering': 'no',
+                'Connection': 'keep-alive',
+            },
+        )
+
+    except BadRequest:
+        db.session.rollback()
+        return bad_request("Invalid JSON in request body")
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"understand_project_stream setup failed: {str(e)}", exc_info=True)
         return error_response('SERVER_ERROR', str(e), 500)
 
 
@@ -358,10 +804,31 @@ def update_project(project_id):
             project.outline_requirements = data['outline_requirements']
         if 'description_requirements' in data:
             project.description_requirements = data['description_requirements']
+
+        if 'platform_context' in data:
+            platform_context = data['platform_context']
+            if platform_context is not None and not isinstance(platform_context, dict):
+                return bad_request("platform_context must be an object")
+            project.set_platform_context(platform_context)
+        if 'outline_template_id' in data:
+            project.outline_template_id = data['outline_template_id'] or None
+        if 'ppt_template_id' in data:
+            project.ppt_template_id = data['ppt_template_id'] or None
         
         # Update template_style if provided
         if 'template_style' in data:
             project.template_style = data['template_style']
+
+        # Update generation mode if provided. This is independent from visual style control.
+        if 'generation_mode' in data or 'harness_template' in data:
+            generation_mode = data.get('generation_mode', project.generation_mode or 'fast')
+            if generation_mode not in ['fast', 'harness']:
+                return bad_request("Invalid generation_mode")
+            harness_template = data.get('harness_template', project.harness_template)
+            if generation_mode == 'harness' and harness_template and harness_template not in ['paper-operators']:
+                return bad_request("Invalid harness_template")
+            project.generation_mode = generation_mode
+            project.harness_template = harness_template if generation_mode == 'harness' else None
         
         # Update aspect ratio if provided
         if 'image_aspect_ratio' in data:
@@ -494,6 +961,46 @@ def generate_outline(project_id):
             project.idea_prompt = idea_prompt
             input_kind = 'idea'
 
+        requested_target_depth = data.get('target_depth')
+        valid_target_depths = {'outline_only', 'outline_and_descriptions'}
+        if requested_target_depth in valid_target_depths:
+            target_depth = requested_target_depth
+        else:
+            target_depth = 'outline_only'
+
+        existing_pages = Page.query.filter_by(project_id=project_id).order_by(Page.order_index).all()
+        if existing_pages and not data.get('force'):
+            logger.info(
+                "generate_outline skipped existing result: project=%s status=%s pages=%s",
+                project_id,
+                project.status,
+                len(existing_pages),
+            )
+            return success_response({
+                'status': project.status,
+                'pages': [page.to_dict() for page in existing_pages],
+                'reused_existing': True,
+            })
+
+        if project.status == 'GENERATING_OUTLINE':
+            logger.info("generate_outline already running: project=%s", project_id)
+            return success_response({
+                'status': 'GENERATING_OUTLINE',
+                'pages': [],
+                'in_progress': True,
+            }, status_code=202)
+
+        logger.info(
+            "generate_outline request accepted: project=%s input_kind=%s target_depth=%s language=%s",
+            project_id,
+            input_kind,
+            target_depth,
+            language,
+        )
+
+        project.status = 'GENERATING_OUTLINE'
+        db.session.commit()
+
         project_context = ProjectContext(project, reference_files_content)
         generation_service = InputGenerationService(ai_service)
         generation_service.generate(
@@ -501,7 +1008,7 @@ def generate_outline(project_id):
             project_context,
             InputGenerationOptions(
                 input_kind=input_kind,
-                target_depth='outline_and_descriptions' if input_kind == 'no_think' else 'outline_only',
+                target_depth=target_depth,
                 language=language,
                 detail_level=data.get('detail_level'),
             ),
@@ -520,8 +1027,15 @@ def generate_outline(project_id):
     
     except Exception as e:
         db.session.rollback()
+        try:
+            project = Project.query.get(project_id)
+            if project and project.status == 'GENERATING_OUTLINE':
+                project.status = 'UNDERSTOOD' if project.creation_type == 'no_think' else 'DRAFT'
+                db.session.commit()
+        except Exception:
+            db.session.rollback()
         logger.error(f"generate_outline failed: {str(e)}", exc_info=True)
-        return error_response('AI_SERVICE_ERROR', str(e), 503)
+        return _ai_generation_error_response(e)
 
 
 @project_bp.route('/<project_id>/generate/outline/stream', methods=['POST'])
@@ -554,7 +1068,10 @@ def generate_outline_stream(project_id):
                 # Re-fetch project inside app context to attach to this session
                 proj = db.session.get(Project, project_id)
                 ai_service = get_ai_service()
-                reference_files_content = _get_project_reference_files_content(project_id)
+                if proj.creation_type == 'no_think' and proj.get_competition_project_spec():
+                    reference_files_content = []
+                else:
+                    reference_files_content = _get_project_reference_files_content(project_id)
 
                 # Validate input based on creation type
                 if proj.creation_type == 'outline' and not proj.outline_text:
@@ -753,9 +1270,17 @@ def generate_descriptions(project_id):
         
         data = request.get_json() or {}
         # 从配置中读取默认并发数，如果请求中提供了则使用请求的值
-        max_workers = data.get('max_workers', current_app.config.get('MAX_DESCRIPTION_WORKERS', 5))
+        max_workers = int(data.get('max_workers', current_app.config.get('MAX_DESCRIPTION_WORKERS', 4)))
+        max_workers = max(1, min(max_workers, 20))
         language = data.get('language', current_app.config.get('OUTPUT_LANGUAGE', 'zh'))
         detail_level = data.get('detail_level', 'default')
+        logger.info(
+            "generate_descriptions request accepted: project=%s pages=%s max_workers=%s language=%s",
+            project_id,
+            len(pages),
+            max_workers,
+            language,
+        )
         
         # Create task
         task = Task(

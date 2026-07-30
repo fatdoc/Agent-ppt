@@ -26,6 +26,7 @@ vi.mock('@/hooks/useT', () => ({
     const values: Record<string, string> = {
       'nav.materialGenerate': '素材生成',
       'nav.materialCenter': '素材中心',
+      'nav.preciseGenerate': '精准生成',
       'nav.history': '历史项目',
       'nav.settings': '设置',
       'settings.language.label': '界面语言',
@@ -40,19 +41,19 @@ vi.mock('@/hooks/useT', () => ({
       'home.features.naturalEdit': '自然语言修改',
       'home.features.regionEdit': '指定区域编辑',
       'home.features.export': '一键导出 PPTX/PDF',
-      'home.tabs.no_think': 'No Think PPT',
+      'home.tabs.no_think': '快速开始',
       'home.tabs.idea': '一句话生成',
       'home.tabs.outline': '从内容生成 PPT',
       'home.tabs.description': '从描述生成',
       'home.tabs.ppt_renovation': 'PPT 翻新',
       'home.tabs.ppt_to_ppt': '借鉴优秀 PPT 生成',
-      'home.tabDescriptions.no_think': '输入主题和偏好，AI 自动生成大纲和页面描述',
+      'home.tabDescriptions.no_think': '简单说说你的项目，AI 会先理解项目，再生成争夺赛 PPT 初稿',
       'home.tabDescriptions.idea': '输入你的想法，AI 将为你生成完整的 PPT',
       'home.tabDescriptions.outline': '已有大纲？直接粘贴，逐页描述可选填写，也可以稍后由 AI 生成',
       'home.tabDescriptions.description': '已有完整描述？AI 将自动解析并直接生成图片，跳过大纲步骤',
       'home.tabDescriptions.ppt_renovation': '上传已有的 PDF/PPTX 文件，AI 将解析内容并重新生成翻新后的PPT',
       'home.tabDescriptions.ppt_to_ppt': '上传参考 PPT，再输入你的内容，AI 学习结构和表达方式生成新 PPT',
-      'home.placeholders.no_think': '例如：AI 工具入门培训',
+      'home.placeholders.no_think': '例如：我们做一个智慧养老项目，场景是养老院，解决老人跌倒风险，四个学生分别负责评估、护理、记录和成果展示。',
       'home.placeholders.idea': '例如：生成一份关于 AI 发展史的演讲 PPT',
       'home.placeholders.outline': '粘贴你的 PPT 大纲（必填）...',
       'home.placeholders.description': '粘贴你的完整页面描述...',
@@ -64,13 +65,18 @@ vi.mock('@/hooks/useT', () => ({
       'home.content.generateDescriptions': '根据大纲生成逐页描述',
       'home.examples.outline': '大纲示例',
       'home.examples.description': '描述示例',
-      'home.noThink.scenario': '使用场景',
-      'home.noThink.colorTone': '色调',
-      'home.noThink.density': '内容密度',
-      'home.noThink.pageCount': '页数',
-      'home.noThink.styleTemplate': '风格倾向',
-      'home.noThink.extraInstruction': '额外要求',
-      'home.noThink.extraPlaceholder': '例如：适合新员工，避免技术细节过深',
+      'home.noThink.title': '场景定位',
+      'home.noThink.subtitle': '固定绑定世界职业院校技能大赛/争夺赛主线，把项目任务、岗位现场和服务对象转成现场展示语义。',
+      'home.noThink.projectDescription': '项目想法',
+      'home.noThink.projectName': '项目名称',
+      'home.noThink.projectNamePlaceholder': '可不填',
+      'home.noThink.industryOrTrack': '赛道 / 专业方向',
+      'home.noThink.realScene': '真实场景',
+      'home.noThink.realScenePlaceholder': '养老院、温室大棚、数控车间...',
+      'home.noThink.targetUser': '服务对象',
+      'home.noThink.targetUserPlaceholder': '老人、种植户、设备操作员、游客...',
+      'home.noThink.teamTaskDescription': '四名选手分工',
+      'home.noThink.teamTaskPlaceholder': '可用自然语言描述，不要求结构化。',
       'home.template.title': '选择风格模板',
       'home.template.useTextStyle': '使用文字描述风格',
       'home.actions.selectFile': '选择参考文件',
@@ -101,6 +107,31 @@ vi.mock('@/store/useProjectStore', () => ({
   }),
 }));
 
+vi.mock('@/platform', () => ({
+  usePlatform: () => ({
+    competition: {
+      id: 'wvcc',
+      name: '世界职业院校技能大赛',
+      shortName: '世职赛',
+      supportLevel: 'FULL',
+      enabled: true,
+      competitionTypes: [],
+      tracks: [],
+      themes: [],
+      recommendedPageCount: 39,
+      scoreDimensions: [],
+    },
+    projectContext: {
+      projectName: '',
+      competitionId: 'wvcc',
+      targetPageCount: 39,
+      style: '科技蓝',
+      activeScoreDimensionIds: [],
+    },
+    updateProjectContext: vi.fn(),
+  }),
+}));
+
 vi.mock('@/api/endpoints', () => ({
   listUserTemplates: vi.fn().mockResolvedValue({ data: {} }),
   uploadReferenceFile: vi.fn(),
@@ -109,6 +140,7 @@ vi.mock('@/api/endpoints', () => ({
   associateMaterialsToProject: vi.fn(),
   createPptRenovationProject: vi.fn(),
   createPptToPptProject: vi.fn(),
+  persistPlatformContext: vi.fn(),
 }));
 
 vi.mock('@/components/shared/MarkdownTextarea', () => ({
@@ -153,16 +185,18 @@ describe('Home no-think mode', () => {
     sessionStorage.clear();
   });
 
-  it('shows the NoThink workbench and option controls by default', async () => {
+  it('shows the vocational quick-start workbench and scenario fields by default', async () => {
     render(<Home />);
 
-    expect(screen.getByRole('button', { name: 'No Think PPT' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: '启发 · Banana Slides' })).toBeInTheDocument();
-    expect(screen.getByText('使用场景')).toBeInTheDocument();
-    expect(screen.getByText('色调')).toBeInTheDocument();
-    expect(screen.getByText('内容密度')).toBeInTheDocument();
-    expect(screen.getByText('页数')).toBeInTheDocument();
-    expect(screen.getByText('风格倾向')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '快速开始' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '启发 · 职业教育版' })).toBeInTheDocument();
+    expect(screen.getByText('项目想法')).toBeInTheDocument();
+    expect(screen.getByText('场景定位')).toBeInTheDocument();
+    expect(screen.getByText('项目名称')).toBeInTheDocument();
+    expect(screen.getByText('赛道 / 专业方向')).toBeInTheDocument();
+    expect(screen.getByText('真实场景')).toBeInTheDocument();
+    expect(screen.getByText('服务对象')).toBeInTheDocument();
+    expect(screen.getByText('四名选手分工')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '下一步' })).toBeInTheDocument();
   });
 
@@ -172,10 +206,16 @@ describe('Home no-think mode', () => {
     expect(screen.queryByRole('button', { name: '帮助' })).not.toBeInTheDocument();
   });
 
+  it('shows the precise generation entry in the home header', () => {
+    render(<Home />);
+
+    expect(screen.getByRole('button', { name: '精准生成' })).toBeInTheDocument();
+  });
+
   it('keeps focused top-level entries and includes PPT to PPT as its own mode', () => {
     render(<Home />);
 
-    expect(screen.getByRole('button', { name: 'No Think PPT' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '快速开始' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '从内容生成 PPT' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '借鉴优秀 PPT 生成' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'PPT 翻新' })).toBeInTheDocument();

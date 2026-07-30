@@ -84,6 +84,8 @@ from services.pdf_service import split_pdf_to_pages
 
 logger = logging.getLogger(__name__)
 
+_NARRATION_BATCH_SIZE = 8
+
 
 class TaskManager:
     """Simple task manager using ThreadPoolExecutor"""
@@ -588,6 +590,7 @@ def generate_images_task(task_id: str, project_id: str, ai_service, file_service
                             page_desc=desc_text,
                             has_template_image=bool(page_ref_image_path),
                             has_blueprint_page=False,
+                            page_data=page_data,
                         )
                         
                         # Generate image prompt
@@ -777,18 +780,18 @@ def generate_single_page_image_task(task_id: str, project_id: str, page_id: str,
 
             from models import Project
             project = Project.query.get(project_id)
+            page_data = page.get_outline_content() or {}
+            if page.part:
+                page_data['part'] = page.part
             visual_guidance = VisualGuidanceService().build_visual_guidance(
                 project=project,
                 page_desc=desc_text,
                 has_template_image=bool(ref_image_path),
                 has_blueprint_page=False,
+                page_data=page_data,
             )
             
             # Generate image prompt
-            page_data = page.get_outline_content() or {}
-            if page.part:
-                page_data['part'] = page.part
-            
             prompt = ai_service.generate_image_prompt(
                 outline, page_data, desc_text, page.order_index + 1,
                 has_material_images=has_material_images,
@@ -2067,32 +2070,40 @@ def export_video_task(
                 if pages_needing_narration:
                     progress_callback("旁白", f"正在生成 {len(pages_needing_narration)} 页旁白...", 5)
                     try:
-                        prompt_pages = [
-                            {
-                                'page_index': seq,
-                                'title': outline.get('title', ''),
-                                'points': outline.get('points', []),
-                                'description_text': desc_text,
-                            }
-                            for _, seq, outline, desc_text in pages_needing_narration
-                        ]
-                        prompt = get_narration_generation_prompt(
-                            prompt_pages,
-                            language=language,
-                            config=normalized_narration_config,
-                        )
-                        result = ai_service.text_provider.generate_text(prompt)
-                        parsed = parse_narration_generation_result(result)
+                        for start in range(0, len(pages_needing_narration), _NARRATION_BATCH_SIZE):
+                            batch = pages_needing_narration[start:start + _NARRATION_BATCH_SIZE]
+                            prompt_pages = [
+                                {
+                                    'page_index': seq,
+                                    'title': outline.get('title', ''),
+                                    'points': outline.get('points', []),
+                                    'description_text': desc_text,
+                                }
+                                for _, seq, outline, desc_text in batch
+                            ]
+                            prompt = get_narration_generation_prompt(
+                                prompt_pages,
+                                language=language,
+                                config=normalized_narration_config,
+                            )
+                            result = ai_service.text_provider.generate_text(prompt)
+                            parsed = parse_narration_generation_result(result)
 
-                        for page, seq, _, _ in pages_needing_narration:
-                            narration = parsed.get(seq, '')
-                            if narration:
-                                page.set_narration_text(narration)
-                                narration_generated += 1
-                            elif fail_fast:
-                                raise RuntimeError(
-                                    f"第 {page.order_index + 1} 页旁白生成结果为空，当前项目未开启“允许返回半成品”，已停止导出。"
-                                )
+                            for page, seq, _, _ in batch:
+                                narration = parsed.get(seq, '')
+                                if narration:
+                                    page.set_narration_text(narration)
+                                    narration_generated += 1
+                                elif fail_fast:
+                                    raise RuntimeError(
+                                        f"第 {page.order_index + 1} 页旁白生成结果为空，当前项目未开启“允许返回半成品”，已停止导出。"
+                                    )
+
+                            progress_callback(
+                                "旁白",
+                                f"已生成旁白 {min(start + len(batch), len(pages_needing_narration))}/{len(pages_needing_narration)} 页",
+                                5 + int((start + len(batch)) / len(pages_needing_narration) * 15),
+                            )
                         db.session.commit()
 
                     except RuntimeError:

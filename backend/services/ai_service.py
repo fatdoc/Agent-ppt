@@ -54,6 +54,12 @@ class ProjectContext:
             self.creation_type = project_or_dict.creation_type or 'idea'
             self.outline_requirements = project_or_dict.outline_requirements
             self.description_requirements = project_or_dict.description_requirements
+            self.generation_mode = getattr(project_or_dict, 'generation_mode', None) or 'fast'
+            self.harness_template = getattr(project_or_dict, 'harness_template', None)
+            if hasattr(project_or_dict, 'get_competition_project_spec'):
+                self.competition_project_spec = project_or_dict.get_competition_project_spec()
+            else:
+                self.competition_project_spec = None
         else:
             # 是字典
             self.idea_prompt = project_or_dict.get('idea_prompt')
@@ -62,6 +68,9 @@ class ProjectContext:
             self.creation_type = project_or_dict.get('creation_type', 'idea')
             self.outline_requirements = project_or_dict.get('outline_requirements')
             self.description_requirements = project_or_dict.get('description_requirements')
+            self.generation_mode = project_or_dict.get('generation_mode') or 'fast'
+            self.harness_template = project_or_dict.get('harness_template')
+            self.competition_project_spec = project_or_dict.get('competition_project_spec')
 
         self.reference_files_content = reference_files_content or []
 
@@ -74,6 +83,9 @@ class ProjectContext:
             'creation_type': self.creation_type,
             'outline_requirements': self.outline_requirements,
             'description_requirements': self.description_requirements,
+            'generation_mode': self.generation_mode,
+            'harness_template': self.harness_template,
+            'competition_project_spec': self.competition_project_spec,
             'reference_files_content': self.reference_files_content
         }
 

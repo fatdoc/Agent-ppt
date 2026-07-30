@@ -20,7 +20,7 @@ vi.mock('@/components/shared/MarkdownTextarea', () => {
   return {
     MarkdownTextarea: React.forwardRef(
       ({ value, onChange, onPaste, onFocus, placeholder, label }: any, ref: any) => {
-        const textareaRef = React.useRef<HTMLTextAreaElement>(null)
+        const textareaRef = React.useRef(null)
         React.useImperativeHandle(ref, () => ({
           insertAtCursor: (text: string) => {
             // Simulate inserting text at end

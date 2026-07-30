@@ -95,7 +95,7 @@ interface ProjectState {
   setError: (error: string | null) => void;
   
   // 项目操作
-  initializeProject: (type: 'idea' | 'outline' | 'description' | 'no_think', content: string, templateImage?: File, templateStyle?: string, referenceFileIds?: string[], aspectRatio?: string, noThinkOptions?: NoThinkOptions, pageDescriptions?: string, generateDescriptionsFromOutline?: boolean) => Promise<void>;
+  initializeProject: (type: 'idea' | 'outline' | 'description' | 'no_think', content: string, templateImage?: File, templateStyle?: string, referenceFileIds?: string[], aspectRatio?: string, noThinkOptions?: NoThinkOptions, pageDescriptions?: string, generateDescriptionsFromOutline?: boolean, generationMode?: 'fast' | 'harness', harnessTemplate?: 'paper-operators' | null) => Promise<void>;
   syncProject: (projectId?: string) => Promise<void>;
   
   // 页面操作
@@ -112,7 +112,7 @@ interface ProjectState {
 
   // 生成操作
   generateOutline: () => Promise<void>;
-  generateOutlineStream: () => Promise<{ complete: boolean } | undefined>;
+  generateOutlineStream: (lockPageCount?: boolean) => Promise<{ complete: boolean } | undefined>;
   generateFromDescription: () => Promise<void>;
   generateDescriptions: (detailLevel?: string) => Promise<void>;
   generatePageDescription: (pageId: string, detailLevel?: string) => Promise<void>;
@@ -197,7 +197,7 @@ const debouncedUpdatePage = debounce(
   setError: (error) => set({ error }),
 
   // 初始化项目
-  initializeProject: async (type, content, templateImage, templateStyle, referenceFileIds, aspectRatio, noThinkOptions, pageDescriptions, generateDescriptionsFromOutline = false) => {
+  initializeProject: async (type, content, templateImage, templateStyle, referenceFileIds, aspectRatio, noThinkOptions, pageDescriptions, generateDescriptionsFromOutline = false, generationMode = 'fast', harnessTemplate = null) => {
     set({ isGlobalLoading: true, error: null });
     try {
       const request: any = {};
@@ -228,6 +228,9 @@ const debouncedUpdatePage = debounce(
       if (aspectRatio) {
         request.image_aspect_ratio = aspectRatio;
       }
+
+      request.generation_mode = generationMode;
+      request.harness_template = generationMode === 'harness' ? harnessTemplate : null;
 
       // 1. 创建项目
       const response = await api.createProject(request);
@@ -276,7 +279,7 @@ const debouncedUpdatePage = debounce(
       } else if (type === 'outline' || type === 'no_think') {
         await generateWithRollback(() => api.generateOutline(projectId), '生成大纲');
         if (type === 'outline' && generateDescriptionsFromOutline) {
-          await generateWithRollback(() => api.generateDescriptions(projectId), '生成描述');
+          await generateWithRollback(() => api.generateDescriptions(projectId, undefined, undefined, { max_workers: 4 }), '生成描述');
         }
       } else if (type === 'description') {
         await generateWithRollback(() => api.generateFromDescription(projectId, content), '从描述生成大纲和页面描述');
@@ -629,7 +632,7 @@ const debouncedUpdatePage = debounce(
     // Concurrent queue: pages are pushed by SSE callbacks, drained by a timer loop
     const pageQueue: any[] = [];
     let streamDone = false;
-    let doneData: { total: number; pages: any[]; complete?: boolean } | null = null;
+    const doneRef: { value: { total: number; pages: any[]; complete?: boolean } | null } = { value: null };
     const STAGGER_MS = 150;
 
     // Start the render loop — runs concurrently with the SSE stream
@@ -664,7 +667,7 @@ const debouncedUpdatePage = debounce(
     try {
       await api.generateOutlineStream(currentProject.id!, {
         onPage: (page) => { pageQueue.push(page); },
-        onDone: (data) => { doneData = data; },
+        onDone: (data) => { doneRef.value = data; },
         onError: (message) => {
           console.error('[流式大纲] 错误:', message);
           set({ error: normalizeErrorMessage(message), isOutlineStreaming: false });
@@ -676,6 +679,7 @@ const debouncedUpdatePage = debounce(
       await renderPromise;
 
       // Replace temp pages with real persisted pages
+      const doneData = doneRef.value;
       if (doneData) {
         const { currentProject: proj } = get();
         if (proj) {
@@ -733,10 +737,10 @@ const debouncedUpdatePage = debounce(
     if (pages.length === 0) return;
 
     // 检查描述生成模式，优先从 sessionStorage 缓存读取以避免额外 API 调用
-    let mode: string = 'streaming';
+    let mode: string = 'parallel';
     try {
       const cached = sessionStorage.getItem('banana-settings');
-      if (cached) {
+      if (cached && currentProject.creation_type !== 'no_think') {
         const parsed = JSON.parse(cached);
         if (parsed?.description_generation_mode) {
           mode = parsed.description_generation_mode;
@@ -756,7 +760,7 @@ const debouncedUpdatePage = debounce(
       // Concurrent queue + render loop (like outline streaming)
       const descQueue: api.DescriptionStreamEvent[] = [];
       let streamDone = false;
-      let doneData: { total: number; pages: any[]; warning?: string } | null = null;
+      const doneRef: { value: { total: number; pages: any[]; warning?: string } | null } = { value: null };
       const STAGGER_MS = 100;
 
       const renderPromise = new Promise<void>((resolve) => {
@@ -793,7 +797,7 @@ const debouncedUpdatePage = debounce(
       try {
         await api.generateDescriptionsStream(currentProject.id, {
           onDescription: (data) => { descQueue.push(data); },
-          onDone: (data) => { doneData = data; },
+          onDone: (data) => { doneRef.value = data; },
           onError: (message) => {
             console.error('[流式描述] 错误:', message);
             set({ error: normalizeErrorMessage(message) });
@@ -804,6 +808,7 @@ const debouncedUpdatePage = debounce(
         streamDone = true;
         await renderPromise;
 
+        const doneData = doneRef.value;
         if (doneData) {
           const { currentProject: proj } = get();
           if (proj) {
@@ -845,7 +850,7 @@ const debouncedUpdatePage = debounce(
           throw new Error(t('store.projectIdMissing'));
         }
 
-        const response = await api.generateDescriptions(projectId, undefined, detailLevel);
+        const response = await api.generateDescriptions(projectId, undefined, detailLevel, { max_workers: 4 });
         const taskId = response.data?.task_id;
 
         if (!taskId) {

@@ -105,7 +105,7 @@ class Config:
     IMAGE_CAPTION_MODEL = os.getenv('IMAGE_CAPTION_MODEL', 'gemini-3-flash-preview')
     
     # 并发配置
-    MAX_DESCRIPTION_WORKERS = int(os.getenv('MAX_DESCRIPTION_WORKERS', '20'))
+    MAX_DESCRIPTION_WORKERS = int(os.getenv('MAX_DESCRIPTION_WORKERS', '4'))
     MAX_IMAGE_WORKERS = int(os.getenv('MAX_IMAGE_WORKERS', '20'))
     
     # 图片生成配置

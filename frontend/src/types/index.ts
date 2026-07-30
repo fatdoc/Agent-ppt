@@ -2,7 +2,7 @@
 export type PageStatus = 'DRAFT' | 'GENERATING_DESCRIPTION' | 'DESCRIPTION_GENERATED' | 'QUEUED' | 'GENERATING' | 'COMPLETED' | 'FAILED';
 
 // 项目状态
-export type ProjectStatus = 'DRAFT' | 'OUTLINE_GENERATED' | 'DESCRIPTIONS_GENERATED' | 'COMPLETED';
+export type ProjectStatus = 'DRAFT' | 'UNDERSTOOD' | 'GENERATING_OUTLINE' | 'OUTLINE_GENERATED' | 'DESCRIPTIONS_GENERATED' | 'COMPLETED';
 
 // 大纲内容
 export interface OutlineContent {
@@ -39,8 +39,8 @@ export interface ImageVersion {
 
 // 页面
 export interface Page {
-  page_id: string;  // 后端返回 page_id
-  id?: string;      // 前端使用的别名
+  page_id?: string; // 后端返回 page_id
+  id: string;       // normalizePage 保证存在的前端规范 ID
   order_index: number;
   part?: string; // 章节名
   outline_content: OutlineContent | null;
@@ -72,7 +72,7 @@ export type ExportInpaintMethod = 'generative' | 'baidu' | 'hybrid';
 // 项目
 export interface Project {
   project_id: string;  // 后端返回 project_id
-  id?: string;         // 前端使用的别名
+  id: string;          // normalizeProject 保证存在的前端规范 ID
   project_title?: string;
   idea_prompt: string;
   outline_text?: string;  // 用户输入的大纲文本（用于outline类型）
@@ -84,6 +84,11 @@ export interface Project {
   template_image_url?: string; // 后端返回 template_image_url
   template_image_path?: string; // 前端使用的别名
   template_style?: string; // 风格描述文本（无模板图模式）
+  generation_mode?: 'fast' | 'harness'; // 生成流程模式，不控制视觉风格
+  harness_template?: 'paper-operators' | null; // Harness 流程模板
+  platform_context?: import('@/platform/types').PlatformProjectContext;
+  outline_template_id?: string;
+  ppt_template_id?: string;
   // 导出设置
   export_extractor_method?: ExportExtractorMethod; // 组件提取方法
   export_inpaint_method?: ExportInpaintMethod; // 背景图获取方法
@@ -118,14 +123,28 @@ export interface Task {
   completed_at?: string;
 }
 
+// 项目素材。与素材 API 返回结构保持一致，供编辑器和素材中心共享。
+export interface Material {
+  id: string;
+  project_id?: string | null;
+  filename: string;
+  url: string;
+  relative_path: string;
+  created_at: string;
+  prompt?: string;
+  original_filename?: string;
+  source_filename?: string;
+  name?: string;
+  caption?: string;
+}
+
 // 创建项目请求
 export interface NoThinkOptions {
-  scenario?: string;
-  color_tone?: string;
-  density?: string;
-  page_count?: string;
-  style_template?: string;
-  extra_instruction?: string;
+  project_name?: string;
+  industry_or_track?: string;
+  real_scene?: string;
+  target_user?: string;
+  team_task_description?: string;
 }
 
 export interface CreateProjectRequest {
@@ -136,6 +155,8 @@ export interface CreateProjectRequest {
   no_think_options?: NoThinkOptions;
   template_image?: File;
   template_style?: string;
+  generation_mode?: 'fast' | 'harness';
+  harness_template?: 'paper-operators' | null;
   image_aspect_ratio?: string;
 }
 

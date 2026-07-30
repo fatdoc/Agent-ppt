@@ -136,7 +136,7 @@ class Settings(db.Model):
             'mineru_token_length': len(mineru_token) if mineru_token else 0,
             'image_caption_model': self._val('image_caption_model', d),
             'output_language': self._val('output_language', d),
-            'description_generation_mode': self._val('description_generation_mode', d) or 'streaming',
+            'description_generation_mode': self._val('description_generation_mode', d) or 'parallel',
             'description_extra_fields': self.get_description_extra_fields(),
             'image_prompt_extra_fields': self.get_image_prompt_extra_fields(),
             'enable_text_reasoning': self.enable_text_reasoning,

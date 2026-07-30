@@ -1,54 +1,14 @@
 import { apiClient, getAuthHeaders } from './client';
 import type { Project, Task, ApiResponse, CreateProjectRequest, Page } from '@/types';
 import type { Settings } from '../types/index';
+import type { CompetitionProjectSpec } from '@/types/spec';
+import type { PatchOp } from '@/types/patch';
+import type { CompetitionConfig, OutlineTemplate, PlatformProjectContext } from '@/platform/types';
+
+export type { CompetitionProjectSpec } from '@/types/spec';
+export type { PatchOp } from '@/types/patch';
 
 // ===== 访问口令 API =====
-
-export interface AuthUser {
-  id: string;
-  username: string;
-  email?: string | null;
-  created_at?: string;
-}
-
-export const getAuthConfig = async (): Promise<ApiResponse<{ enabled: boolean }>> => {
-  const response = await apiClient.get<ApiResponse<{ enabled: boolean }>>('/api/auth/config');
-  return response.data;
-};
-
-export const login = async (
-  identifier: string,
-  password: string
-): Promise<ApiResponse<{ user: AuthUser; token: string }>> => {
-  const response = await apiClient.post<ApiResponse<{ user: AuthUser; token: string }>>('/api/auth/login', {
-    identifier,
-    password,
-  });
-  return response.data;
-};
-
-export const register = async (
-  username: string,
-  password: string,
-  email?: string
-): Promise<ApiResponse<{ user: AuthUser; token: string }>> => {
-  const response = await apiClient.post<ApiResponse<{ user: AuthUser; token: string }>>('/api/auth/register', {
-    username,
-    password,
-    email,
-  });
-  return response.data;
-};
-
-export const getCurrentUser = async (): Promise<ApiResponse<{ user: AuthUser }>> => {
-  const response = await apiClient.get<ApiResponse<{ user: AuthUser }>>('/api/auth/me');
-  return response.data;
-};
-
-export const logout = async (): Promise<ApiResponse> => {
-  const response = await apiClient.post<ApiResponse>('/api/auth/logout');
-  return response.data;
-};
 
 export const checkAccessCode = async (): Promise<ApiResponse<{ enabled: boolean }>> => {
   const response = await apiClient.get<ApiResponse<{ enabled: boolean }>>('/api/access-code/check');
@@ -80,10 +40,124 @@ export const createProject = async (data: CreateProjectRequest): Promise<ApiResp
     outline_text: data.outline_text,
     description_text: data.description_text,
     template_style: data.template_style,
+    generation_mode: data.generation_mode,
+    harness_template: data.harness_template,
     image_aspect_ratio: data.image_aspect_ratio,
     no_think_options: data.no_think_options,
   });
   return response.data;
+};
+
+export interface UnderstandProjectRequest {
+  generation_mode: 'precise';
+  project_id?: string;
+  input_mode: 'raw_text' | 'uploaded_file' | 'structured_input' | 'patch';
+  raw_text?: string;
+  file_id?: string;
+  structured_input?: CompetitionProjectSpec;
+  patch_ops?: PatchOp[];
+}
+
+export interface RejectedPatchOp {
+  op?: Partial<PatchOp> & Record<string, unknown>;
+  code?: string;
+  message?: string;
+}
+
+export interface UnderstandProjectResponse {
+  project_id: string;
+  generation_mode: 'precise';
+  input_mode: UnderstandProjectRequest['input_mode'];
+  project_title: string;
+  competition_project_spec: CompetitionProjectSpec;
+  missing_fields: string[];
+  risk_flags: string[];
+  confidence: Record<string, number>;
+  input_quality: 'ready' | 'needs_review' | 'insufficient';
+  next_action: 'edit_structured_spec';
+  reply?: string;
+  change_summary?: string[];
+  destructive_changes?: string[];
+  needs_confirmation?: boolean;
+  questions?: string[];
+  ops?: PatchOp[];
+  rejected_ops?: RejectedPatchOp[];
+}
+
+export const understandProject = async (
+  data: UnderstandProjectRequest
+): Promise<ApiResponse<UnderstandProjectResponse>> => {
+  const response = await apiClient.post<ApiResponse<UnderstandProjectResponse>>('/api/projects/understand', data);
+  return response.data;
+};
+
+export interface UnderstandProjectStreamCallbacks {
+  onStatus?: (message: string) => void;
+  onDelta: (text: string) => void;
+  onDraft: (data: UnderstandProjectResponse) => void;
+  onDone?: (data: { project_id: string }) => void;
+  onError: (message: string, code?: string) => void;
+}
+
+export const understandProjectStream = async (
+  data: UnderstandProjectRequest,
+  callbacks: UnderstandProjectStreamCallbacks,
+): Promise<void> => {
+  const accessCode = localStorage.getItem('banana-access-code');
+
+  const response = await fetch('/api/projects/understand/stream', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...getAuthHeaders(),
+      ...(accessCode ? { 'X-Access-Code': accessCode } : {}),
+    },
+    body: JSON.stringify(data),
+  });
+
+  if (!response.ok || !response.body) {
+    callbacks.onError(`HTTP ${response.status}`);
+    return;
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  let readResult = await reader.read();
+  while (!readResult.done) {
+    const { value } = readResult;
+    buffer += decoder.decode(value, { stream: true });
+
+    const parts = buffer.split('\n\n');
+    buffer = parts.pop() || '';
+
+    for (const part of parts) {
+      const lines = part.split('\n');
+      let eventType = '';
+      let eventData = '';
+
+      for (const line of lines) {
+        if (line.startsWith('event: ')) eventType = line.slice(7);
+        else if (line.startsWith('data: ')) eventData = line.slice(6);
+      }
+
+      if (!eventType || !eventData) continue;
+
+      try {
+        const parsed = JSON.parse(eventData);
+        if (eventType === 'status') callbacks.onStatus?.(parsed.message || '');
+        else if (eventType === 'assistant_delta') callbacks.onDelta(parsed.text || '');
+        else if (eventType === 'draft') callbacks.onDraft(parsed as UnderstandProjectResponse);
+        else if (eventType === 'done') callbacks.onDone?.(parsed);
+        else if (eventType === 'error') callbacks.onError(parsed.message || '流式对话失败', parsed.code);
+      } catch {
+        // Skip malformed events
+      }
+    }
+
+    readResult = await reader.read();
+  }
 };
 
 /**
@@ -144,6 +218,58 @@ export const updateProject = async (
   return response.data;
 };
 
+// ===== 业务平台配置与大纲模板 =====
+
+export const listCompetitionConfigs = async (): Promise<ApiResponse<{ competitions: CompetitionConfig[] }>> => {
+  const response = await apiClient.get<ApiResponse<{ competitions: CompetitionConfig[] }>>('/api/platform/competitions');
+  return response.data;
+};
+
+export const listOutlineTemplates = async (): Promise<ApiResponse<{ templates: OutlineTemplate[] }>> => {
+  const response = await apiClient.get<ApiResponse<{ templates: OutlineTemplate[] }>>('/api/outline-templates');
+  return response.data;
+};
+
+export const createOutlineTemplate = async (
+  template: OutlineTemplate,
+): Promise<ApiResponse<OutlineTemplate>> => {
+  const response = await apiClient.post<ApiResponse<OutlineTemplate>>('/api/outline-templates', template);
+  return response.data;
+};
+
+export const updateOutlineTemplate = async (
+  template: OutlineTemplate,
+  changeNote?: string,
+): Promise<ApiResponse<OutlineTemplate>> => {
+  const response = await apiClient.put<ApiResponse<OutlineTemplate>>(
+    `/api/outline-templates/${template.id}`,
+    { ...template, changeNote },
+  );
+  return response.data;
+};
+
+export const deleteOutlineTemplate = async (templateId: string): Promise<ApiResponse> => {
+  const response = await apiClient.delete<ApiResponse>(`/api/outline-templates/${templateId}`);
+  return response.data;
+};
+
+export const duplicateOutlineTemplate = async (
+  templateId: string,
+): Promise<ApiResponse<OutlineTemplate>> => {
+  const response = await apiClient.post<ApiResponse<OutlineTemplate>>(`/api/outline-templates/${templateId}/duplicate`);
+  return response.data;
+};
+
+export const persistPlatformContext = async (
+  projectId: string,
+  context: PlatformProjectContext,
+): Promise<ApiResponse<Project>> =>
+  updateProject(projectId, {
+    platform_context: context,
+    outline_template_id: context.outlineTemplateId,
+    ppt_template_id: context.pptTemplateId,
+  });
+
 /**
  * 更新页面顺序
  */
@@ -165,11 +291,16 @@ export const updatePagesOrder = async (
  * @param projectId 项目ID
  * @param language 输出语言（可选，默认从 sessionStorage 获取）
  */
-export const generateOutline = async (projectId: string, language?: OutputLanguage): Promise<ApiResponse> => {
+export const generateOutline = async (
+  projectId: string,
+  language?: OutputLanguage,
+  options: { target_depth?: 'outline_only' | 'outline_and_descriptions' } = {}
+): Promise<ApiResponse> => {
   const lang = language || await getStoredOutputLanguage();
   const response = await apiClient.post<ApiResponse>(
     `/api/projects/${projectId}/generate/outline`,
-    { language: lang }
+    { language: lang, ...options },
+    { timeout: 1200000 }
   );
   return response.data;
 };
@@ -280,11 +411,20 @@ export const generateFromDescription = async (projectId: string, descriptionText
  * @param projectId 项目ID
  * @param language 输出语言（可选，默认从 sessionStorage 获取）
  */
-export const generateDescriptions = async (projectId: string, language?: OutputLanguage, detailLevel?: string): Promise<ApiResponse> => {
+export const generateDescriptions = async (
+  projectId: string,
+  language?: OutputLanguage,
+  detailLevel?: string,
+  options: { max_workers?: number } = {}
+): Promise<ApiResponse> => {
   const lang = language || await getStoredOutputLanguage();
   const response = await apiClient.post<ApiResponse>(
     `/api/projects/${projectId}/generate/descriptions`,
-    { language: lang, detail_level: detailLevel || 'default' }
+    {
+      language: lang,
+      detail_level: detailLevel || 'default',
+      max_workers: options.max_workers ?? 4,
+    }
   );
   return response.data;
 };
@@ -945,6 +1085,7 @@ export interface Material {
   original_filename?: string;
   source_filename?: string;
   name?: string;
+  caption?: string;
 }
 
 /**

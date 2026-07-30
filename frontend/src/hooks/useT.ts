@@ -12,6 +12,10 @@ type Translations = {
  * 例如：getNestedValue(obj, 'home.title') 获取 obj.home.title
  */
 function getNestedValue(obj: NestedRecord, path: string): string | undefined {
+  if (typeof path !== 'string') {
+    return undefined;
+  }
+
   const keys = path.split('.');
   let current: unknown = obj;
   
@@ -83,6 +87,6 @@ export function useT<T extends Translations>(translations: T) {
     }
     
     // 组件内没找到，fallback 到全局翻译（保持原始参数传递）
-    return globalT(key, defaultOrParams as any);
+    return typeof key === 'string' ? String(globalT(key, defaultOrParams as any)) : '';
   };
 }

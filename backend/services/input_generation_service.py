@@ -3,10 +3,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+import logging
 import re
 from typing import Any
 
 from models import Page, db
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -325,8 +328,18 @@ class InputGenerationService:
         if options.target_depth not in self.VALID_TARGET_DEPTHS:
             raise ValueError(f"Unsupported target_depth: {options.target_depth}")
 
+        logger.info(
+            "input_generation started: project=%s input_kind=%s target_depth=%s",
+            project.id,
+            options.input_kind,
+            options.target_depth,
+        )
         outline = self.build_outline(options.input_kind, project_context, options)
+        flat_outline = self._flatten_outline(outline)
+        logger.info("input_generation outline ready: project=%s pages=%s", project.id, len(flat_outline))
         page_descriptions = self.build_descriptions(options.input_kind, outline, project_context, options)
+        if page_descriptions is not None:
+            logger.info("input_generation descriptions ready: project=%s pages=%s", project.id, len(page_descriptions))
         pages = self.save_pages(project.id, outline, page_descriptions, mode=save_mode)
 
         if page_descriptions is not None and pages:

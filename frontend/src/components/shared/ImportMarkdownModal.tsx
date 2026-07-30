@@ -14,7 +14,7 @@ interface ImportMarkdownModalProps {
   pastePlaceholder: string;
   uploadLabel: string;
   uploadHint: string;
-  uploadFormatsHint: string;
+  uploadFormatsHint?: string;
   importButtonLabel: string;
   cancelButtonLabel: string;
   emptyError: string;
@@ -31,7 +31,7 @@ export const ImportMarkdownModal: React.FC<ImportMarkdownModalProps> = ({
   pastePlaceholder,
   uploadLabel,
   uploadHint,
-  uploadFormatsHint,
+  uploadFormatsHint = '',
   importButtonLabel,
   cancelButtonLabel,
   emptyError,

@@ -54,11 +54,15 @@ export default defineConfig(({ mode }) => {
         '/api': {
           target: backendUrl,
           changeOrigin: true,
+          timeout: 1200000,
+          proxyTimeout: 1200000,
         },
         // 文件服务代理到后端
         '/files': {
           target: backendUrl,
           changeOrigin: true,
+          timeout: 1200000,
+          proxyTimeout: 1200000,
         },
         // 健康检查代理到后端
         '/health': {

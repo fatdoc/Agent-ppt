@@ -248,6 +248,7 @@ import { TemplateSelector, getTemplateFile } from '@/components/shared/TemplateS
 import { listUserTemplates, type UserTemplate } from '@/api/endpoints';
 import { materialUrlToFile } from '@/components/shared/MaterialSelector';
 import type { Material } from '@/api/endpoints';
+import { StandaloneAgentLauncher } from '@/components/platform';
 import { SlideCard } from '@/components/preview/SlideCard';
 import { useProjectStore } from '@/store/useProjectStore';
 import { useExportTasksStore, type ExportTaskType } from '@/store/useExportTasksStore';
@@ -255,6 +256,7 @@ import { getImageUrl } from '@/api/client';
 import { getPageImageVersions, setCurrentImageVersion, updateProject, uploadTemplate, exportPPTX as apiExportPPTX, exportPDF as apiExportPDF, exportImages as apiExportImages, exportEditablePPTX as apiExportEditablePPTX, exportVideo as apiExportVideo, getSettings, getElevenLabsVoices } from '@/api/endpoints';
 import type { ImageVersion, DescriptionContent, ExportExtractorMethod, ExportInpaintMethod, Page, NarrationConfig } from '@/types';
 import { normalizeErrorMessage } from '@/utils';
+import { usePlatform } from '@/platform';
 
 const VIDEO_VOICE_OPTIONS = [
   { group: '中文', voices: [
@@ -301,8 +303,8 @@ const DEFAULT_VIDEO_NARRATION_CONFIG: NarrationConfig = {
   target_audience: 'the general public with no technical background',
   speech_tone: 'analytical, data-driven, and highly professional',
   presentation_topic: '',
-  min_words: 100,
-  max_words: 200,
+  min_words: 60,
+  max_words: 120,
 };
 
 export const SlidePreview: React.FC = () => {
@@ -324,6 +326,7 @@ export const SlidePreview: React.FC = () => {
     pageGeneratingTasks,
     warningMessage,
   } = useProjectStore();
+  const { projectContext, updateProjectContext } = usePlatform();
   
   const { addTask, pollTask: pollExportTask, tasks: exportTasks, restoreActiveTasks } = useExportTasksStore();
 
@@ -333,6 +336,30 @@ export const SlidePreview: React.FC = () => {
   }, [restoreActiveTasks]);
 
   const [selectedIndex, setSelectedIndex] = useState(0);
+  useEffect(() => {
+    const page = currentProject?.pages[selectedIndex];
+    const nextProjectId = projectId || currentProject?.id;
+    if (!nextProjectId) return;
+    if (
+      projectContext.projectId !== nextProjectId
+      || projectContext.currentPageId !== page?.id
+      || projectContext.currentSectionId !== page?.part
+    ) {
+      updateProjectContext({
+        projectId: nextProjectId,
+        currentPageId: page?.id,
+        currentSectionId: page?.part,
+      });
+    }
+  }, [
+    currentProject,
+    projectContext.currentPageId,
+    projectContext.currentSectionId,
+    projectContext.projectId,
+    projectId,
+    selectedIndex,
+    updateProjectContext,
+  ]);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
   const [useTextStyleMode, setUseTextStyleMode] = useState(false);
@@ -1190,7 +1217,6 @@ export const SlidePreview: React.FC = () => {
           pollExportTask(exportTaskId, projectId, taskId);
         }
       } else if (type === 'video') {
-        // Async export - create processing task and start polling
         addTask({
           id: exportTaskId,
           taskId: '',
@@ -2814,6 +2840,7 @@ export const SlidePreview: React.FC = () => {
         </div>
       </Modal>
 
+      <StandaloneAgentLauncher />
     </div>
   );
 };

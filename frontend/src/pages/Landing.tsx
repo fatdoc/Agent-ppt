@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 
 const accent = '#AFFF00';
+const APP_EDITION = import.meta.env.VITE_APP_EDITION || '职业教育版';
 
 const navLinks = [
   { label: '首页', href: '#hero' },
@@ -90,7 +91,14 @@ const formula = [
 const entries = [
   {
     icon: Wand2,
-    title: 'No Think PPT',
+    title: '精准生成',
+    description: '面向世界职业院校技能大赛/争夺赛，把项目资料整理成可编辑的现场展示作战稿。',
+    cta: '进入精准生成',
+    path: '/ppt-editor',
+  },
+  {
+    icon: Wand2,
+    title: '快速开始',
     description: '从一个主题开始，无需思考结构，直接得到完整初稿。',
     cta: '从主题开始',
   },
@@ -124,7 +132,7 @@ const references = [
 ];
 
 const footerLinks = [
-  { title: '入口', links: ['No Think PPT', '从内容生成', '借鉴优秀 PPT', 'PPT 翻新'] },
+  { title: '入口', links: ['精准生成', '快速开始', '从内容生成', '借鉴优秀 PPT', 'PPT 翻新'] },
   { title: '场景', links: ['创新创业比赛', '工作汇报', '教学课件', '融资路演'] },
   { title: '关于', links: ['产品理念', '更新日志', '加入我们', '联系我们'] },
   { title: '条款', links: ['隐私政策', '服务条款', '数据安全'] },
@@ -264,7 +272,7 @@ export const Landing: React.FC = () => {
             >
               <span className="text-[#AFFF00]">启发</span>
               <span className={`font-mono text-sm ${scrolled ? 'text-white/70' : 'text-[#121212]/60'}`}>
-                Banana Slides
+                {APP_EDITION}
               </span>
             </button>
 
@@ -542,14 +550,14 @@ export const Landing: React.FC = () => {
               </p>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
               {entries.map((entry) => {
                 const Icon = entry.icon;
                 return (
                   <button
                     key={entry.title}
                     type="button"
-                    onClick={goCreate}
+                    onClick={() => navigate(entry.path || '/app')}
                     className="landing-entry group relative overflow-hidden rounded-2xl bg-[#121212] p-6 text-left transition-transform hover:-translate-y-2"
                   >
                     <div className="absolute inset-0 bg-[#AFFF00] opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
@@ -649,7 +657,7 @@ export const Landing: React.FC = () => {
             </div>
 
             <p className="mx-auto mb-10 max-w-xl text-center text-sm leading-relaxed text-white/60">
-              启发 Banana Slides 把复杂内容生成清晰、有力、可展示的演示文稿。让材料成为结构，让结构成为叙事，让叙事成为画面。
+              启发 {APP_EDITION} 把复杂内容生成清晰、有力、可展示的演示文稿。让材料成为结构，让结构成为叙事，让叙事成为画面。
             </p>
 
             <div className="grid grid-cols-2 gap-6 border-t border-white/10 py-8 md:grid-cols-4">
@@ -672,9 +680,9 @@ export const Landing: React.FC = () => {
             <div className="flex flex-col items-center justify-between gap-3 border-t border-white/10 pt-6 md:flex-row">
               <span className="flex items-baseline gap-1.5 text-xl font-black tracking-normal">
                 <span className="text-[#AFFF00]">启发</span>
-                <span className="font-mono text-sm text-white/60">Banana Slides</span>
+                <span className="font-mono text-sm text-white/60">{APP_EDITION}</span>
               </span>
-              <p className="font-mono text-xs text-white/40">© 2026 启发 Banana Slides. 保留所有权利。</p>
+              <p className="font-mono text-xs text-white/40">© 2026 启发 {APP_EDITION}. 保留所有权利。</p>
               <p className="font-mono text-xs text-white/30">从混沌到秩序</p>
             </div>
           </div>

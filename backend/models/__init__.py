@@ -26,5 +26,6 @@ from .material import Material
 from .reference_file import ReferenceFile
 from .settings import Settings
 from .user_style_template import UserStyleTemplate
+from .outline_template import OutlineTemplate
 
-__all__ = ['db', 'User', 'Project', 'Page', 'Task', 'UserTemplate', 'PageImageVersion', 'Material', 'ReferenceFile', 'Settings', 'UserStyleTemplate']
+__all__ = ['db', 'User', 'Project', 'Page', 'Task', 'UserTemplate', 'PageImageVersion', 'Material', 'ReferenceFile', 'Settings', 'UserStyleTemplate', 'OutlineTemplate']

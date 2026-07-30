@@ -26,6 +26,7 @@ export interface ExportTask {
     completed: number;
     percent?: number;
     current_step?: string;
+    help_text?: string;
     messages?: string[];
     warnings?: string[];  // 导出警告信息
     warning_details?: {   // 警告详细信息
@@ -202,4 +203,3 @@ export const useExportTasksStore = create<ExportTasksState>()(
     }
   )
 );
-

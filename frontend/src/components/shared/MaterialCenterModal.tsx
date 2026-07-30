@@ -86,6 +86,7 @@ interface State {
   sortBy: 'newest' | 'oldest' | 'name-asc' | 'name-desc';
   projects: Project[];
   projectsReady: boolean;
+  showAllProjects: boolean;
   preview: { url: string; label: string } | null;
 }
 
@@ -117,6 +118,7 @@ const initial: State = {
   sortBy: 'newest',
   projects: [],
   projectsReady: false,
+  showAllProjects: false,
   preview: null,
 };
 

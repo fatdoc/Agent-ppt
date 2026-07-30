@@ -17,8 +17,14 @@
     "lint:backend": "uv run flake8 backend/ --count --select=E9,F63,F7,F82 --show-source --statistics",
     "lint:frontend": "cd frontend && npm run lint",
     "dev": "docker compose up",
+    "dev:local": "bash scripts/workspace.sh start",
     "dev:backend": "cd backend && uv run python app.py",
     "dev:frontend": "cd frontend && npm run dev",
+    "workspace:start": "bash scripts/workspace.sh start",
+    "workspace:stop": "bash scripts/workspace.sh stop",
+    "workspace:restart": "bash scripts/workspace.sh restart",
+    "workspace:status": "bash scripts/workspace.sh status",
+    "workspace:logs": "bash scripts/workspace.sh logs",
     "build": "docker compose build",
     "start": "docker compose up -d",
     "stop": "docker compose down",
@@ -28,4 +34,3 @@
     "node": ">=18.0.0"
   }
 }
-

@@ -1,8 +1,8 @@
 import React from 'react';
-import { Github } from 'lucide-react';
 
 // const GITHUB_REPO = 'Anionex/banana-slides';
 // const GITHUB_URL = `https://github.com/${GITHUB_REPO}`;
+const APP_EDITION = import.meta.env.VITE_APP_EDITION || '职业教育版';
 
 export const Footer: React.FC = () => {
   const currentYear = new Date().getFullYear();
@@ -15,7 +15,7 @@ export const Footer: React.FC = () => {
           <div className="flex items-center gap-1.5">
             <span>© {currentYear}</span>
             <span className="font-black text-[#121212] dark:text-[#AFFF00]">
-              启发 Banana Slides
+              启发 {APP_EDITION}
             </span>
           </div>
 

@@ -6,6 +6,6 @@ from .export_controller import export_bp
 from .file_controller import file_bp
 from .material_controller import material_bp
 from .settings_controller import settings_bp
+from .platform_controller import platform_bp, outline_template_bp
 
-__all__ = ['project_bp', 'style_bp', 'page_bp', 'template_bp', 'user_template_bp', 'user_style_template_bp', 'export_bp', 'file_bp', 'material_bp', 'settings_bp']
-
+__all__ = ['project_bp', 'style_bp', 'page_bp', 'template_bp', 'user_template_bp', 'user_style_template_bp', 'export_bp', 'file_bp', 'material_bp', 'settings_bp', 'platform_bp', 'outline_template_bp']

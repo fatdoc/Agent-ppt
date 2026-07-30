@@ -371,6 +371,20 @@ def generate_material_image(project_id):
         if not prompt:
             return bad_request("prompt is required")
 
+        if project is not None:
+            from services.visual_guidance_service import VisualGuidanceService
+            context_block = VisualGuidanceService().build_asset_context(
+                project,
+                section=(data.get('section') or '').strip(),
+                page_purpose=(data.get('page_purpose') or '').strip(),
+                image_usage=(data.get('image_usage') or '项目素材库中的可复用 PPT 视觉素材').strip(),
+            )
+            prompt = (
+                f"{prompt}\n\n"
+                "以下为当前项目业务上下文，生成结果必须与其一致，不得替换为无关的通用科技场景：\n"
+                f"{context_block}"
+            )
+
         # 处理project_id：对于全局素材，使用'global'作为Task的project_id
         # Task模型要求project_id不能为null，但Material可以
         task_project_id = project_id if project_id is not None else 'global'

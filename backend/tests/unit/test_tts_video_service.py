@@ -39,6 +39,11 @@ _tts_mod = _load_module_directly(
     os.path.join(_services_dir, 'tts_video_service.py'),
 )
 
+_load_module_directly(
+    'services.prompt_registry',
+    os.path.join(_services_dir, 'prompt_registry.py'),
+)
+
 _prompts_mod = _load_module_directly(
     'services.prompts',
     os.path.join(_services_dir, 'prompts.py'),
@@ -503,7 +508,7 @@ class TestNarrationPrompt:
         assert '<slide_title>' in prompt
         assert 'knowledgeable and patient university professor' in prompt
         assert 'the general public with no technical background' in prompt
-        assert 'between 100 and 200 words' in prompt
+        assert 'between 60 and 120 words' in prompt
 
     def test_english_prompt(self):
         prompt = get_narration_generation_prompt(

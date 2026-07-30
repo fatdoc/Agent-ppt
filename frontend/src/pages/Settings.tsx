@@ -377,7 +377,7 @@ const initialFormData = {
   mineru_api_base: '',
   mineru_token: '',
   image_resolution: '2K',
-  max_description_workers: 5,
+  max_description_workers: 4,
   max_image_workers: 8,
   output_language: 'zh' as OutputLanguage,
   // 推理模式配置（分别控制文本和图像）
@@ -537,7 +537,7 @@ const formDataFromSettings = (data: SettingsType): typeof initialFormData => ({
   api_base_url: data.api_base_url || '',
   api_key: '',
   image_resolution: data.image_resolution || '2K',
-  max_description_workers: data.max_description_workers || 5,
+  max_description_workers: data.max_description_workers || 4,
   max_image_workers: data.max_image_workers || 8,
   text_model: data.text_model || '',
   image_model: data.image_model || '',
@@ -1014,7 +1014,10 @@ export const Settings: React.FC = () => {
 
       // 启动异步测试，获取任务ID
       const response = await action(testSettings);
-      const taskId = response.data.task_id;
+      const taskId = response.data?.task_id;
+      if (!taskId) {
+        throw new Error(t('settings.serviceTest.testFailed'));
+      }
 
       // isActive tracks whether this test round is still pending — avoids stale closure
       let isActive = true;
@@ -1032,14 +1035,16 @@ export const Settings: React.FC = () => {
       pollInterval = setInterval(async () => {
         try {
           const statusResponse = await api.getTestStatus(taskId);
-          const taskStatus = statusResponse.data.status;
+          const statusData = statusResponse.data;
+          if (!statusData) return;
+          const taskStatus = statusData.status;
 
           if (taskStatus === 'COMPLETED') {
-            const detail = formatDetail(statusResponse.data.result || {});
-            const message = statusResponse.data.message || t('settings.messages.testSuccess');
+            const detail = formatDetail(statusData.result || {});
+            const message = statusData.message || t('settings.messages.testSuccess');
             finish({ status: 'success', message, detail }, message, 'success');
           } else if (taskStatus === 'FAILED') {
-            const errorMessage = statusResponse.data.error || t('settings.serviceTest.testFailed');
+            const errorMessage = statusData.error || t('settings.serviceTest.testFailed');
             finish({ status: 'error', message: errorMessage }, `${t('settings.serviceTest.testFailed')}: ${errorMessage}`, 'error');
           }
           // 如果是 PENDING 或 PROCESSING，继续轮询

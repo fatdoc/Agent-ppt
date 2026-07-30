@@ -20,6 +20,8 @@ logger = logging.getLogger(__name__)
 
 page_bp = Blueprint('pages', __name__, url_prefix='/api/projects')
 
+_NARRATION_BATCH_SIZE = 8
+
 
 @page_bp.route('/<project_id>/pages', methods=['POST'])
 def create_page(project_id):
@@ -961,6 +963,7 @@ def generate_page_narration(project_id, page_id):
         from services.prompts import (
             get_narration_generation_prompt,
             normalize_narration_generation_config,
+            parse_narration_generation_result,
         )
         narration_config = normalize_narration_generation_config(
             data.get('narration_config'),
@@ -977,7 +980,9 @@ def generate_page_narration(project_id, page_id):
             config=narration_config,
         )
 
-        narration = ai_service.text_provider.generate_text(prompt)
+        result = ai_service.text_provider.generate_text(prompt)
+        parsed = parse_narration_generation_result(result)
+        narration = parsed.get(page.order_index + 1) or result
 
         if not narration or not narration.strip():
             return error_response('AI_SERVICE_ERROR', 'AI returned empty narration', 503)
@@ -1032,6 +1037,7 @@ def generate_all_narrations(project_id):
         generated = 0
         skipped = 0
         failed = 0
+        pages_needing_narration = []
 
         for page in pages:
             # Skip if already has narration and not forcing
@@ -1059,28 +1065,42 @@ def generate_all_narrations(project_id):
                     skipped += 1
                     continue
 
+            pages_needing_narration.append({
+                'page': page,
+                'prompt_page': {
+                    'page_index': page.order_index + 1,
+                    'title': outline_content.get('title', ''),
+                    'points': outline_content.get('points', []),
+                    'description_text': desc_text,
+                },
+            })
+
+        from services.prompts import parse_narration_generation_result
+
+        for start in range(0, len(pages_needing_narration), _NARRATION_BATCH_SIZE):
+            batch = pages_needing_narration[start:start + _NARRATION_BATCH_SIZE]
             try:
                 prompt = get_narration_generation_prompt(
-                    pages=[{
-                        'page_index': page.order_index + 1,
-                        'title': outline_content.get('title', ''),
-                        'points': outline_content.get('points', []),
-                        'description_text': desc_text,
-                    }],
+                    pages=[item['prompt_page'] for item in batch],
                     language=language,
                     config=narration_config,
                 )
-                narration = ai_service.text_provider.generate_text(prompt)
+                result = ai_service.text_provider.generate_text(prompt)
+                parsed = parse_narration_generation_result(result)
 
-                if narration and narration.strip():
-                    page.set_narration_text(narration.strip())
-                    page.updated_at = datetime.utcnow()
-                    generated += 1
-                else:
-                    failed += 1
+                for item in batch:
+                    page = item['page']
+                    page_index = item['prompt_page']['page_index']
+                    narration = parsed.get(page_index, '')
+                    if narration and narration.strip():
+                        page.set_narration_text(narration.strip())
+                        page.updated_at = datetime.utcnow()
+                        generated += 1
+                    else:
+                        failed += 1
             except Exception as e:
-                logger.error(f"Failed to generate narration for page {page.id}: {e}")
-                failed += 1
+                logger.error(f"Failed to generate narration batch starting at {start}: {e}")
+                failed += len(batch)
 
         db.session.commit()
 

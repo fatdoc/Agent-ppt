@@ -132,6 +132,7 @@ import { DescriptionCard } from '@/components/preview/DescriptionCard';
 import { useProjectStore } from '@/store/useProjectStore';
 import { refineDescriptions, getTaskStatus, addPage, updateProject, getSettings, updateSettings } from '@/api/endpoints';
 import { exportProjectToMarkdown, parseMarkdownPages } from '@/utils/projectUtils';
+import { StandaloneAgentLauncher } from '@/components/platform';
 
 // 详细程度图标 — 暂时屏蔽，效果不够理想
 // const DETAIL_LEVEL_LINES: Record<string, number[]> = {
@@ -233,7 +234,7 @@ export const DetailEditor: React.FC = () => {
     targetPageCount?: number;
   } | null>(null);
   const [detailLevel, setDetailLevel] = useState<string>('default');
-  const [generationMode, setGenerationMode] = useState<'streaming' | 'parallel'>('streaming');
+  const [generationMode, setGenerationMode] = useState<'streaming' | 'parallel'>('parallel');
   const [extraFieldNames, setExtraFieldNames] = useState<string[]>(['视觉元素', '视觉焦点', '排版布局', '演讲者备注']);
   const [imagePromptFields, setImagePromptFields] = useState<string[]>(['视觉元素', '视觉焦点', '排版布局']);
   // 可选字段池（localStorage 持久化，包含所有已知字段名）
@@ -262,7 +263,7 @@ export const DetailEditor: React.FC = () => {
         // detail level from sessionStorage (backwards compat, then from DB if we add it later)
         const storedLevel = sessionStorage.getItem('banana-detail-level');
         if (storedLevel) setDetailLevel(storedLevel);
-        setGenerationMode(s.description_generation_mode || 'streaming');
+        setGenerationMode(s.description_generation_mode || 'parallel');
         const activeFields = s.description_extra_fields || ['视觉元素', '视觉焦点', '排版布局', '演讲者备注'];
         setExtraFieldNames(activeFields);
         if (s.image_prompt_extra_fields) setImagePromptFields(s.image_prompt_extra_fields);
@@ -1002,7 +1003,7 @@ export const DetailEditor: React.FC = () => {
                 ))
               ) : (
                 currentProject.pages.map((page, index) => {
-                const pageId = page.id || page.page_id;
+                const pageId = page.id;
                 // Renovation processing: treat pages without description as generating
                 const hasDescription = page.description_content && (
                   (typeof page.description_content === 'object' && 'text' in page.description_content && page.description_content.text?.trim())
@@ -1056,6 +1057,7 @@ export const DetailEditor: React.FC = () => {
         onSelect={handleMaterialSelect}
         multiple
       />
+      <StandaloneAgentLauncher />
     </div>
   );
 };

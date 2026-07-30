@@ -9,6 +9,8 @@ const utilsI18n = {
     projectUtils: {
       untitled: '未命名项目',
       notStarted: '未开始',
+      understood: '理解草稿',
+      generatingOutline: '正在生成大纲',
       completed: '已完成',
       pendingImages: '待生成图片',
       pendingDesc: '待生成描述',
@@ -29,6 +31,8 @@ const utilsI18n = {
     projectUtils: {
       untitled: 'Untitled Project',
       notStarted: 'Not Started',
+      understood: 'Understanding Draft',
+      generatingOutline: 'Generating Outline',
       completed: 'Completed',
       pendingImages: 'Pending Images',
       pendingDesc: 'Pending Descriptions',
@@ -111,9 +115,11 @@ export const formatDate = (dateString: string): string => {
   });
 };
 
-type StatusKey = 'notStarted' | 'completed' | 'pendingImages' | 'pendingDesc';
+type StatusKey = 'notStarted' | 'understood' | 'generatingOutline' | 'completed' | 'pendingImages' | 'pendingDesc';
 
 const getStatusKey = (project: Project): StatusKey => {
+  if (project.status === 'GENERATING_OUTLINE') return 'generatingOutline';
+  if (project.status === 'UNDERSTOOD') return 'understood';
   if (!project.pages || project.pages.length === 0) return 'notStarted';
   if (project.pages.some(p => p.generated_image_path)) return 'completed';
   if (project.pages.some(p => p.description_content)) return 'pendingImages';
@@ -131,6 +137,8 @@ const statusColorMap: Record<StatusKey, string> = {
   completed: 'text-green-600 bg-green-50',
   pendingImages: 'text-yellow-600 bg-yellow-50',
   pendingDesc: 'text-blue-600 bg-blue-50',
+  generatingOutline: 'text-blue-600 bg-blue-50',
+  understood: 'text-teal-600 bg-teal-50',
   notStarted: 'text-gray-600 bg-gray-50',
 };
 
