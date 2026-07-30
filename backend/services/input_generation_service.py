@@ -7,6 +7,7 @@ import re
 from typing import Any
 
 from models import Page, db
+from services.harness_generation_service import clear_harness_artifacts, enhance_project_context, ensure_page_visual_plans
 
 
 @dataclass
@@ -214,7 +215,17 @@ class InputGenerationService:
                 )
             else:
                 outline = self.ai_service.parse_description_to_outline(project_context, language=options.language)
-        elif input_kind in {"idea", "no_think", "blueprint_topic"}:
+        elif input_kind in {"no_think", "blueprint_topic"}:
+            outline = []
+            stream_complete = False
+            for item in self.ai_service.generate_outline_stream(project_context, language=options.language):
+                if "__stream_complete__" in item:
+                    stream_complete = bool(item["__stream_complete__"])
+                else:
+                    outline.append(item)
+            if not stream_complete:
+                raise ValueError("流式大纲生成未正常结束，请重试。")
+        elif input_kind == "idea":
             outline = self.ai_service.generate_outline(project_context, language=options.language)
         else:
             raise ValueError(f"Unsupported input_kind: {input_kind}")
@@ -238,6 +249,10 @@ class InputGenerationService:
                 getattr(project_context, "description_text", "") or "",
                 expected_count=len(pages),
             )
+            if raw_descriptions is None and getattr(project_context, "outline_text", None):
+                raise ValueError(
+                    "逐页描述数量必须和大纲页数一致，请使用“第 1 页/第 2 页”格式逐页填写。"
+                )
             if raw_descriptions is None:
                 raw_descriptions = self.ai_service.parse_description_to_page_descriptions(
                     project_context,
@@ -246,17 +261,29 @@ class InputGenerationService:
                 )
             return self.validate_page_descriptions(raw_descriptions, expected_count=len(pages))
 
-        descriptions = []
-        for page_index, page_outline in enumerate(pages, start=1):
-            desc = self.ai_service.generate_page_description(
-                project_context,
-                outline,
-                page_outline,
-                page_index,
-                language=options.language,
-                detail_level=options.detail_level or "default",
-            )
-            descriptions.append(desc)
+        # Generate every page description in one model call. The old path made one
+        # synchronous request per page, so a ten-page deck routinely exceeded the
+        # browser's five-minute timeout even when every individual call succeeded.
+        descriptions: list[dict[str, Any]] = []
+        stream_complete = False
+        for item in self.ai_service.generate_descriptions_stream(
+            project_context,
+            outline,
+            pages,
+            language=options.language,
+            detail_level=options.detail_level or "default",
+        ):
+            if "__stream_complete__" in item:
+                stream_complete = bool(item["__stream_complete__"])
+                continue
+
+            description = {"text": str(item.get("description_text") or "").strip()}
+            if isinstance(item.get("extra_fields"), dict) and item["extra_fields"]:
+                description["extra_fields"] = item["extra_fields"]
+            descriptions.append(description)
+
+        if not stream_complete:
+            raise ValueError("批量页面描述生成未正常结束，请重试。")
 
         return self.validate_page_descriptions(descriptions, expected_count=len(pages))
 
@@ -325,9 +352,12 @@ class InputGenerationService:
         if options.target_depth not in self.VALID_TARGET_DEPTHS:
             raise ValueError(f"Unsupported target_depth: {options.target_depth}")
 
+        project_context = enhance_project_context(project, project_context)
         outline = self.build_outline(options.input_kind, project_context, options)
         page_descriptions = self.build_descriptions(options.input_kind, outline, project_context, options)
+        clear_harness_artifacts(project.id)
         pages = self.save_pages(project.id, outline, page_descriptions, mode=save_mode)
+        ensure_page_visual_plans(project, pages)
 
         if page_descriptions is not None and pages:
             status = "DESCRIPTIONS_GENERATED"

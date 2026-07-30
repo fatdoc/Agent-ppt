@@ -267,6 +267,24 @@ def _get_model_type_provider_config(model_type: str) -> Dict[str, Any]:
         return {'format': 'anthropic', 'api_key': api_key, 'api_base': api_base}
 
     else:
+        # Vendor sources may still point at an explicitly configured OpenAI-
+        # compatible gateway.  Previously these fields were ignored and Qwen was
+        # forced through LazyLLM, whose HTTP call had no request timeout.
+        explicit_api_key = _resolve_setting(f'{prefix}_API_KEY')
+        explicit_api_base = _resolve_setting(f'{prefix}_API_BASE')
+        if explicit_api_key and explicit_api_base:
+            logger.info(
+                "Per-model config — %s: openai-compatible gateway for source %s, api_base: %s",
+                model_type,
+                source_lower,
+                explicit_api_base,
+            )
+            return {
+                'format': 'openai',
+                'api_key': explicit_api_key,
+                'api_base': explicit_api_base,
+            }
+
         # Assume it's a LazyLLM vendor name
         logger.info("Per-model config — %s: lazyllm, source: %s", model_type, source_lower)
         return {'format': 'lazyllm', 'source': source_lower}
@@ -287,7 +305,17 @@ def get_caption_provider(model: str = "gemini-3-flash-preview") -> TextProvider:
         return AnthropicTextProvider(api_key=config['api_key'], api_base=config['api_base'], model=model)
     elif fmt == 'openai':
         logger.info("Caption provider: OpenAI, model=%s", model)
-        return OpenAITextProvider(api_key=config['api_key'], api_base=config['api_base'], model=model)
+        from config import get_config
+        runtime_config = get_config()
+        return OpenAITextProvider(
+            api_key=config['api_key'],
+            api_base=config['api_base'],
+            model=model,
+            timeout=runtime_config.CAPTION_REQUEST_TIMEOUT,
+            # AIService owns caption retries so JSON failures and provider 5xx
+            # follow one consistent retry policy.
+            max_retries=0,
+        )
     elif fmt == 'vertex':
         logger.info("Caption provider: Vertex AI, model=%s", model)
         return GenAITextProvider(

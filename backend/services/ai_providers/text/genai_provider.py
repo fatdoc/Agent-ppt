@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 def _log_retry(retry_state):
     """记录重试信息"""
     logger.warning(
-        f"GenAI 请求失败，正在重试 ({retry_state.attempt_number}/{get_config().GENAI_MAX_RETRIES + 1})，"
+        f"GenAI 请求失败，正在重试 ({retry_state.attempt_number}/{get_config().TEXT_REQUEST_MAX_RETRIES + 1})，"
         f"错误: {retry_state.outcome.exception() if retry_state.outcome else 'unknown'}"
     )
 
@@ -56,11 +56,12 @@ class GenAITextProvider(TextProvider):
             api_base=api_base,
             project_id=project_id,
             location=location,
+            timeout_seconds=get_config().TEXT_REQUEST_TIMEOUT,
         )
         self.model = model
     
     @retry(
-        stop=stop_after_attempt(get_config().GENAI_MAX_RETRIES + 1),
+        stop=stop_after_attempt(get_config().TEXT_REQUEST_MAX_RETRIES + 1),
         wait=wait_exponential(multiplier=1, min=2, max=10),
         reraise=True,
         before_sleep=_log_retry
@@ -89,7 +90,7 @@ class GenAITextProvider(TextProvider):
         return _validate_response(response)
     
     @retry(
-        stop=stop_after_attempt(get_config().GENAI_MAX_RETRIES + 1),
+        stop=stop_after_attempt(get_config().TEXT_REQUEST_MAX_RETRIES + 1),
         wait=wait_exponential(multiplier=1, min=2, max=10),
         reraise=True,
         before_sleep=_log_retry

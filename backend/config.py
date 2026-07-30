@@ -62,6 +62,18 @@ class Config:
     OPENAI_TIMEOUT = float(os.getenv('OPENAI_TIMEOUT', '480.0'))  # 8 分钟：留出 gpt-image-2 生图(~225s)+传输的余量
     OPENAI_MAX_RETRIES = int(os.getenv('OPENAI_MAX_RETRIES', '2'))  # 减少重试次数，避免过多重试导致累积超时
 
+    # Text calls must finish before the browser's five-minute request timeout.
+    # Image generation keeps the longer OPENAI_* limits above.
+    TEXT_REQUEST_TIMEOUT = float(os.getenv('TEXT_REQUEST_TIMEOUT', '120.0'))
+    TEXT_REQUEST_MAX_RETRIES = int(os.getenv('TEXT_REQUEST_MAX_RETRIES', '0'))
+
+    # Image-caption calls process full slide screenshots and can be much heavier
+    # than ordinary text requests. Keep their retry/concurrency controls
+    # separate so editable-PPTX export cannot flood one upstream provider.
+    CAPTION_REQUEST_TIMEOUT = float(os.getenv('CAPTION_REQUEST_TIMEOUT', '180.0'))
+    CAPTION_REQUEST_MAX_RETRIES = int(os.getenv('CAPTION_REQUEST_MAX_RETRIES', '2'))
+    TEXT_STYLE_MAX_WORKERS = int(os.getenv('TEXT_STYLE_MAX_WORKERS', '3'))
+
     # Anthropic 格式专用配置（当 AI_PROVIDER_FORMAT=anthropic 时使用）
     # 支持 ANTHROPIC_AUTH_TOKEN 作为 ANTHROPIC_API_KEY 的别名
     # 支持 ANTHROPIC_BASE_URL 作为 ANTHROPIC_API_BASE 的别名

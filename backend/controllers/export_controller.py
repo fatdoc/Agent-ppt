@@ -17,12 +17,26 @@ from utils import (
 )
 from utils.auth import current_user_id, owned_project_or_404
 from services import ExportService, FileService
-from services.ai_service_manager import get_ai_service
+from services.credit_service import (
+    InsufficientCredits,
+    attach_task_credit_progress,
+    estimate_operation,
+    reserve_credits,
+)
+from services.ai_service_manager import create_ai_service
 from services.prompts import normalize_narration_generation_config
 
 logger = logging.getLogger(__name__)
 
 export_bp = Blueprint('export', __name__, url_prefix='/api/projects')
+
+
+def _credit_error_response(exc: InsufficientCredits):
+    return error_response(
+        'INSUFFICIENT_CREDITS',
+        f'积分不足：需要 {exc.required}，当前可用 {exc.available}',
+        402,
+    )
 
 
 @export_bp.route('/<project_id>/exports', methods=['GET'])
@@ -371,8 +385,14 @@ def export_editable_pptx(project_id):
         
         if not isinstance(max_workers, int) or max_workers < 1 or max_workers > 16:
             return bad_request("max_workers must be an integer between 1 and 16")
+
+        # Capture the authenticated user's providers now and pass the concrete
+        # service into the background job. This prevents a later request from
+        # another account changing global Flask model settings mid-export.
+        caption_ai_service = create_ai_service()
         
         # Create task record
+        estimate = estimate_operation('editable_export', page_count=len(pages))
         task = Task(
             user_id=current_user_id(),
             project_id=project_id,
@@ -380,6 +400,16 @@ def export_editable_pptx(project_id):
             status='PENDING'
         )
         db.session.add(task)
+        db.session.flush()
+        reserve_credits(
+            user_id=current_user_id(),
+            amount=estimate.amount,
+            operation=estimate.operation,
+            project_id=project_id,
+            task_id=task.id,
+            metadata={**estimate.details, 'endpoint': 'export_editable_pptx'},
+        )
+        attach_task_credit_progress(task, estimate)
         db.session.commit()
         
         logger.info(f"Created export task {task.id} for project {project_id} (recursive analysis: depth={max_depth}, workers={max_workers})")
@@ -406,7 +436,7 @@ def export_editable_pptx(project_id):
             f"icon_subject_extraction={enable_icon_subject_extraction}"
         )
 
-        # 使用递归分析任务（不需要 ai_service，使用 ImageEditabilityService）
+        # 使用递归分析任务；图片识别服务在当前用户请求中固定下来。
         task_manager.submit_task(
             task.id,
             export_editable_pptx_with_recursive_analysis_task,
@@ -419,6 +449,7 @@ def export_editable_pptx(project_id):
             export_extractor_method=export_extractor_method,
             export_inpaint_method=export_inpaint_method,
             enable_icon_subject_extraction=enable_icon_subject_extraction,
+            caption_ai_service=caption_ai_service,
             app=app
         )
         
@@ -429,11 +460,15 @@ def export_editable_pptx(project_id):
                 "task_id": task.id,
                 "method": "recursive_analysis",
                 "max_depth": max_depth,
-                "max_workers": max_workers
+                "max_workers": max_workers,
+                "credit_estimate": estimate.to_dict(),
             },
             message="Export task created (using recursive analysis)"
         )
     
+    except InsufficientCredits as e:
+        db.session.rollback()
+        return _credit_error_response(e)
     except Exception as e:
         logger.exception("Error creating export task")
         return error_response('SERVER_ERROR', str(e), 500)

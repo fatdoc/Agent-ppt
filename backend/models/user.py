@@ -17,6 +17,7 @@ class User(db.Model):
     email = db.Column(db.String(255), nullable=True, unique=True, index=True)
     password_hash = db.Column(db.String(255), nullable=False)
     is_active = db.Column(db.Boolean, nullable=False, default=True)
+    is_admin = db.Column(db.Boolean, nullable=False, default=False, server_default='0')
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -26,6 +27,8 @@ class User(db.Model):
     user_style_templates = db.relationship('UserStyleTemplate', back_populates='user', lazy='select')
     reference_files = db.relationship('ReferenceFile', back_populates='user', lazy='select')
     materials = db.relationship('Material', back_populates='user', lazy='select')
+    credit_account = db.relationship('CreditAccount', back_populates='user', lazy='select', uselist=False)
+    credit_ledger = db.relationship('CreditLedger', back_populates='user', lazy='select')
 
     def set_password(self, password: str) -> None:
         self.password_hash = generate_password_hash(password)
@@ -38,6 +41,7 @@ class User(db.Model):
             'id': self.id,
             'username': self.username,
             'email': self.email,
+            'is_admin': bool(self.is_admin),
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }

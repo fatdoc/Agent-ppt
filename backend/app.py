@@ -25,9 +25,13 @@ from config import Config
 from controllers.material_controller import material_bp, material_global_bp
 from controllers.reference_file_controller import reference_file_bp
 from controllers.settings_controller import settings_bp
+from controllers.credit_controller import credit_bp
 from controllers.auth_controller import auth_bp
 from controllers.openai_oauth_controller import openai_oauth_bp
 from controllers.ppt_to_ppt_controller import ppt_to_ppt_bp
+from controllers.agent_mode_controller import agent_mode_bp
+from controllers.api_key_controller import api_key_bp
+from controllers.public_ppt_controller import public_ppt_bp
 from controllers import project_bp, page_bp, template_bp, user_template_bp, user_style_template_bp, export_bp, file_bp, style_bp
 
 
@@ -107,6 +111,7 @@ def create_app():
     # Register blueprints
     app.register_blueprint(project_bp)
     app.register_blueprint(ppt_to_ppt_bp)
+    app.register_blueprint(agent_mode_bp)
     app.register_blueprint(page_bp)
     app.register_blueprint(template_bp)
     app.register_blueprint(user_template_bp)
@@ -117,9 +122,12 @@ def create_app():
     app.register_blueprint(material_global_bp)
     app.register_blueprint(reference_file_bp, url_prefix='/api/reference-files')
     app.register_blueprint(settings_bp)
+    app.register_blueprint(credit_bp)
     app.register_blueprint(auth_bp)
     app.register_blueprint(openai_oauth_bp)
     app.register_blueprint(style_bp)
+    app.register_blueprint(api_key_bp)
+    app.register_blueprint(public_ppt_bp)
 
     with app.app_context():
         # Load settings from database and sync to app.config
@@ -222,6 +230,10 @@ def _load_settings_to_config(app, user_id=None):
     """Load settings from database and apply to app.config on startup"""
     from models import Settings
     try:
+        if os.getenv('SERVER_MANAGED_AI_CONFIG', '').strip().lower() in {'1', 'true', 'yes', 'on'}:
+            logging.info("SERVER_MANAGED_AI_CONFIG enabled; using server environment model settings")
+            return
+
         settings = Settings.get_settings(user_id=user_id)
         
         # Load AI provider format (always sync, has default value)

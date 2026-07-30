@@ -71,6 +71,18 @@ def test_can_generate_captions_returns_true_when_factory_succeeds():
         assert service._can_generate_captions() is True
 
 
+def test_explicit_caption_provider_is_pinned_for_background_export():
+    """MinerU captioning must reuse the task-scoped visual provider."""
+    pinned_provider = MagicMock()
+    service = FileParserService(
+        mineru_token='test-token',
+        image_caption_model='qwen-vl-max',
+        caption_provider=pinned_provider,
+    )
+
+    assert service._get_caption_provider() is pinned_provider
+
+
 def test_generate_single_caption_vertex_uses_provider_factory():
     """Vertex provider should also go through the factory (the original bug)."""
     image_path = _create_temp_image()

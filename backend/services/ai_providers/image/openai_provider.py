@@ -319,16 +319,27 @@ class OpenAIImageProvider(ImageProvider):
 
         if ref_images and self.model.lower() != 'dall-e-3':
             # dall-e-3 does not support images.edit; all other native models do
-            # Resize ref image to match target size so the API doesn't reject mismatched dimensions
+            # Image 1 is the current page. Any following images are user-provided
+            # replacement references and must be sent too; previously only
+            # ref_images[0] reached the API, so uploaded objects were ignored.
             w, h = map(int, size.split('x'))
-            ref_img = ref_images[0]
-            if ref_img.size != (w, h):
-                ref_img = ref_img.resize((w, h), Image.LANCZOS)
-            image_bytes = self._pil_to_png_bytes(ref_img)
-            image_file = BytesIO(image_bytes)
-            image_file.name = 'image.png'
-            logger.debug("%s: images.edit, size=%s", self.model, size)
-            kwargs = dict(model=self.model, image=image_file, prompt=prompt, n=1, size=size)
+            image_files = []
+            for idx, source_image in enumerate(ref_images):
+                prepared_image = source_image
+                if idx == 0 and source_image.size != (w, h):
+                    prepared_image = source_image.resize((w, h), Image.LANCZOS)
+                image_file = BytesIO(self._pil_to_png_bytes(prepared_image))
+                image_file.name = 'current_page.png' if idx == 0 else f'user_reference_{idx}.png'
+                image_files.append(image_file)
+
+            image_payload = image_files[0] if len(image_files) == 1 else image_files
+            logger.debug(
+                "%s: images.edit, size=%s, input_images=%d",
+                self.model,
+                size,
+                len(image_files),
+            )
+            kwargs = dict(model=self.model, image=image_payload, prompt=prompt, n=1, size=size)
             if quality:
                 kwargs['quality'] = quality
             if response_format:

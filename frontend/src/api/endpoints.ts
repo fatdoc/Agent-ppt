@@ -1,6 +1,60 @@
 import { apiClient, getAuthHeaders } from './client';
-import type { Project, Task, ApiResponse, CreateProjectRequest, Page } from '@/types';
+import type { Project, Task, ApiResponse, CreateProjectRequest, Page, CreditAccount, CreditEstimate, CreditLedgerEntry, GenerationMode, HarnessTemplate } from '@/types';
 import type { Settings } from '../types/index';
+
+export interface AgentModeCreatePlanRequest {
+  topic: string;
+  audience: string;
+  page_count: number;
+  style?: string;
+  generation_mode?: GenerationMode;
+  harness_template?: HarnessTemplate;
+  harness_payload?: Record<string, unknown>;
+}
+
+export interface AgentModeDeckVersion {
+  deck_version_id: string;
+  project_id: string;
+  status: string;
+  deck_plan: Record<string, any>;
+  visual_system?: Record<string, any> | null;
+  slides: Array<Record<string, any>>;
+}
+
+export const createAgentModePlan = async (data: AgentModeCreatePlanRequest): Promise<ApiResponse<AgentModeDeckVersion>> => {
+  const response = await apiClient.post<ApiResponse<AgentModeDeckVersion>>('/api/agent-mode/plans', data);
+  return response.data;
+};
+
+export const getAgentModePlan = async (projectId: string, deckVersionId: string): Promise<ApiResponse<AgentModeDeckVersion>> => {
+  const response = await apiClient.get<ApiResponse<AgentModeDeckVersion>>(`/api/agent-mode/projects/${projectId}/deck-versions/${deckVersionId}`);
+  return response.data;
+};
+
+export const updateAgentSlideContent = async (projectId: string, deckVersionId: string, slideVersionId: string, slidePlan: Record<string, any>): Promise<ApiResponse<Record<string, any>>> => {
+  const response = await apiClient.put<ApiResponse<Record<string, any>>>(`/api/agent-mode/projects/${projectId}/deck-versions/${deckVersionId}/slides/${slideVersionId}/content`, { slide_plan: slidePlan });
+  return response.data;
+};
+
+export const updateAgentSlideVisualPlan = async (projectId: string, deckVersionId: string, slideVersionId: string, visualPlan: Record<string, any>): Promise<ApiResponse<Record<string, any>>> => {
+  const response = await apiClient.put<ApiResponse<Record<string, any>>>(`/api/agent-mode/projects/${projectId}/deck-versions/${deckVersionId}/slides/${slideVersionId}/visual-plan`, { visual_plan: visualPlan });
+  return response.data;
+};
+
+export const setAgentSlideLock = async (projectId: string, deckVersionId: string, slideVersionId: string, locked: boolean): Promise<ApiResponse<Record<string, any>>> => {
+  const response = await apiClient.post<ApiResponse<Record<string, any>>>(`/api/agent-mode/projects/${projectId}/deck-versions/${deckVersionId}/slides/${slideVersionId}/lock`, { locked });
+  return response.data;
+};
+
+export const generateAgentStylePreview = async (projectId: string, deckVersionId: string, slideVersionIds?: string[]): Promise<ApiResponse<{ task_id: string; generation_jobs: Array<Record<string, any>>; page_ids: string[] }>> => {
+  const response = await apiClient.post<ApiResponse<{ task_id: string; generation_jobs: Array<Record<string, any>>; page_ids: string[] }>>(`/api/agent-mode/projects/${projectId}/deck-versions/${deckVersionId}/style-preview`, { slide_version_ids: slideVersionIds });
+  return response.data;
+};
+
+export const generateAgentRemainingSlides = async (projectId: string, deckVersionId: string): Promise<ApiResponse<{ task_id: string; generation_jobs: Array<Record<string, any>>; page_ids: string[] }>> => {
+  const response = await apiClient.post<ApiResponse<{ task_id: string; generation_jobs: Array<Record<string, any>>; page_ids: string[] }>>(`/api/agent-mode/projects/${projectId}/deck-versions/${deckVersionId}/generate-remaining`, {});
+  return response.data;
+};
 
 // ===== 访问口令 API =====
 
@@ -8,6 +62,7 @@ export interface AuthUser {
   id: string;
   username: string;
   email?: string | null;
+  is_admin?: boolean;
   created_at?: string;
 }
 
@@ -50,6 +105,73 @@ export const logout = async (): Promise<ApiResponse> => {
   return response.data;
 };
 
+// ===== 开放 API 密钥管理 =====
+
+export interface ApiKeyRecord {
+  id: string;
+  name: string;
+  prefix: string;
+  scopes: string[];
+  is_active: boolean;
+  expires_at?: string | null;
+  last_used_at?: string | null;
+  created_at: string;
+  revoked_at?: string | null;
+}
+
+export interface CreatedApiKey {
+  api_key: ApiKeyRecord;
+  key: string;
+  warning: string;
+}
+
+export const createApiKey = async (
+  name: string,
+  expiresInDays?: number
+): Promise<ApiResponse<CreatedApiKey>> => {
+  const response = await apiClient.post<ApiResponse<CreatedApiKey>>('/api/api-keys', {
+    name,
+    scopes: ['ppt:generate'],
+    ...(expiresInDays ? { expires_in_days: expiresInDays } : {}),
+  });
+  return response.data;
+};
+
+export const listApiKeys = async (): Promise<ApiResponse<{ api_keys: ApiKeyRecord[] }>> => {
+  const response = await apiClient.get<ApiResponse<{ api_keys: ApiKeyRecord[] }>>('/api/api-keys');
+  return response.data;
+};
+
+export const revokeApiKey = async (apiKeyId: string): Promise<ApiResponse<{ api_key: ApiKeyRecord }>> => {
+  const response = await apiClient.delete<ApiResponse<{ api_key: ApiKeyRecord }>>(`/api/api-keys/${apiKeyId}`);
+  return response.data;
+};
+
+export const getMyCredits = async (): Promise<ApiResponse<{
+  account: CreditAccount;
+  recent_entries: CreditLedgerEntry[];
+  pricing: Record<string, any>;
+}>> => {
+  const response = await apiClient.get<ApiResponse<{
+    account: CreditAccount;
+    recent_entries: CreditLedgerEntry[];
+    pricing: Record<string, any>;
+  }>>('/api/credits/me');
+  return response.data;
+};
+
+export const estimateCredits = async (data: {
+  operation: string;
+  project_id?: string;
+  page_count?: number;
+  reference_page_count?: number;
+  target_page_count?: number;
+  text?: string;
+}): Promise<ApiResponse<{ estimate: CreditEstimate }>> => {
+  const response = await apiClient.post<ApiResponse<{ estimate: CreditEstimate }>>('/api/credits/estimate', data);
+  return response.data;
+};
+
 export const checkAccessCode = async (): Promise<ApiResponse<{ enabled: boolean }>> => {
   const response = await apiClient.get<ApiResponse<{ enabled: boolean }>>('/api/access-code/check');
   return response.data;
@@ -80,6 +202,12 @@ export const createProject = async (data: CreateProjectRequest): Promise<ApiResp
     outline_text: data.outline_text,
     description_text: data.description_text,
     template_style: data.template_style,
+    generation_mode: data.generation_mode,
+    harness_template: data.harness_template,
+    harness_payload: data.harness_payload,
+    visual_strategy: data.visual_strategy,
+    external_style_skill_id: data.external_style_skill_id,
+    external_style_payload: data.external_style_payload,
     image_aspect_ratio: data.image_aspect_ratio,
     no_think_options: data.no_think_options,
   });
@@ -760,9 +888,9 @@ export const exportEditablePPTX = async (
   projectId: string,
   filename?: string,
   pageIds?: string[]
-): Promise<ApiResponse<{ task_id: string }>> => {
+): Promise<ApiResponse<{ task_id: string; credit_estimate?: CreditEstimate }>> => {
   const response = await apiClient.post<
-    ApiResponse<{ task_id: string }>
+    ApiResponse<{ task_id: string; credit_estimate?: CreditEstimate }>
   >(`/api/projects/${projectId}/export/editable-pptx`, {
     filename,
     page_ids: pageIds
@@ -1310,11 +1438,63 @@ export const getStoredOutputLanguage = async (): Promise<OutputLanguage> => {
   }
 };
 
+export interface AdminManagedUser {
+  id: string;
+  username: string;
+  email?: string | null;
+  is_admin: boolean;
+  created_at?: string;
+}
+
 /**
  * 获取系统设置
  */
 export const getSettings = async (): Promise<ApiResponse<Settings>> => {
   const response = await apiClient.get<ApiResponse<Settings>>('/api/settings');
+  return response.data;
+};
+
+/**
+ * 管理员：列出可管理的用户
+ */
+export const listAdminManagedUsers = async (): Promise<ApiResponse<{ users: AdminManagedUser[] }>> => {
+  const response = await apiClient.get<ApiResponse<{ users: AdminManagedUser[] }>>('/api/settings/admin/users');
+  return response.data;
+};
+
+/**
+ * 管理员：获取指定用户的模型配置
+ */
+export const getAdminUserSettings = async (userId: string): Promise<ApiResponse<Settings>> => {
+  const response = await apiClient.get<ApiResponse<Settings>>(`/api/settings/admin/users/${userId}`);
+  return response.data;
+};
+
+/**
+ * 管理员：更新指定用户的模型配置
+ */
+export const updateAdminUserSettings = async (
+  userId: string,
+  data: Partial<Omit<Settings, 'id' | 'api_key_length' | 'mineru_token_length' | 'baidu_api_key_length' | 'elevenlabs_api_key_length' | 'created_at' | 'updated_at'>> & {
+    api_key?: string;
+    mineru_token?: string;
+    baidu_api_key?: string;
+    elevenlabs_api_key?: string;
+    text_api_key?: string;
+    image_api_key?: string;
+    image_caption_api_key?: string;
+    lazyllm_api_keys?: Record<string, string>;
+  }
+): Promise<ApiResponse<Settings>> => {
+  const response = await apiClient.put<ApiResponse<Settings>>(`/api/settings/admin/users/${userId}`, data);
+  return response.data;
+};
+
+/**
+ * 管理员：重置指定用户的模型配置
+ */
+export const resetAdminUserAiConfig = async (userId: string): Promise<ApiResponse<Settings>> => {
+  const response = await apiClient.post<ApiResponse<Settings>>(`/api/settings/admin/users/${userId}/reset-ai-config`);
   return response.data;
 };
 

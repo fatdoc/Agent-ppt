@@ -25,6 +25,12 @@ class Project(db.Model):
     creation_type = db.Column(db.String(20), nullable=False, default='idea')  # idea|outline|descriptions
     template_image_path = db.Column(db.String(500), nullable=True)
     template_style = db.Column(db.Text, nullable=True)  # 风格描述文本（无模板图模式）
+    generation_mode = db.Column(db.String(30), nullable=False, server_default='fast', default='fast')
+    harness_template = db.Column(db.String(80), nullable=True)
+    harness_payload = db.Column(db.Text, nullable=True)
+    visual_strategy = db.Column(db.String(30), nullable=False, server_default='native', default='native')
+    external_style_skill_id = db.Column(db.String(128), nullable=True)
+    external_style_payload = db.Column(db.Text, nullable=True)
     ppt_to_ppt_blueprint = db.Column(db.Text, nullable=True)
     # 导出设置
     export_extractor_method = db.Column(db.String(50), nullable=True, default='hybrid')  # 组件提取方法: mineru, hybrid
@@ -70,6 +76,12 @@ class Project(db.Model):
             'creation_type': self.creation_type,
             'template_image_url': f'/files/{self.id}/template/{self.template_image_path.split("/")[-1]}' if self.template_image_path else None,
             'template_style': self.template_style,
+            'generation_mode': self.generation_mode or 'fast',
+            'harness_template': self.harness_template,
+            'harness_payload': self.get_harness_payload(),
+            'visual_strategy': self.visual_strategy or 'native',
+            'external_style_skill_id': self.external_style_skill_id,
+            'external_style_payload': self.get_external_style_payload(),
             'ppt_to_ppt_blueprint': self.get_ppt_to_ppt_blueprint(),
             'export_extractor_method': self.export_extractor_method or 'hybrid',
             'export_inpaint_method': self.export_inpaint_method or 'hybrid',
@@ -102,6 +114,42 @@ class Project(db.Model):
             self.ppt_to_ppt_blueprint = json.dumps(data, ensure_ascii=False)
         else:
             self.ppt_to_ppt_blueprint = None
+
+    def get_harness_payload(self):
+        """Parse harness payload JSON."""
+        if self.harness_payload:
+            try:
+                return json.loads(self.harness_payload)
+            except json.JSONDecodeError:
+                return self.harness_payload
+        return None
+
+    def set_harness_payload(self, data):
+        """Store harness payload as JSON text."""
+        if data is None or data == "":
+            self.harness_payload = None
+        elif isinstance(data, str):
+            self.harness_payload = data
+        else:
+            self.harness_payload = json.dumps(data, ensure_ascii=False)
+
+    def get_external_style_payload(self):
+        """Parse external style skill payload JSON."""
+        if self.external_style_payload:
+            try:
+                return json.loads(self.external_style_payload)
+            except json.JSONDecodeError:
+                return self.external_style_payload
+        return None
+
+    def set_external_style_payload(self, data):
+        """Store external style skill payload as JSON text."""
+        if data is None or data == "":
+            self.external_style_payload = None
+        elif isinstance(data, str):
+            self.external_style_payload = data
+        else:
+            self.external_style_payload = json.dumps(data, ensure_ascii=False)
     
     def __repr__(self):
         return f'<Project {self.id}: {self.status}>'

@@ -127,6 +127,39 @@ def _get_cached_caption_provider(model: str) -> TextProvider:
         return _caption_provider_cache[cache_key]
 
 
+def create_ai_service() -> AIService:
+    """Create a request/task-scoped service without replacing the singleton.
+
+    Long-running background jobs keep this concrete service instance, so a
+    settings change or another request cannot swap the providers underneath an
+    export that is already running.
+    """
+    from config import get_config
+    config = get_config()
+
+    if has_app_context() and current_app and hasattr(current_app, "config"):
+        text_model = current_app.config.get("TEXT_MODEL", config.TEXT_MODEL)
+        image_model = current_app.config.get("IMAGE_MODEL", config.IMAGE_MODEL)
+        caption_model = current_app.config.get("IMAGE_CAPTION_MODEL", config.IMAGE_CAPTION_MODEL)
+    else:
+        text_model = config.TEXT_MODEL
+        image_model = config.IMAGE_MODEL
+        caption_model = config.IMAGE_CAPTION_MODEL
+
+    service = AIService(
+        text_provider=_get_cached_text_provider(text_model),
+        image_provider=_get_cached_image_provider(image_model),
+        caption_provider=_get_cached_caption_provider(caption_model),
+    )
+    logger.info(
+        "Created task-scoped AIService with models: text=%s, image=%s, caption=%s",
+        text_model,
+        image_model,
+        caption_model,
+    )
+    return service
+
+
 def get_ai_service(force_new: bool = False) -> AIService:
     """
     Get the singleton AIService instance with optimized provider caching
@@ -157,33 +190,7 @@ def get_ai_service(force_new: bool = False) -> AIService:
             # Double-check locking pattern
             if _ai_service_instance is None:
                 logger.info("Initializing AIService singleton with provider caching")
-                
-                # Get model names from Flask config or use defaults
-                from config import get_config
-                config = get_config()
-                
-                if has_app_context() and current_app and hasattr(current_app, "config"):
-                    text_model = current_app.config.get("TEXT_MODEL", config.TEXT_MODEL)
-                    image_model = current_app.config.get("IMAGE_MODEL", config.IMAGE_MODEL)
-                    caption_model = current_app.config.get("IMAGE_CAPTION_MODEL", config.IMAGE_CAPTION_MODEL)
-                else:
-                    text_model = config.TEXT_MODEL
-                    image_model = config.IMAGE_MODEL
-                    caption_model = config.IMAGE_CAPTION_MODEL
-
-                # Get cached providers
-                text_provider = _get_cached_text_provider(text_model)
-                image_provider = _get_cached_image_provider(image_model)
-                caption_provider = _get_cached_caption_provider(caption_model)
-
-                # Create AIService with cached providers
-                _ai_service_instance = AIService(
-                    text_provider=text_provider,
-                    image_provider=image_provider,
-                    caption_provider=caption_provider
-                )
-
-                logger.info(f"AIService singleton created with models: text={text_model}, image={image_model}, caption={caption_model}")
+                _ai_service_instance = create_ai_service()
     
     return _ai_service_instance
 

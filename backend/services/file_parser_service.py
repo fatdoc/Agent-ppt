@@ -74,6 +74,7 @@ class FileParserService:
                  local_return_images: bool = None,
                  local_response_format_zip: bool = None,
                  local_return_original_file: bool = None,
+                 caption_provider = None,
                  **_ignored_kwargs,
                  ):
         """
@@ -110,7 +111,9 @@ class FileParserService:
         
         self._image_caption_model = image_caption_model
         self._provider_format = _get_ai_provider_format(provider_format)
-        self._caption_provider = None
+        # Long-running exports can pin the request's provider here. This keeps
+        # MinerU image captions on the same model/key as text-style extraction.
+        self._caption_provider = caption_provider
 
     @staticmethod
     def normalize_mineru_api_base(value: str | None) -> str:

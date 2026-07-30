@@ -26,6 +26,7 @@ class Task(db.Model):
     # Relationships
     project = db.relationship('Project', back_populates='tasks')
     user = db.relationship('User')
+    credit_entries = db.relationship('CreditLedger', back_populates='task', lazy='select')
     
     def get_progress(self):
         """Parse progress from JSON string"""

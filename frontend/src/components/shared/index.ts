@@ -30,3 +30,4 @@ export { AccessCodeGuard } from './AccessCodeGuard';
 export { AuthGuard } from './AuthGuard';
 export { TextStyleSelector } from './TextStyleSelector';
 export { Pagination } from './Pagination';
+export { CreditEstimateBadge, estimateCredits } from './CreditEstimateBadge';

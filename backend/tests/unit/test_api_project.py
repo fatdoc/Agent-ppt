@@ -51,6 +51,69 @@ class TestProjectCreate:
         
         assert response.status_code in [400, 422]
 
+    def test_create_project_accepts_external_visual_strategy(self, client):
+        """测试创建项目时可保存外部视觉策略"""
+        response = client.post('/api/projects', json={
+            'creation_type': 'idea',
+            'idea_prompt': '生成一份关于AI的PPT',
+            'template_style': '原生商务风',
+            'visual_strategy': 'external_skill',
+            'external_style_skill_id': 'ppt-style-pro',
+            'external_style_payload': {'style_prompt': '外部 Skill 黑金风格'},
+        })
+
+        data = assert_success_response(response, 201)
+        project_id = data['data']['project_id']
+
+        get_response = client.get(f'/api/projects/{project_id}')
+        project = assert_success_response(get_response)['data']
+
+        assert project['visual_strategy'] == 'external_skill'
+        assert project['external_style_skill_id'] == 'ppt-style-pro'
+        assert project['external_style_payload'] == {'style_prompt': '外部 Skill 黑金风格'}
+
+    def test_create_project_rejects_empty_external_visual_strategy(self, client):
+        """测试外部视觉策略必须提供 Skill ID 或 payload"""
+        response = client.post('/api/projects', json={
+            'creation_type': 'idea',
+            'idea_prompt': '测试',
+            'visual_strategy': 'external_skill',
+        })
+
+        assert response.status_code in [400, 422]
+
+    def test_create_project_accepts_harness_generation_mode(self, client):
+        """测试 Harness 生成模式独立于视觉策略保存"""
+        response = client.post('/api/projects', json={
+            'creation_type': 'idea',
+            'idea_prompt': '生成一份关于AI的PPT',
+            'template_style': '稳重科技风',
+            'generation_mode': 'harness',
+            'harness_template': 'paper_operators',
+            'visual_strategy': 'native',
+        })
+
+        data = assert_success_response(response, 201)
+        project_id = data['data']['project_id']
+
+        get_response = client.get(f'/api/projects/{project_id}')
+        project = assert_success_response(get_response)['data']
+
+        assert project['generation_mode'] == 'harness'
+        assert project['harness_template'] == 'paper_operators'
+        assert project['template_style'] == '稳重科技风'
+        assert project['visual_strategy'] == 'native'
+
+    def test_create_project_rejects_paper_operators_visual_strategy(self, client):
+        """测试 paper_operators 不再是视觉策略"""
+        response = client.post('/api/projects', json={
+            'creation_type': 'idea',
+            'idea_prompt': '测试',
+            'visual_strategy': 'paper_operators',
+        })
+
+        assert response.status_code in [400, 422]
+
 
 class TestProjectGet:
     """项目获取测试"""
@@ -223,7 +286,6 @@ class TestNoThinkProject:
             'idea_prompt': 'AI 工具入门',
             'no_think_options': {
                 'scenario': '内部培训',
-                'color_tone': '蓝绿色',
                 'density': '简洁',
                 'page_count': '5页',
                 'style_template': '现代商务',
@@ -240,7 +302,25 @@ class TestNoThinkProject:
         assert project['creation_type'] == 'no_think'
         assert 'No Think PPT 生成需求' in project['idea_prompt']
         assert '用途场景：内部培训' in project['idea_prompt']
+        assert '色调感觉' not in project['idea_prompt']
         assert '页数倾向：5页' in project['idea_prompt']
+        assert project['template_style'] == '现代商务'
+
+    def test_no_think_explicit_style_source_beats_quick_harness_tendency(self, client):
+        response = client.post('/api/projects', json={
+            'creation_type': 'no_think',
+            'idea_prompt': 'AI 工具入门',
+            'template_style': '用户指定的黑金发布会风格',
+            'no_think_options': {
+                'style_template': '商务演示',
+            },
+        })
+
+        data = assert_success_response(response, 201)
+        project = assert_success_response(client.get(f"/api/projects/{data['data']['project_id']}"))['data']
+
+        assert project['template_style'] == '用户指定的黑金发布会风格'
+        assert '风格模板：商务演示' not in project['idea_prompt']
 
     def test_generate_outline_for_no_think_generates_descriptions(self, client, monkeypatch):
         from services.input_generation_service import InputGenerationResult

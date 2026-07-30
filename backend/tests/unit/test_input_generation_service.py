@@ -80,6 +80,33 @@ def test_build_outline_dispatches_description_input():
     ai.parse_description_to_outline.assert_called_once()
 
 
+def test_build_outline_uses_single_streamed_call_for_no_think():
+    from services.input_generation_service import InputGenerationOptions, InputGenerationService
+
+    ai = MagicMock()
+    ai.generate_outline_stream.return_value = iter([
+        {"title": "封面", "points": ["主题"]},
+        {"title": "方案", "points": ["路径"]},
+        {"__stream_complete__": True},
+    ])
+    service = InputGenerationService(ai_service=ai)
+    project_context = object()
+    options = InputGenerationOptions(
+        input_kind="no_think",
+        target_depth="outline_and_descriptions",
+        language="zh",
+    )
+
+    result = service.build_outline("no_think", project_context, options)
+
+    assert result == [
+        {"title": "封面", "points": ["主题"]},
+        {"title": "方案", "points": ["路径"]},
+    ]
+    ai.generate_outline_stream.assert_called_once_with(project_context, language="zh")
+    ai.generate_outline.assert_not_called()
+
+
 def test_build_outline_prefers_provided_outline_for_description_input():
     from services.input_generation_service import InputGenerationOptions, InputGenerationService
 
@@ -150,6 +177,48 @@ def test_build_descriptions_splits_common_page_headers_without_ai():
         {"text": "页面标题：方案\n展示目标和路径。"},
     ]
     ai.parse_description_to_page_descriptions.assert_not_called()
+
+
+def test_build_descriptions_batches_all_generated_pages_into_one_model_call():
+    from services.input_generation_service import InputGenerationOptions, InputGenerationService
+
+    outline = [
+        {"title": "封面", "points": ["主题"]},
+        {"title": "方案", "points": ["路径"]},
+    ]
+    ai = MagicMock()
+    ai.generate_descriptions_stream.return_value = iter([
+        {"page_index": 0, "description_text": "封面描述"},
+        {
+            "page_index": 1,
+            "description_text": "方案描述",
+            "extra_fields": {"排版布局": "左右分栏"},
+        },
+        {"__stream_complete__": True},
+    ])
+    service = InputGenerationService(ai_service=ai)
+    project_context = object()
+    options = InputGenerationOptions(
+        input_kind="no_think",
+        target_depth="outline_and_descriptions",
+        language="zh",
+        detail_level="concise",
+    )
+
+    result = service.build_descriptions("no_think", outline, project_context, options)
+
+    assert result == [
+        {"text": "封面描述"},
+        {"text": "方案描述", "extra_fields": {"排版布局": "左右分栏"}},
+    ]
+    ai.generate_descriptions_stream.assert_called_once_with(
+        project_context,
+        outline,
+        outline,
+        language="zh",
+        detail_level="concise",
+    )
+    ai.generate_page_description.assert_not_called()
 
 
 @pytest.fixture

@@ -15,12 +15,12 @@ import type { Project } from '@/types';
 // 页面特有翻译 - AI 可以直接看到所有文案
 const historyI18n = {
   zh: {
-    home: { title: '启发', actions: { createProject: '创建新项目' } },
+    home: { title: '兰台', actions: { createProject: '创建新项目' } },
     nav: { home: '主页' },
     settings: { language: { label: '界面语言' }, theme: { light: '浅色', dark: '深色' } },
     history: {
       title: '历史项目',
-      subtitle: '查看和管理你的所有项目',
+      subtitle: '查看和管理你的 Harness 交付项目',
       noProjects: '暂无历史项目',
       createFirst: '创建你的第一个项目开始使用吧',
       selectedCount: '已选择 {{count}} 项',
@@ -43,12 +43,12 @@ const historyI18n = {
     },
   },
   en: {
-    home: { title: 'Banana Slides', actions: { createProject: 'Create New Project' } },
+    home: { title: 'Lantai PPT Agent', actions: { createProject: 'Create New Project' } },
     nav: { home: 'Home' },
     settings: { language: { label: 'Interface Language' }, theme: { light: 'Light', dark: 'Dark' } },
     history: {
       title: 'Project History',
-      subtitle: 'View and manage all your projects',
+      subtitle: 'View and manage all your harness delivery projects',
       noProjects: 'No projects yet',
       createFirst: 'Create your first project to get started',
       selectedCount: '{{count}} selected',

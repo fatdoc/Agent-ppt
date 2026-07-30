@@ -30,7 +30,7 @@ const statusI18n = {
 };
 
 interface StatusBadgeProps {
-  status: PageStatus;
+  status?: PageStatus;
 }
 
 const statusClassNames: Record<PageStatus, string> = {
@@ -55,8 +55,8 @@ const statusLabelKeys: Record<PageStatus, string> = {
 
 export const StatusBadge: React.FC<StatusBadgeProps> = ({ status }) => {
   const t = useT(statusI18n);
-  const className = statusClassNames[status];
-  const labelKey = statusLabelKeys[status];
+  const className = status ? statusClassNames[status] : undefined;
+  const labelKey = status ? statusLabelKeys[status] : undefined;
   
   return (
     <span
@@ -67,7 +67,7 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status }) => {
         className
       )}
     >
-      {t(labelKey)}
+      {t(labelKey || 'status.unknown')}
     </span>
   );
 };

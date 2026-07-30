@@ -36,6 +36,24 @@ def _get_file_type(filename: str) -> str:
     return 'unknown'
 
 
+def _safe_reference_filename(original_filename: str) -> str:
+    """Return a filesystem-safe filename while preserving the original extension."""
+    file_type = _get_file_type(original_filename)
+    filename = secure_filename(original_filename)
+
+    if file_type != 'unknown':
+        expected_suffix = f'.{file_type}'
+        if not filename.lower().endswith(expected_suffix):
+            stem = secure_filename(original_filename.rsplit('.', 1)[0]).strip('._-')
+            if not stem:
+                stem = 'file'
+            filename = f"{stem}{expected_suffix}"
+    elif not filename:
+        filename = f"file_{uuid.uuid4().hex[:8]}"
+
+    return filename
+
+
 def _parse_file_async(file_id: str, file_path: str, filename: str, app):
     """
     Parse file asynchronously in background
@@ -168,16 +186,7 @@ def upload_reference_file():
         
         # Secure filename for filesystem (but keep original for database)
         # secure_filename removes non-ASCII chars, so we need to handle Chinese characters
-        filename = secure_filename(original_filename)
-        
-        # If secure_filename removed everything (e.g., all Chinese chars), use a fallback
-        if not filename or filename == '':
-            # Extract extension from original filename
-            ext = _get_file_type(original_filename)
-            if ext == 'unknown':
-                ext = 'file'
-            filename = f"file_{uuid.uuid4().hex[:8]}.{ext}"
-            logger.warning(f"Original filename '{original_filename}' was sanitized to '{filename}'")
+        filename = _safe_reference_filename(original_filename)
         
         # Create upload directory structure
         upload_folder = current_app.config['UPLOAD_FOLDER']

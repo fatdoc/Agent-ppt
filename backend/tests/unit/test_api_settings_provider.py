@@ -69,3 +69,36 @@ def test_verify_uses_configured_text_model():
     assert data['data']['available'] is True
     mock_get_provider.assert_called_once_with(model='deepseek-chat')
     mock_provider.generate_text.assert_called_once()
+
+
+def test_vendor_source_with_explicit_gateway_uses_timeout_capable_openai_provider():
+    """A custom /v1 gateway must not be discarded when source is qwen."""
+    from services.ai_providers import _get_model_type_provider_config
+
+    app = Flask(__name__)
+    app.config.update(
+        TEXT_MODEL_SOURCE='qwen',
+        TEXT_API_KEY='test-key',
+        TEXT_API_BASE='https://gateway.example/v1',
+    )
+
+    with app.app_context():
+        provider_config = _get_model_type_provider_config('text')
+
+    assert provider_config == {
+        'format': 'openai',
+        'api_key': 'test-key',
+        'api_base': 'https://gateway.example/v1',
+    }
+
+
+def test_vendor_source_without_explicit_gateway_keeps_lazyllm_provider():
+    from services.ai_providers import _get_model_type_provider_config
+
+    app = Flask(__name__)
+    app.config.update(TEXT_MODEL_SOURCE='qwen')
+
+    with app.app_context():
+        provider_config = _get_model_type_provider_config('text')
+
+    assert provider_config == {'format': 'lazyllm', 'source': 'qwen'}

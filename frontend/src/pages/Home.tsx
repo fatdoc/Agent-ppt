@@ -1,21 +1,22 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Sparkles, FileText, FileEdit, ImagePlus, Paperclip, Palette, Lightbulb, Search, Settings, FolderOpen, HelpCircle, Sun, Moon, Globe, Monitor, ChevronDown, Upload, RefreshCw } from 'lucide-react';
-import { Button, Card, useToast, MaterialGeneratorModal, MaterialCenterModal, MaterialSelector, ReferenceFileList, ReferenceFileSelector, FilePreviewModal, Footer, GithubRepoCard, TextStyleSelector } from '@/components/shared';
+import { Sparkles, FileText, FileEdit, ImagePlus, Paperclip, Palette, Lightbulb, Settings, FolderOpen, HelpCircle, Sun, Moon, Globe, Monitor, ChevronDown, Upload, RefreshCw } from 'lucide-react';
+import { Button, useToast, MaterialGeneratorModal, MaterialCenterModal, MaterialSelector, ReferenceFileList, ReferenceFileSelector, FilePreviewModal, Footer, TextStyleSelector } from '@/components/shared';
 import { MarkdownTextarea, type MarkdownTextareaRef } from '@/components/shared/MarkdownTextarea';
 import { TemplateSelector, getTemplateFile } from '@/components/shared/TemplateSelector';
+import { AgentModePanel } from '@/components/agent';
 import { listUserTemplates, type UserTemplate, uploadReferenceFile, type ReferenceFile, associateFileToProject, triggerFileParse, associateMaterialsToProject, createPptRenovationProject, createPptToPptProject } from '@/api/endpoints';
 import { useProjectStore } from '@/store/useProjectStore';
 import { devLog } from '@/utils/logger';
 import { useTheme } from '@/hooks/useTheme';
 import { useImagePaste, buildMaterialsMarkdown } from '@/hooks/useImagePaste';
-import type { Material } from '@/types';
+import type { GenerationMode, HarnessTemplate, Material } from '@/types';
 import { useT } from '@/hooks/useT';
 import { ASPECT_RATIO_OPTIONS } from '@/config/aspectRatio';
 
-type CreationType = 'no_think' | 'idea' | 'outline' | 'description' | 'ppt_to_ppt' | 'ppt_renovation';
-type VisibleCreationType = 'no_think' | 'outline' | 'ppt_to_ppt' | 'ppt_renovation';
+type CreationType = 'agent' | 'no_think' | 'idea' | 'outline' | 'description' | 'ppt_to_ppt' | 'ppt_renovation';
+type VisibleCreationType = 'agent' | 'no_think' | 'outline' | 'ppt_to_ppt' | 'ppt_renovation';
 type RenovationStyleSource = 'original' | 'template';
 type PptToPptStyleSource = 'original' | 'template';
 
@@ -24,9 +25,7 @@ const ALLOWED_DOC_EXTENSIONS = ['pdf', 'docx', 'pptx', 'doc', 'ppt', 'xlsx', 'xl
 
 const NO_THINK_SELECT_OPTIONS = {
   scenario: ['工作汇报', '产品发布', '教学课件', '个人展示'],
-  colorTone: ['商务蓝', '科技紫', '温暖米', '清新绿'],
   density: ['精炼要点版', '详细说明版'],
-  pageCount: ['短(5-7页)', '中(10-12页)', '长(15页以上)'],
   styleTemplate: ['商务演示', '极简展示', '创意渐变'],
 };
 
@@ -42,44 +41,62 @@ const homeI18n = {
       theme: { label: '主题模式', light: '浅色', dark: '深色', system: '跟随系统' }
     },
     home: {
-      title: '启发',
-      subtitle: 'Vibe your slides like vibe coding',
-      tagline: '',
+      title: '兰台',
+      subtitle: '把 PPT 生产变成可接入、可编排、可校验、可交付的 Harness 工程',
+      tagline: '兰台·PPT Agent',
       features: {
-        oneClick: '一句话生成 PPT',
-        naturalEdit: '自然语言修改',
-        regionEdit: '指定区域编辑',
-        export: '一键导出 PPTX/PDF',
+        oneClick: '材料接入 Harness',
+        naturalEdit: 'Agent 编排结构',
+        regionEdit: '风格验证 Gate',
+        export: '稳定交付 PPTX/PDF',
       },
       tabs: {
-        no_think: 'No Think PPT',
+        no_think: '主题生成',
+        agent: 'Harness Agent',
         idea: '一句话生成',
-        outline: '从内容生成 PPT',
+        outline: '输入大纲',
         description: '从描述生成',
-        ppt_to_ppt: '借鉴优秀 PPT 生成',
+        ppt_to_ppt: 'PPT 仿写',
         ppt_renovation: 'PPT 翻新',
       },
       tabDescriptions: {
-        no_think: '输入主题和偏好，AI 自动生成大纲和页面描述',
+        no_think: '输入主题和约束，兰台自动搭建结构、页面描述与视觉初稿',
+        agent: '先生成可编辑计划和风格验证页，确认 Gate 后再批量生成图片',
         idea: '输入你的想法，AI 将为你生成完整的 PPT',
         outline: '已有大纲？直接粘贴，逐页描述可选填写，也可以稍后由 AI 生成',
         description: '已有完整描述？AI 将自动解析并直接生成图片，跳过大纲步骤',
-        ppt_to_ppt: '上传参考 PPT，再输入你的内容，AI 学习结构和表达方式生成新 PPT',
-        ppt_renovation: '上传已有的 PDF/PPTX 文件，AI 将解析内容并重新生成翻新后的PPT',
+        ppt_to_ppt: '上传参考 PPT，再输入你的内容，兰台将结构、表达和视觉约束接入生成链路',
+        ppt_renovation: '上传已有的 PDF/PPTX 文件，兰台解析旧稿并按 Harness 链路重构页面',
       },
       placeholders: {
-        no_think: '例如：AI 工具入门培训',
+        no_think: '例如：AI 工具入门培训，要求先讲价值再讲操作',
+        agent: '例如：面向投资人的 AI 教育产品融资路演',
         idea: '例如：生成一份关于 AI 发展史的演讲 PPT',
         outline: '粘贴你的 PPT 大纲（必填）...',
         description: '粘贴你的完整页面描述...',
-        ppt_to_ppt: '粘贴你的项目内容、工作材料或比赛说明...',
+        ppt_to_ppt: '粘贴你的项目内容、工作材料、比赛说明或交付约束...',
       },
       content: {
         descriptionLabel: '逐页描述（选填）',
         descriptionPlaceholder: '如果你已经有每页内容、布局、图表或素材说明，可以直接填到这里',
         descriptionHint: '逐页描述用于补充每页内容、布局、图表和素材说明；全局视觉风格由上方风格模板控制。',
-        emptyOutlineTip: '还没有大纲？可以使用 NoThinkPPT 先生成完整结构',
+        emptyOutlineTip: '还没有大纲？可以先用“主题生成”自动生成完整结构',
         generateDescriptions: '根据大纲生成逐页描述',
+      },
+      generation: {
+        title: '生成管线',
+        fast: '标准生成',
+        fastHint: '直接进入大纲、描述和生图流程，速度更快',
+        harness: '结构化 Harness',
+        harnessHint: '增加计划、校验和页面组织，质量更稳',
+        templateLabel: 'Harness 场景包',
+        packs: {
+          paper_operators: { label: '纸片人 Paper Operators', hint: '隐喻执行者叙事，默认纸模舞台视觉' },
+          lecture_deck: { label: '课程讲义', hint: '目标→概念→例题→小结的教学结构，默认讲义板书视觉' },
+          product_launch: { label: '产品发布会', hint: '产品图占主视觉的发布叙事，默认深色舞台视觉' },
+          consulting_report: { label: '咨询汇报', hint: '结论先行、图表主导，默认深蓝灰咨询版式' },
+        },
+        visualHint: '场景包视觉仅在未指定风格时兜底；模板图、文字风格或外部 Skill 会整体接管视觉，不与场景包风格混合。页面结构和质量校验始终保留。',
       },
       examples: {
         outline: '推荐输入格式（可直接复制）：\n\n第 1 页：AI 的起源\n- 1956 达特茅斯会议\n- 早期研究者的愿景\n\n第 2 页：机器学习的发展\n- 从规则驱动到数据驱动\n- 经典算法介绍\n\n第 3 页：未来展望\n- 趋势与挑战\n\n可只写页标题，AI 会按页头自动切分并转为结构化大纲；要点可选填，不影响解析。',
@@ -92,13 +109,19 @@ const homeI18n = {
       template: {
         title: '选择风格模板',
         useTextStyle: '使用文字描述风格',
+        useExternalSkill: '使用外部风格 Skill',
+        externalSkillId: 'Skill ID',
+        externalPrompt: '外部 Skill 输出',
+        externalPromptPlaceholder: '粘贴外部 Skill 生成的视觉系统、风格 prompt 或 JSON payload',
+        externalHelper: '启用后，模板图、文字风格和页面描述中的全局风格词都不会参与视觉控制。',
       },
       noThink: {
         scenario: '使用场景',
-        colorTone: '色调',
         density: '内容密度',
-        pageCount: '页数',
+        pageCount: 'PPT页数',
         styleTemplate: '风格倾向',
+        styleAuto: '不指定（按内容决定）',
+        styleControlled: '已由上方视觉来源接管，主题生成不再注入风格。',
         extraInstruction: '额外要求',
         extraPlaceholder: '例如：适合新员工，避免技术细节过深',
       },
@@ -130,6 +153,7 @@ const homeI18n = {
       messages: {
         enterContent: '请输入内容',
         filesParsing: '还有 {{count}} 个参考文件正在解析中，请等待解析完成',
+        filesParseFailed: '有 {{count}} 个参考文件解析失败，请删除或重新解析后再创建项目',
         projectCreateFailed: '项目创建失败',
         uploadingImage: '正在上传图片并识别内容...',
         imageUploadSuccess: '图片上传成功！已插入到光标位置',
@@ -148,6 +172,7 @@ const homeI18n = {
         serviceTestTip: '建议先到设置页底部进行服务测试，避免后续功能异常',
         verifying: '正在验证 API 配置...',
         verifyFailed: '请在设置页配置正确的 API Key，并在页面底部点击「服务测试」验证',
+        externalSkillMissing: '请填写外部风格 Skill ID 或外部 Skill 输出',
       },
     },
   },
@@ -161,44 +186,62 @@ const homeI18n = {
       theme: { label: 'Theme', light: 'Light', dark: 'Dark', system: 'System' }
     },
     home: {
-      title: 'Banana Slides',
-      subtitle: 'Vibe your slides like vibe coding',
-      tagline: 'AI-native PPT generator for structured visual expression',
+      title: 'Lantai',
+      subtitle: 'Turn deck production into an ingest, plan, verify, and ship harness',
+      tagline: 'Lantai PPT Agent',
       features: {
-        oneClick: 'One-click PPT generation',
-        naturalEdit: 'Natural language editing',
-        regionEdit: 'Region-specific editing',
-        export: 'Export to PPTX/PDF',
+        oneClick: 'Material ingest harness',
+        naturalEdit: 'Agent structure planning',
+        regionEdit: 'Style verification gate',
+        export: 'Stable PPTX/PDF delivery',
       },
       tabs: {
-        no_think: 'No Think PPT',
+        no_think: 'Topic Builder',
+        agent: 'Harness Agent',
         idea: 'From Idea',
-        outline: 'Generate from Content',
+        outline: 'Outline Input',
         description: 'From Description',
-        ppt_to_ppt: 'PPT to PPT',
+        ppt_to_ppt: 'PPT Rewrite',
         ppt_renovation: 'PPT Renovation',
       },
       tabDescriptions: {
-        no_think: 'Enter a topic and preferences; AI generates outline and slide descriptions automatically',
+        no_think: 'Enter a topic and constraints; Lantai builds structure, page descriptions, and a visual draft',
+        agent: 'Generate an editable plan and style preview first, then batch-generate images after the verification gate',
         idea: 'Enter your idea, AI will generate a complete PPT for you',
         outline: 'Have an outline? Paste it directly; slide descriptions are optional and can be generated later',
         description: 'Have detailed descriptions? AI will parse and generate images directly, skipping the outline step',
-        ppt_to_ppt: 'Upload a reference PPT, then enter your content; AI learns its structure and expression to generate a new deck',
-        ppt_renovation: 'Upload an existing PDF/PPTX file, AI will parse its content and regenerate the renovated PPT',
+        ppt_to_ppt: 'Upload a reference PPT, then enter your content; Lantai ingests its structure, expression, and visual constraints',
+        ppt_renovation: 'Upload an existing PDF/PPTX file; Lantai parses the legacy deck and rebuilds it through the harness',
       },
       placeholders: {
-        no_think: 'e.g., AI tools onboarding workshop',
+        no_think: 'e.g., AI tools onboarding workshop, lead with value before operations',
+        agent: 'e.g., AI education startup investor pitch',
         idea: 'e.g., Generate a presentation about the history of AI',
         outline: 'Paste your PPT outline (required)...',
         description: 'Paste your complete page descriptions...',
-        ppt_to_ppt: 'Paste your project content, work material, or competition brief...',
+        ppt_to_ppt: 'Paste your project content, work material, competition brief, or delivery constraints...',
       },
       content: {
         descriptionLabel: 'Slide descriptions (optional)',
         descriptionPlaceholder: 'Paste slide-by-slide content, layout, chart, or asset notes here',
         descriptionHint: 'Slide descriptions are for page content, layout, charts, and assets; the global visual style is controlled by the style template above.',
-        emptyOutlineTip: 'No outline yet? Use NoThinkPPT to generate a full structure first',
+        emptyOutlineTip: 'No outline yet? Use Topic Builder to generate a full structure first',
         generateDescriptions: 'Generate slide descriptions from outline',
+      },
+      generation: {
+        title: 'Generation Pipeline',
+        fast: 'Standard generation',
+        fastHint: 'Go directly into outline, descriptions, and image generation',
+        harness: 'Structured Harness',
+        harnessHint: 'Add planning, QA, and page organization for steadier quality',
+        templateLabel: 'Harness Scenario Pack',
+        packs: {
+          paper_operators: { label: 'Paper Operators', hint: 'Metaphor-operator narrative with paper-craft stage visuals by default' },
+          lecture_deck: { label: 'Lecture Deck', hint: 'Goal → concept → example → recap teaching structure, handout-style visuals by default' },
+          product_launch: { label: 'Product Launch', hint: 'Product-image-led keynote narrative, dark stage visuals by default' },
+          consulting_report: { label: 'Consulting Report', hint: 'Conclusion-first, chart-driven, slate-blue executive layout by default' },
+        },
+        visualHint: 'Pack visuals are fallback-only. A template, style text, or external Skill fully owns the visual layer without mixing pack style. Page structure and QA always stay on.',
       },
       examples: {
         outline: 'Recommended input (click to insert):\n\nPage 1: AI Origins\n- 1956 Dartmouth Conference\n- Early researchers\' vision\n\nPage 2: Evolution of Machine Learning\n- Shift from rule-based to data-driven\n- Overview of classic algorithms\n\nPage 3: Future Outlook\n- Trends and opportunities\n- Challenges and risks\n\nPage titles only is also supported. The AI will split by page headers and build structured outlines.',
@@ -211,13 +254,19 @@ const homeI18n = {
       template: {
         title: 'Select Style Template',
         useTextStyle: 'Use text description for style',
+        useExternalSkill: 'Use external style Skill',
+        externalSkillId: 'Skill ID',
+        externalPrompt: 'External Skill output',
+        externalPromptPlaceholder: 'Paste the visual system, style prompt, or JSON payload generated by the external Skill',
+        externalHelper: 'When enabled, template images, text style, and global style words in page descriptions will not control visuals.',
       },
       noThink: {
         scenario: 'Scenario',
-        colorTone: 'Color tone',
         density: 'Content density',
-        pageCount: 'Pages',
+        pageCount: 'PPT pages',
         styleTemplate: 'Style direction',
+        styleAuto: 'Unspecified (follow content)',
+        styleControlled: 'The visual source above owns style; Topic Builder will not inject another style.',
         extraInstruction: 'Extra instruction',
         extraPlaceholder: 'e.g., for new hires, keep technical details light',
       },
@@ -249,6 +298,7 @@ const homeI18n = {
       messages: {
         enterContent: 'Please enter content',
         filesParsing: '{{count}} reference file(s) are still parsing, please wait',
+        filesParseFailed: '{{count}} reference file(s) failed to parse. Delete or reparse them before creating the project',
         projectCreateFailed: 'Failed to create project',
         uploadingImage: 'Uploading and recognizing image...',
         imageUploadSuccess: 'Image uploaded! Inserted at cursor position',
@@ -267,10 +317,95 @@ const homeI18n = {
         serviceTestTip: 'Test services in Settings first to avoid issues',
         verifying: 'Verifying API configuration...',
         verifyFailed: 'Please configure a valid API Key in Settings and click "Service Test" at the bottom to verify',
+        externalSkillMissing: 'Enter an external style Skill ID or external Skill output',
       },
     },
   },
 };
+
+const HARNESS_PACK_IDS: HarnessTemplate[] = ['paper_operators', 'lecture_deck', 'product_launch', 'consulting_report'];
+
+type GenerationModePanelProps = {
+  generationMode: GenerationMode;
+  harnessTemplate: HarnessTemplate;
+  onGenerationModeChange: (mode: GenerationMode) => void;
+  onHarnessTemplateChange: (template: HarnessTemplate) => void;
+  t: (key: string) => string;
+};
+
+const GenerationModePanel: React.FC<GenerationModePanelProps> = ({
+  generationMode,
+  harnessTemplate,
+  onGenerationModeChange,
+  onHarnessTemplateChange,
+  t,
+}) => (
+  <div className="mb-4 rounded-xl border border-gray-100 bg-white/60 p-3 dark:border-border-primary dark:bg-background-tertiary/60">
+    <div className="mb-3 flex items-center gap-2">
+      <Settings size={16} className="text-banana-600 dark:text-banana" />
+      <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
+        {t('home.generation.title')}
+      </h3>
+    </div>
+    <div className="grid gap-2 sm:grid-cols-2">
+      {([
+        { value: 'fast' as GenerationMode, label: t('home.generation.fast'), hint: t('home.generation.fastHint') },
+        { value: 'harness' as GenerationMode, label: t('home.generation.harness'), hint: t('home.generation.harnessHint') },
+      ]).map((option) => {
+        const active = generationMode === option.value;
+        return (
+          <button
+            key={option.value}
+            type="button"
+            aria-label={option.label}
+            aria-pressed={active}
+            onClick={() => onGenerationModeChange(option.value)}
+            className={`min-h-[72px] rounded-lg border px-3 py-2 text-left transition ${
+              active
+                ? 'border-banana-400 bg-banana-50 text-gray-950 ring-2 ring-banana-100 dark:border-banana dark:bg-banana/10 dark:text-white dark:ring-banana/20'
+                : 'border-gray-200 bg-white text-gray-700 hover:border-banana-300 dark:border-border-primary dark:bg-background-elevated dark:text-foreground-secondary dark:hover:border-banana/60'
+            }`}
+          >
+            <span className="block text-sm font-semibold">{option.label}</span>
+            <span className="mt-1 block text-xs leading-relaxed text-gray-500 dark:text-foreground-tertiary">{option.hint}</span>
+          </button>
+        );
+      })}
+    </div>
+    {generationMode === 'harness' && (
+      <div className="mt-3">
+        <span className="mb-1 block text-xs font-medium text-gray-500 dark:text-foreground-tertiary">
+          {t('home.generation.templateLabel')}
+        </span>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {HARNESS_PACK_IDS.map((packId) => {
+            const active = harnessTemplate === packId;
+            return (
+              <button
+                key={packId}
+                type="button"
+                aria-label={t(`home.generation.packs.${packId}.label`)}
+                aria-pressed={active}
+                onClick={() => onHarnessTemplateChange(packId)}
+                className={`min-h-[60px] rounded-lg border px-3 py-2 text-left transition ${
+                  active
+                    ? 'border-banana-400 bg-banana-50 text-gray-950 ring-2 ring-banana-100 dark:border-banana dark:bg-banana/10 dark:text-white dark:ring-banana/20'
+                    : 'border-gray-200 bg-white text-gray-700 hover:border-banana-300 dark:border-border-primary dark:bg-background-elevated dark:text-foreground-secondary dark:hover:border-banana/60'
+                }`}
+              >
+                <span className="block text-sm font-semibold">{t(`home.generation.packs.${packId}.label`)}</span>
+                <span className="mt-1 block text-xs leading-relaxed text-gray-500 dark:text-foreground-tertiary">{t(`home.generation.packs.${packId}.hint`)}</span>
+              </button>
+            );
+          })}
+        </div>
+        <p className="mt-2 text-xs leading-relaxed text-gray-500 dark:text-foreground-tertiary">
+          {t('home.generation.visualHint')}
+        </p>
+      </div>
+    )}
+  </div>
+);
 
 export const Home: React.FC = () => {
   const navigate = useNavigate();
@@ -298,13 +433,17 @@ export const Home: React.FC = () => {
 
   const [useTemplateStyle, setUseTemplateStyle] = useState(false);
   const [templateStyle, setTemplateStyle] = useState('');
+  const [useExternalStyleSkill, setUseExternalStyleSkill] = useState(false);
+  const [externalStyleSkillId, setExternalStyleSkillId] = useState('');
+  const [externalStylePrompt, setExternalStylePrompt] = useState('');
+  const [generationMode, setGenerationMode] = useState<GenerationMode>('fast');
+  const [harnessTemplate, setHarnessTemplate] = useState<HarnessTemplate>('paper_operators');
   const [aspectRatio, setAspectRatio] = useState('16:9');
   const [isAspectRatioOpen, setIsAspectRatioOpen] = useState(false);
   const [noThinkScenario, setNoThinkScenario] = useState(NO_THINK_SELECT_OPTIONS.scenario[0]);
-  const [noThinkColorTone, setNoThinkColorTone] = useState(NO_THINK_SELECT_OPTIONS.colorTone[0]);
   const [noThinkDensity, setNoThinkDensity] = useState(NO_THINK_SELECT_OPTIONS.density[0]);
-  const [noThinkPageCount, setNoThinkPageCount] = useState(NO_THINK_SELECT_OPTIONS.pageCount[1]);
-  const [noThinkStyleTemplate, setNoThinkStyleTemplate] = useState(NO_THINK_SELECT_OPTIONS.styleTemplate[0]);
+  const [noThinkPageCount, setNoThinkPageCount] = useState('10');
+  const [noThinkStyleTemplate, setNoThinkStyleTemplate] = useState('');
   const [noThinkExtraInstruction, setNoThinkExtraInstruction] = useState('');
   const [renovationFile, setRenovationFile] = useState<File | null>(null);
   const [pptToPptReferenceFile, setPptToPptReferenceFile] = useState<File | null>(null);
@@ -620,6 +759,13 @@ export const Home: React.FC = () => {
     description: string;
     example: string | null;
   }> = {
+    agent: {
+      icon: <Sparkles size={20} />,
+      label: t('home.tabs.agent'),
+      placeholder: t('home.placeholders.agent'),
+      description: t('home.tabDescriptions.agent'),
+      example: null as string | null,
+    },
     no_think: {
       icon: <Sparkles size={20} />,
       label: t('home.tabs.no_think'),
@@ -649,7 +795,7 @@ export const Home: React.FC = () => {
       example: null as string | null,
     },
   };
-  const currentTabConfig = tabConfig[(activeTab in tabConfig ? activeTab : 'outline') as VisibleCreationType];
+  const currentTabConfig = tabConfig[(activeTab in tabConfig ? activeTab : 'agent') as VisibleCreationType];
 
   const captureModePanelHeight = useCallback(() => {
     const panel = modePanelRef.current;
@@ -726,6 +872,30 @@ export const Home: React.FC = () => {
     }
   };
 
+  const canUseExternalStyleSkill = activeTab !== 'ppt_renovation' && activeTab !== 'ppt_to_ppt';
+  const canUseGenerationMode = activeTab !== 'agent' && activeTab !== 'ppt_renovation' && activeTab !== 'ppt_to_ppt';
+  // Any explicit user visual source fully owns style; Harness keeps only structure and QA.
+  const externalStyleSkillEnabled = canUseExternalStyleSkill && useExternalStyleSkill;
+  const topicBuilderStyleControlled = Boolean(
+    externalStyleSkillEnabled
+    || selectedTemplate
+    || selectedTemplateId
+    || selectedPresetTemplateId
+    || (useTemplateStyle && templateStyle.trim())
+  );
+
+  const buildExternalStylePayload = () => {
+    const raw = externalStylePrompt.trim();
+    if (!raw) {
+      return undefined;
+    }
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return { style_prompt: raw };
+    }
+  };
+
   const handleSubmit = async (eventOrOptions?: React.MouseEvent | { generateDescriptionsFromOutline?: boolean }) => {
     const generateDescriptionsFromOutline = Boolean(
       eventOrOptions &&
@@ -759,6 +929,11 @@ export const Home: React.FC = () => {
       return;
     }
 
+    if (externalStyleSkillEnabled && !externalStyleSkillId.trim() && !externalStylePrompt.trim()) {
+      show({ message: t('home.messages.externalSkillMissing'), type: 'error' });
+      return;
+    }
+
     // 检查是否有正在解析的文件
     const parsingFiles = referenceFiles.filter(f =>
       f.parse_status === 'pending' || f.parse_status === 'parsing'
@@ -767,6 +942,15 @@ export const Home: React.FC = () => {
       show({
         message: t('home.messages.filesParsing', { count: parsingFiles.length }),
         type: 'info'
+      });
+      return;
+    }
+
+    const failedFiles = referenceFiles.filter(f => f.parse_status === 'failed');
+    if (failedFiles.length > 0) {
+      show({
+        message: t('home.messages.filesParseFailed', { count: failedFiles.length }),
+        type: 'error',
       });
       return;
     }
@@ -866,8 +1050,25 @@ export const Home: React.FC = () => {
         }
       }
       
-      // 传递风格描述（只要有内容就传递，不管开关状态）
-      const styleDesc = templateStyle.trim() ? templateStyle.trim() : undefined;
+      // External style Skill is mutually exclusive with native template/style inputs.
+      const styleDesc = !externalStyleSkillEnabled && useTemplateStyle && templateStyle.trim() ? templateStyle.trim() : undefined;
+      const templateForProject = externalStyleSkillEnabled ? undefined : templateFile || undefined;
+      const explicitVisualSourceSelected = Boolean(
+        externalStyleSkillEnabled
+        || templateForProject
+        || selectedTemplateId
+        || selectedPresetTemplateId
+        || styleDesc
+      );
+      const visualOptions = externalStyleSkillEnabled
+        ? {
+            visual_strategy: 'external_skill' as const,
+            external_style_skill_id: externalStyleSkillId.trim() || undefined,
+            external_style_payload: buildExternalStylePayload(),
+          }
+        : {
+            visual_strategy: 'native' as const,
+          };
 
       // 传递参考文件ID列表，确保 AI 生成时能读取参考文件内容
       const refFileIds = referenceFiles
@@ -880,24 +1081,33 @@ export const Home: React.FC = () => {
       const noThinkOptions = activeTab === 'no_think'
         ? {
             scenario: noThinkScenario,
-            color_tone: noThinkColorTone,
             density: noThinkDensity,
-            page_count: noThinkPageCount,
-            style_template: noThinkStyleTemplate,
+            page_count: noThinkPageCount.trim() ? `${noThinkPageCount.trim()}页` : undefined,
+            style_template: !explicitVisualSourceSelected
+              ? noThinkStyleTemplate.trim() || undefined
+              : undefined,
             extra_instruction: noThinkExtraInstruction.trim() || undefined,
+          }
+        : undefined;
+      const generationOptions = canUseGenerationMode
+        ? {
+            generation_mode: generationMode,
+            harness_template: generationMode === 'harness' ? harnessTemplate : undefined,
           }
         : undefined;
 
       await initializeProject(
         activeTab as 'no_think' | 'idea' | 'outline' | 'description',
         submittedContent,
-        templateFile || undefined,
+        templateForProject,
         styleDesc,
         refFileIds.length > 0 ? refFileIds : undefined,
         aspectRatio,
         noThinkOptions,
         activeTab === 'outline' ? pageDescriptions : undefined,
-        activeTab === 'outline' ? generateDescriptionsFromOutline : false
+        activeTab === 'outline' ? generateDescriptionsFromOutline : false,
+        visualOptions,
+        generationOptions
       );
       
       // 根据类型跳转到不同页面
@@ -972,28 +1182,10 @@ export const Home: React.FC = () => {
       options: NO_THINK_SELECT_OPTIONS.scenario,
     },
     {
-      label: t('home.noThink.colorTone'),
-      value: noThinkColorTone,
-      onChange: setNoThinkColorTone,
-      options: NO_THINK_SELECT_OPTIONS.colorTone,
-    },
-    {
       label: t('home.noThink.density'),
       value: noThinkDensity,
       onChange: setNoThinkDensity,
       options: NO_THINK_SELECT_OPTIONS.density,
-    },
-    {
-      label: t('home.noThink.pageCount'),
-      value: noThinkPageCount,
-      onChange: setNoThinkPageCount,
-      options: NO_THINK_SELECT_OPTIONS.pageCount,
-    },
-    {
-      label: t('home.noThink.styleTemplate'),
-      value: noThinkStyleTemplate,
-      onChange: setNoThinkStyleTemplate,
-      options: NO_THINK_SELECT_OPTIONS.styleTemplate,
     },
   ];
 
@@ -1045,208 +1237,230 @@ export const Home: React.FC = () => {
     <div className="app-surface min-h-screen dark:bg-background-primary relative overflow-hidden">
 
       {/* 导航栏 */}
-      <nav className="app-chrome relative z-50 h-16 md:h-18 border-b">
-
-        <div className="max-w-7xl mx-auto px-4 md:px-6 h-full flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="flex items-center">
-              <img
-                src="/logo.png"
-                alt="启发 Banana Slides Logo"
-                className="h-10 md:h-12 w-auto rounded-lg object-contain"
-              />
-            </div>
-            <span className="brand-wordmark text-xl md:text-2xl font-black text-[#AFFF00]">
-              启发
-            </span>
+      <nav className="app-chrome relative z-50 h-14 border-b">
+        <div className="mx-auto flex h-full max-w-7xl items-center justify-between px-4 md:px-6">
+          <div className="flex min-w-0 items-center">
+            <img
+              src="/lantai-deck-agent-logo.png"
+              alt="兰台 DeckAgent AI Presentation Agent Logo"
+              className="h-10 w-[170px] object-contain object-left md:w-[240px]"
+            />
           </div>
-          <div className="flex items-center gap-2 md:gap-3">
-            {/* 桌面端：带文字的素材生成按钮 */}
-            <Button
-              variant="ghost"
-              size="sm"
-              icon={<ImagePlus size={16} className="md:w-[18px] md:h-[18px]" />}
-              onClick={handleOpenMaterialModal}
-              className="hidden sm:inline-flex hover:bg-banana-100/60 hover:shadow-sm hover:scale-105 transition-all duration-200 font-medium"
-            >
-              <span className="hidden md:inline">{t('nav.materialGenerate')}</span>
-            </Button>
-            {/* 手机端：仅图标的素材生成按钮 */}
-            <Button
-              variant="ghost"
-              size="sm"
-              icon={<ImagePlus size={16} />}
-              onClick={handleOpenMaterialModal}
-              className="sm:hidden hover:bg-banana-100/60 hover:shadow-sm hover:scale-105 transition-all duration-200"
-              title={t('nav.materialGenerate')}
-            />
-            {/* 桌面端：带文字的素材中心按钮 */}
-            <Button
-              variant="ghost"
-              size="sm"
-              icon={<FolderOpen size={16} className="md:w-[18px] md:h-[18px]" />}
-              onClick={() => setIsMaterialCenterOpen(true)}
-              className="hidden sm:inline-flex hover:bg-banana-100/60 hover:shadow-sm hover:scale-105 transition-all duration-200 font-medium"
-            >
-              <span className="hidden md:inline">{t('nav.materialCenter')}</span>
-            </Button>
-            {/* 手机端：仅图标的素材中心按钮 */}
-            <Button
-              variant="ghost"
-              size="sm"
-              icon={<FolderOpen size={16} />}
-              onClick={() => setIsMaterialCenterOpen(true)}
-              className="sm:hidden hover:bg-banana-100/60 hover:shadow-sm hover:scale-105 transition-all duration-200"
-              title={t('nav.materialCenter')}
-            />
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => navigate('/history')}
-              className="text-xs md:text-sm hover:bg-banana-100/60 hover:shadow-sm hover:scale-105 transition-all duration-200 font-medium"
-            >
-              <span className="hidden sm:inline">{t('nav.history')}</span>
-              <span className="sm:hidden">{t('nav.history')}</span>
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              icon={<Settings size={16} className="md:w-[18px] md:h-[18px]" />}
-              onClick={() => navigate('/settings')}
-              className="text-xs md:text-sm hover:bg-banana-100/60 hover:shadow-sm hover:scale-105 transition-all duration-200 font-medium"
-            >
-              <span className="hidden md:inline">{t('nav.settings')}</span>
-            </Button>
-            {/* 分隔线 */}
-            <div className="h-5 w-px bg-gray-300 dark:bg-border-primary mx-1" />
-            {/* 语言切换按钮 */}
-            <button
-              onClick={() => i18n.changeLanguage(i18n.language?.startsWith('zh') ? 'en' : 'zh')}
-              className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-gray-600 dark:text-foreground-tertiary hover:text-gray-900 dark:hover:text-gray-100 hover:bg-banana-100/60 dark:hover:bg-background-hover rounded-md transition-all"
-              title={t('settings.language.label')}
-            >
-              <Globe size={14} />
-              <span>{i18n.language?.startsWith('zh') ? 'EN' : '中'}</span>
-            </button>
-            {/* 主题切换按钮 */}
-            <div className="relative" ref={themeMenuRef}>
-              <button
-                onClick={() => setIsThemeMenuOpen(!isThemeMenuOpen)}
-                className="flex items-center gap-1 p-1.5 text-gray-600 dark:text-foreground-tertiary hover:text-gray-900 dark:hover:text-gray-100 hover:bg-banana-100/60 dark:hover:bg-background-hover rounded-md transition-all"
-                title={t('settings.theme.label')}
-              >
-                {theme === 'system' ? <Monitor size={16} /> : isDark ? <Moon size={16} /> : <Sun size={16} />}
-                <ChevronDown size={12} className={`transition-transform ${isThemeMenuOpen ? 'rotate-180' : ''}`} />
-              </button>
-              {/* 主题下拉菜单 */}
-              {isThemeMenuOpen && (
-                <>
-                  <div className="fixed inset-0 z-40" onClick={() => setIsThemeMenuOpen(false)} />
-                  <div className="absolute right-0 top-full mt-1 z-50 bg-white dark:bg-background-secondary border border-gray-200 dark:border-border-primary rounded-lg shadow-lg dark:shadow-none py-1 min-w-[120px]">
-                    <button
-                      onClick={() => { setTheme('light'); setIsThemeMenuOpen(false); }}
-                      className={`w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-background-hover transition-colors ${theme === 'light' ? 'text-banana' : 'text-gray-700 dark:text-foreground-secondary'}`}
-                    >
-                      <Sun size={14} />
-                      <span>{t('settings.theme.light')}</span>
-                    </button>
-                    <button
-                      onClick={() => { setTheme('dark'); setIsThemeMenuOpen(false); }}
-                      className={`w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-background-hover transition-colors ${theme === 'dark' ? 'text-banana' : 'text-gray-700 dark:text-foreground-secondary'}`}
-                    >
-                      <Moon size={14} />
-                      <span>{t('settings.theme.dark')}</span>
-                    </button>
-                    <button
-                      onClick={() => { setTheme('system'); setIsThemeMenuOpen(false); }}
-                      className={`w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-background-hover transition-colors ${theme === 'system' ? 'text-banana' : 'text-gray-700 dark:text-foreground-secondary'}`}
-                    >
-                      <Monitor size={14} />
-                      <span>{t('settings.theme.system')}</span>
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
+          <div className="flex items-center gap-2 text-xs font-medium text-gray-500 dark:text-foreground-tertiary">
+            <span className="rounded-md bg-gray-100 px-2 py-1 dark:bg-background-secondary">
+              {currentTabConfig.label}
+            </span>
+            <span className="hidden rounded-md bg-gray-100 px-2 py-1 dark:bg-background-secondary sm:inline">
+              {generationMode === 'harness' ? t('home.generation.harness') : t('home.generation.fast')}
+            </span>
           </div>
         </div>
       </nav>
 
       {/* 主内容 */}
-      <main className="relative max-w-5xl mx-auto px-3 md:px-4 py-8 md:py-12">
-        {/* Hero 标题区 */}
-        <div className="text-center mb-10 md:mb-16 space-y-4 md:space-y-6">
-          {/*<div className="inline-flex items-center gap-2 px-4 py-2 bg-[#121212] text-white dark:bg-background-secondary backdrop-blur-sm rounded-full shadow-sm dark:shadow-none mb-4">*/}
-          {/*  <span className="text-sm font-medium text-white/85 dark:text-foreground-secondary">{t('home.tagline')}</span>*/}
-          {/*</div>*/}
-
-          <h1 className="text-4xl md:text-6xl lg:text-7xl font-extrabold leading-tight">
-            <span className="bg-gradient-to-r from-[#121212] via-[#84cc16] to-[#AFFF00] dark:from-banana-dark dark:via-banana dark:to-banana-light bg-clip-text text-transparent dark:italic" style={{
-              backgroundSize: '200% auto',
-              animation: 'gradient 3s ease infinite',
-            }}>
-              {i18n.language?.startsWith('zh') ? `${t('home.title')} · Banana Slides` : 'Banana Slides'}
-            </span>
-          </h1>
-
-          <p className="text-lg md:text-xl text-gray-600 dark:text-foreground-secondary max-w-2xl mx-auto font-light">
-            {t('home.subtitle')}
-          </p>
-
-          {/* 特性标签 */}
-          <div className="flex flex-wrap items-center justify-center gap-2 md:gap-3 pt-4">
+      <main className="relative mx-auto max-w-7xl px-3 py-4 md:px-5 md:py-6">
+        <div className="mb-4 flex flex-col gap-3 border-b border-gray-200 pb-4 dark:border-border-primary md:flex-row md:items-end md:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400 dark:text-foreground-tertiary">
+              {t('home.tagline')}
+            </p>
+            <h1 className="mt-1 text-2xl font-semibold text-gray-950 dark:text-white md:text-3xl">
+              {i18n.language?.startsWith('zh') ? `${t('home.title')} 工作台` : 'Lantai Workspace'}
+            </h1>
+            <p className="mt-1 max-w-2xl text-sm text-gray-500 dark:text-foreground-tertiary">
+              {t('home.subtitle')}
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
             {[
-              { icon: <Sparkles size={14} className="text-yellow-600 dark:text-banana" />, label: t('home.features.oneClick') },
-              { icon: <FileEdit size={14} className="text-blue-500 dark:text-blue-400" />, label: t('home.features.naturalEdit') },
-              { icon: <Search size={14} className="text-orange-500 dark:text-orange-400" />, label: t('home.features.regionEdit') },
-
-              { icon: <Paperclip size={14} className="text-green-600 dark:text-green-400" />, label: t('home.features.export') },
-            ].map((feature, idx) => (
-              <span
-                key={idx}
-                className="inline-flex items-center gap-1 px-3 py-1.5 bg-white/70 dark:bg-background-secondary backdrop-blur-sm rounded-full text-xs md:text-sm text-gray-700 dark:text-foreground-secondary border border-gray-200/50 dark:border-border-primary shadow-sm dark:shadow-none hover:shadow-md dark:hover:border-border-hover transition-all hover:scale-105 cursor-default"
+              { label: t('home.features.oneClick'), value: referenceFiles.length ? `${referenceFiles.length}` : '0' },
+              { label: t('home.features.naturalEdit'), value: generationMode === 'harness' ? 'Harness' : t('home.generation.fast') },
+              { label: t('home.features.export'), value: aspectRatio },
+            ].map((item) => (
+              <div
+                key={item.label}
+                className="min-w-[112px] rounded-lg border border-gray-200 bg-white px-3 py-2 dark:border-border-primary dark:bg-background-secondary"
               >
-                {feature.icon}
-                {feature.label}
-              </span>
+                <p className="truncate text-[11px] text-gray-400 dark:text-foreground-tertiary">{item.label}</p>
+                <p className="mt-0.5 truncate text-sm font-semibold text-gray-900 dark:text-white">{item.value}</p>
+              </div>
             ))}
           </div>
         </div>
 
-        {/* 创建卡片 */}
-        <Card className="p-4 md:p-10 bg-white/90 dark:bg-background-secondary backdrop-blur-xl dark:backdrop-blur-none shadow-2xl dark:shadow-none border-0 dark:border dark:border-border-primary hover:shadow-3xl dark:hover:shadow-none transition-all duration-300 dark:rounded-2xl">
-          {/* 选项卡 */}
-          <div className="grid grid-cols-2 gap-1.5 rounded-2xl border border-gray-200/70 bg-gray-100/70 p-1.5 shadow-inner dark:border-border-primary dark:bg-background-tertiary/80 sm:grid-cols-4 md:gap-2 mb-6 md:mb-8">
-            {(Object.keys(tabConfig) as VisibleCreationType[]).map((type) => {
-              const config = tabConfig[type];
-              const isActive = activeTab === type;
-              return (
-                <button
-                  key={type}
-                  type="button"
-                  aria-pressed={isActive}
-                  onPointerDown={handleTabPointerDown}
-                  onClick={() => handleTabChange(type)}
-                  className={`home-mode-tab group relative flex min-h-[48px] items-center justify-center gap-1.5 overflow-hidden rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-300 ease-out touch-manipulation md:gap-2 md:px-4 md:py-3 md:text-base ${
-                    isActive
-                      ? 'bg-white text-gray-950 shadow-sm ring-1 ring-black/5 dark:bg-background-elevated dark:text-white dark:ring-white/10'
-                      : 'text-gray-600 hover:bg-white/70 hover:text-gray-950 dark:text-foreground-secondary dark:hover:bg-background-hover dark:hover:text-white'
-                  }`}
-                >
-                  <span
-                    className={`pointer-events-none absolute inset-x-3 top-1 h-0.5 origin-center rounded-full bg-banana-500 transition-all duration-300 dark:bg-banana ${
-                      isActive ? 'scale-x-100 opacity-100' : 'scale-x-0 opacity-0'
-                    }`}
-                  />
-                  <span className={`scale-90 transition-transform duration-300 md:scale-100 ${isActive ? 'text-banana-700 dark:text-banana' : 'group-hover:scale-100'}`}>
-                    {config.icon}
-                  </span>
-                  <span className="truncate">{config.label}</span>
-                </button>
-              );
-            })}
-          </div>
+        <section className="grid gap-4 lg:grid-cols-[260px_minmax(0,1fr)] xl:grid-cols-[280px_minmax(0,1fr)]">
+          <aside className="rounded-xl border border-gray-200 bg-white dark:border-border-primary dark:bg-background-secondary lg:sticky lg:top-20 lg:self-start">
+            <div className="border-b border-gray-100 px-4 py-3 dark:border-border-primary">
+              <p className="text-xs font-medium text-gray-400 dark:text-foreground-tertiary">Workspace</p>
+              <h2 className="mt-0.5 text-sm font-semibold text-gray-950 dark:text-white">兰台工作台</h2>
+            </div>
 
+            <div className="border-b border-gray-100 p-2 dark:border-border-primary">
+              <p className="px-2 pb-1 pt-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-400 dark:text-foreground-tertiary">
+                创建
+              </p>
+              <div className="grid gap-1 sm:grid-cols-2 lg:grid-cols-1">
+              {(Object.keys(tabConfig) as VisibleCreationType[]).map((type) => {
+                const config = tabConfig[type];
+                const isActive = activeTab === type;
+                return (
+                  <button
+                    key={type}
+                    type="button"
+                    aria-label={config.label}
+                    aria-pressed={isActive}
+                    onPointerDown={handleTabPointerDown}
+                    onClick={() => handleTabChange(type)}
+                    className={`home-mode-tab group relative flex min-h-[66px] items-start gap-3 rounded-lg px-3 py-3 text-left transition-all duration-200 touch-manipulation ${
+                      isActive
+                        ? 'bg-gray-950 text-white shadow-sm dark:bg-background-elevated dark:ring-1 dark:ring-white/10'
+                        : 'text-gray-600 hover:bg-gray-50 hover:text-gray-950 dark:text-foreground-secondary dark:hover:bg-background-hover dark:hover:text-white'
+                    }`}
+                  >
+                    <span className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md border transition-colors ${
+                      isActive
+                        ? 'border-banana-300 bg-banana-300 text-black'
+                        : 'border-gray-200 bg-white text-gray-500 group-hover:border-banana-300 dark:border-border-primary dark:bg-background-tertiary dark:text-foreground-tertiary'
+                    }`}>
+                      {config.icon}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-semibold">{config.label}</span>
+                      <span className={`mt-1 line-clamp-2 text-xs leading-relaxed ${
+                        isActive ? 'text-white/65' : 'text-gray-400 dark:text-foreground-tertiary'
+                      }`}>
+                        {config.description}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
+              </div>
+            </div>
+
+            <div className="border-b border-gray-100 p-2 dark:border-border-primary">
+              <p className="px-2 pb-1 pt-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-400 dark:text-foreground-tertiary">
+                资源
+              </p>
+              <div className="grid gap-1 sm:grid-cols-2 lg:grid-cols-1">
+                <button
+                  type="button"
+                  onClick={handleOpenMaterialModal}
+                  className="flex min-h-[44px] items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-950 dark:text-foreground-secondary dark:hover:bg-background-hover dark:hover:text-white"
+                >
+                  <ImagePlus size={16} className="text-gray-400 dark:text-foreground-tertiary" />
+                  <span>{t('nav.materialGenerate')}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsMaterialCenterOpen(true)}
+                  className="flex min-h-[44px] items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-950 dark:text-foreground-secondary dark:hover:bg-background-hover dark:hover:text-white"
+                >
+                  <FolderOpen size={16} className="text-gray-400 dark:text-foreground-tertiary" />
+                  <span>{t('nav.materialCenter')}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => navigate('/history')}
+                  className="flex min-h-[44px] items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-950 dark:text-foreground-secondary dark:hover:bg-background-hover dark:hover:text-white"
+                >
+                  <FileText size={16} className="text-gray-400 dark:text-foreground-tertiary" />
+                  <span>{t('nav.history')}</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="p-2">
+              <p className="px-2 pb-1 pt-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-400 dark:text-foreground-tertiary">
+                系统
+              </p>
+              <div className="grid gap-1 sm:grid-cols-2 lg:grid-cols-1">
+                <button
+                  type="button"
+                  onClick={() => navigate('/settings')}
+                  className="flex min-h-[44px] items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-950 dark:text-foreground-secondary dark:hover:bg-background-hover dark:hover:text-white"
+                >
+                  <Settings size={16} className="text-gray-400 dark:text-foreground-tertiary" />
+                  <span>{t('nav.settings')}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => i18n.changeLanguage(i18n.language?.startsWith('zh') ? 'en' : 'zh')}
+                  className="flex min-h-[44px] items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-950 dark:text-foreground-secondary dark:hover:bg-background-hover dark:hover:text-white"
+                  title={t('settings.language.label')}
+                >
+                  <Globe size={16} className="text-gray-400 dark:text-foreground-tertiary" />
+                  <span>{i18n.language?.startsWith('zh') ? '切换到 English' : 'Switch to 中文'}</span>
+                </button>
+                <div className="relative" ref={themeMenuRef}>
+                  <button
+                    type="button"
+                    onClick={() => setIsThemeMenuOpen(!isThemeMenuOpen)}
+                    className="flex min-h-[44px] w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-950 dark:text-foreground-secondary dark:hover:bg-background-hover dark:hover:text-white"
+                    title={t('settings.theme.label')}
+                  >
+                    <span className="flex items-center gap-3">
+                      {theme === 'system' ? <Monitor size={16} className="text-gray-400 dark:text-foreground-tertiary" /> : isDark ? <Moon size={16} className="text-gray-400 dark:text-foreground-tertiary" /> : <Sun size={16} className="text-gray-400 dark:text-foreground-tertiary" />}
+                      <span>{t('settings.theme.label')}</span>
+                    </span>
+                    <ChevronDown size={12} className={`transition-transform ${isThemeMenuOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  {isThemeMenuOpen && (
+                    <>
+                      <div className="fixed inset-0 z-40" onClick={() => setIsThemeMenuOpen(false)} />
+                      <div className="absolute left-3 right-3 top-full z-50 mt-1 rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-border-primary dark:bg-background-secondary dark:shadow-none">
+                        <button
+                          type="button"
+                          onClick={() => { setTheme('light'); setIsThemeMenuOpen(false); }}
+                          className={`flex w-full items-center gap-2 px-3 py-2 text-sm transition-colors hover:bg-gray-100 dark:hover:bg-background-hover ${theme === 'light' ? 'text-banana' : 'text-gray-700 dark:text-foreground-secondary'}`}
+                        >
+                          <Sun size={14} />
+                          <span>{t('settings.theme.light')}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setTheme('dark'); setIsThemeMenuOpen(false); }}
+                          className={`flex w-full items-center gap-2 px-3 py-2 text-sm transition-colors hover:bg-gray-100 dark:hover:bg-background-hover ${theme === 'dark' ? 'text-banana' : 'text-gray-700 dark:text-foreground-secondary'}`}
+                        >
+                          <Moon size={14} />
+                          <span>{t('settings.theme.dark')}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setTheme('system'); setIsThemeMenuOpen(false); }}
+                          className={`flex w-full items-center gap-2 px-3 py-2 text-sm transition-colors hover:bg-gray-100 dark:hover:bg-background-hover ${theme === 'system' ? 'text-banana' : 'text-gray-700 dark:text-foreground-secondary'}`}
+                        >
+                          <Monitor size={14} />
+                          <span>{t('settings.theme.system')}</span>
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+          </aside>
+
+          <section className="min-w-0 overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-border-primary dark:bg-background-secondary">
+            <div className="flex flex-col gap-3 border-b border-gray-100 px-4 py-4 dark:border-border-primary md:flex-row md:items-center md:justify-between">
+              <div className="min-w-0">
+                <p className="text-xs font-medium text-gray-400 dark:text-foreground-tertiary">Current workflow</p>
+                <h2 className="mt-0.5 flex items-center gap-2 text-lg font-semibold text-gray-950 dark:text-white">
+                  <span className="text-banana-700 dark:text-banana">{currentTabConfig.icon}</span>
+                  {currentTabConfig.label}
+                </h2>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <span className="rounded-md bg-gray-100 px-2 py-1 font-medium text-gray-600 dark:bg-background-tertiary dark:text-foreground-secondary">
+                  {generationMode === 'harness' ? t('home.generation.harness') : t('home.generation.fast')}
+                </span>
+                <span className="rounded-md bg-gray-100 px-2 py-1 font-medium text-gray-600 dark:bg-background-tertiary dark:text-foreground-secondary">
+                  {aspectRatio}
+                </span>
+              </div>
+            </div>
+
+            <div className="p-4 md:p-5">
           <div
             ref={modePanelRef}
             className="transition-[min-height] duration-300 ease-out"
@@ -1276,7 +1490,9 @@ export const Home: React.FC = () => {
 
               {/* 输入区 - 带工具栏 */}
               <div className="mb-2">
-            {activeTab === 'ppt_to_ppt' ? (
+            {activeTab === 'agent' ? (
+              <AgentModePanel onOpenProject={(projectId) => navigate(`/project/${projectId}/detail`)} />
+            ) : activeTab === 'ppt_to_ppt' ? (
               <div className="space-y-4">
                 <div
                   className="border-2 border-dashed border-gray-300 dark:border-border-primary rounded-xl p-8 text-center cursor-pointer hover:border-banana-400 dark:hover:border-banana transition-colors duration-200"
@@ -1470,6 +1686,15 @@ export const Home: React.FC = () => {
               </div>
             ) : (
             <>
+            {canUseGenerationMode && (
+              <GenerationModePanel
+                generationMode={generationMode}
+                harnessTemplate={harnessTemplate}
+                onGenerationModeChange={setGenerationMode}
+                onHarnessTemplateChange={setHarnessTemplate}
+                t={t}
+              />
+            )}
             {activeTab === 'outline' && (
               <div className="mb-2 flex flex-wrap items-center gap-2">
                 <Button
@@ -1563,10 +1788,10 @@ export const Home: React.FC = () => {
                 <div className="mb-3 flex items-center gap-2">
                   <Sparkles size={16} className="text-banana-600 dark:text-banana" />
                   <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
-                    NoThink PPT
+                    主题生成设置
                   </h3>
                 </div>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
                   {noThinkSelects.map((field) => (
                     <label key={field.label} className="block">
                       <span className="mb-1 block text-xs font-medium text-gray-500 dark:text-foreground-tertiary">
@@ -1585,7 +1810,43 @@ export const Home: React.FC = () => {
                       </select>
                     </label>
                   ))}
-                  <label className="block sm:col-span-2 lg:col-span-5">
+                  <label className="block">
+                    <span className="mb-1 block text-xs font-medium text-gray-500 dark:text-foreground-tertiary">
+                      {t('home.noThink.styleTemplate')}
+                    </span>
+                    <select
+                      aria-label={t('home.noThink.styleTemplate')}
+                      value={topicBuilderStyleControlled ? '' : noThinkStyleTemplate}
+                      disabled={topicBuilderStyleControlled}
+                      onChange={(event) => setNoThinkStyleTemplate(event.target.value)}
+                      className="h-9 w-full rounded-lg border border-gray-200 bg-white px-2 text-sm text-gray-800 outline-none transition focus:border-banana-400 focus:ring-2 focus:ring-banana-200 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400 dark:border-border-primary dark:bg-background-elevated dark:text-foreground-primary dark:focus:border-banana dark:disabled:bg-background-hover"
+                    >
+                      <option value="">{t('home.noThink.styleAuto')}</option>
+                      {NO_THINK_SELECT_OPTIONS.styleTemplate.map((option) => (
+                        <option key={option} value={option}>{option}</option>
+                      ))}
+                    </select>
+                    {topicBuilderStyleControlled && (
+                      <span className="mt-1 block text-xs text-gray-400 dark:text-foreground-tertiary">
+                        {t('home.noThink.styleControlled')}
+                      </span>
+                    )}
+                  </label>
+                  <label className="block">
+                    <span className="mb-1 block text-xs font-medium text-gray-500 dark:text-foreground-tertiary">
+                      {t('home.noThink.pageCount')}
+                    </span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={80}
+                      step={1}
+                      value={noThinkPageCount}
+                      onChange={(event) => setNoThinkPageCount(event.target.value)}
+                      className="h-9 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-800 outline-none transition focus:border-banana-400 focus:ring-2 focus:ring-banana-200 dark:border-border-primary dark:bg-background-elevated dark:text-foreground-primary dark:focus:border-banana"
+                    />
+                  </label>
+                  <label className="block sm:col-span-2 lg:col-span-4">
                     <span className="mb-1 block text-xs font-medium text-gray-500 dark:text-foreground-tertiary">
                       {t('home.noThink.extraInstruction')}
                     </span>
@@ -1679,46 +1940,103 @@ export const Home: React.FC = () => {
 
           {/* 模板选择 */}
           {(
-            (activeTab !== 'ppt_renovation' && activeTab !== 'ppt_to_ppt') ||
-            (activeTab === 'ppt_renovation' && renovationStyleSource === 'template') ||
-            (activeTab === 'ppt_to_ppt' && pptToPptStyleSource === 'template')
+            activeTab !== 'agent' && (
+              (activeTab !== 'ppt_renovation' && activeTab !== 'ppt_to_ppt') ||
+              (activeTab === 'ppt_renovation' && renovationStyleSource === 'template') ||
+              (activeTab === 'ppt_to_ppt' && pptToPptStyleSource === 'template')
+            )
           ) && (
             <div className="mb-6 md:mb-8 pt-4 border-t border-gray-100 dark:border-border-primary">
-              <div className="flex items-center justify-between mb-3 md:mb-4">
+              <div className="flex flex-col gap-3 mb-3 md:mb-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center gap-2">
                   <Palette size={18} className="text-orange-600 dark:text-banana flex-shrink-0" />
                   <h3 className="text-base md:text-lg font-semibold text-gray-900 dark:text-white">
                     {t('home.template.title')}
                   </h3>
                 </div>
-                {/* 无模板图模式开关 */}
-                <label className="flex items-center gap-2 cursor-pointer group">
-                  <span className="text-sm text-gray-600 dark:text-foreground-tertiary group-hover:text-gray-900 dark:group-hover:text-white transition-colors">
-                    {t('home.template.useTextStyle')}
-                  </span>
-                  <div className="relative">
-                    <input
-                      type="checkbox"
-                      checked={useTemplateStyle}
-                      onChange={(e) => {
-                        setUseTemplateStyle(e.target.checked);
-                        // 切换到无模板图模式时，清空模板选择
-                        if (e.target.checked) {
-                          setSelectedTemplate(null);
-                          setSelectedTemplateId(null);
-                          setSelectedPresetTemplateId(null);
-                        }
-                        // 不再清空风格描述，允许用户保留已输入的内容
-                      }}
-                      className="sr-only peer"
-                    />
-                    <div className="w-11 h-6 bg-gray-200 dark:bg-background-hover peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-banana-300 dark:peer-focus:ring-banana/30 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white dark:after:bg-foreground-secondary after:border-gray-300 dark:after:border-border-hover after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-banana"></div>
-                  </div>
-                </label>
-              </div>
+                <div className="flex flex-wrap items-center gap-4">
+                  {canUseExternalStyleSkill && (
+                    <label className="flex items-center gap-2 cursor-pointer group">
+                      <span className="text-sm text-gray-600 dark:text-foreground-tertiary group-hover:text-gray-900 dark:group-hover:text-white transition-colors">
+                        {t('home.template.useExternalSkill')}
+                      </span>
+                      <div className="relative">
+                        <input
+                          type="checkbox"
+                          checked={useExternalStyleSkill}
+                          onChange={(e) => {
+                            setUseExternalStyleSkill(e.target.checked);
+                            if (e.target.checked) {
+                              setUseTemplateStyle(false);
+                              setSelectedTemplate(null);
+                              setSelectedTemplateId(null);
+                              setSelectedPresetTemplateId(null);
+                            }
+                          }}
+                          className="sr-only peer"
+                        />
+                        <div className="w-11 h-6 bg-gray-200 dark:bg-background-hover peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-banana-300 dark:peer-focus:ring-banana/30 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white dark:after:bg-foreground-secondary after:border-gray-300 dark:after:border-border-hover after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-banana"></div>
+                      </div>
+                    </label>
+                  )}
+                  {!externalStyleSkillEnabled && (
+                    <label className="flex items-center gap-2 cursor-pointer group">
+                      <span className="text-sm text-gray-600 dark:text-foreground-tertiary group-hover:text-gray-900 dark:group-hover:text-white transition-colors">
+                        {t('home.template.useTextStyle')}
+                      </span>
+                      <div className="relative">
+                        <input
+                          type="checkbox"
+                          checked={useTemplateStyle}
+                          onChange={(e) => {
+                            setUseTemplateStyle(e.target.checked);
+                            if (e.target.checked) {
+                              setSelectedTemplate(null);
+                              setSelectedTemplateId(null);
+                              setSelectedPresetTemplateId(null);
+                            }
+                          }}
+                          className="sr-only peer"
+                        />
+                        <div className="w-11 h-6 bg-gray-200 dark:bg-background-hover peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-banana-300 dark:peer-focus:ring-banana/30 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white dark:after:bg-foreground-secondary after:border-gray-300 dark:after:border-border-hover after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-banana"></div>
+                      </div>
+                    </label>
+                  )}
+                </div>
+                </div>
 
-              {/* 根据模式显示不同的内容 */}
-              {useTemplateStyle ? (
+                {/* 根据模式显示不同的内容 */}
+                {externalStyleSkillEnabled ? (
+                <div className="space-y-3 rounded-lg border border-dashed border-orange-200 bg-orange-50/40 p-3 dark:border-banana/30 dark:bg-banana/5">
+                  <p className="text-xs text-gray-600 dark:text-foreground-tertiary">
+                    {t('home.template.externalHelper')}
+                  </p>
+                  <label className="block">
+                    <span className="mb-1 block text-xs font-medium text-gray-500 dark:text-foreground-tertiary">
+                      {t('home.template.externalSkillId')}
+                    </span>
+                    <input
+                      type="text"
+                      value={externalStyleSkillId}
+                      onChange={(event) => setExternalStyleSkillId(event.target.value)}
+                      placeholder="ppt-style-pro"
+                      className="h-9 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-800 outline-none transition placeholder:text-gray-400 focus:border-banana-400 focus:ring-2 focus:ring-banana-200 dark:border-border-primary dark:bg-background-elevated dark:text-foreground-primary dark:placeholder:text-foreground-tertiary dark:focus:border-banana"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="mb-1 block text-xs font-medium text-gray-500 dark:text-foreground-tertiary">
+                      {t('home.template.externalPrompt')}
+                    </span>
+                    <textarea
+                      value={externalStylePrompt}
+                      onChange={(event) => setExternalStylePrompt(event.target.value)}
+                      placeholder={t('home.template.externalPromptPlaceholder')}
+                      rows={4}
+                      className="w-full resize-y rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none transition placeholder:text-gray-400 focus:border-banana-400 focus:ring-2 focus:ring-banana-200 dark:border-border-primary dark:bg-background-elevated dark:text-foreground-primary dark:placeholder:text-foreground-tertiary dark:focus:border-banana"
+                    />
+                  </label>
+                </div>
+              ) : useTemplateStyle ? (
                 <TextStyleSelector
                   value={templateStyle}
                   onChange={setTemplateStyle}
@@ -1736,9 +2054,10 @@ export const Home: React.FC = () => {
             </div>
           )}
             </div>
-          </div>
-
-        </Card>
+            </div>
+            </div>
+          </section>
+        </section>
       </main>
       <ToastContainer />
       {/* 素材生成模态 - 在主页始终生成全局素材 */}

@@ -8,7 +8,7 @@ import { devLog } from '@/utils/logger';
 // 组件内翻译
 const previewI18n = {
   zh: {
-    home: { title: '启发' },
+    home: { title: '兰台' },
     nav: { home: '主页', materialGenerate: '素材生成' },
     slidePreview: {
       pageGenerating: "该页面正在生成中，请稍候...", generationStarted: "已开始生成图片，请稍候...",
@@ -99,7 +99,7 @@ const previewI18n = {
       confirmRegenerateAll: "将重新生成所有页面（历史记录将会保存），确定继续吗？",
       confirmRegenerateTitle: "确认重新生成",
       generationFailed: "生成失败",
-      disabledExportTip: "还有 {{count}} 页未生成图片，请先生成所有页面图片",
+      disabledExportTip: "还没有任何已生成图片，请先至少生成 1 页图片",
       messages: {
         exportSuccess: "导出成功", exportFailed: "导出失败",
         regenerateSuccess: "重新生成完成", regenerateFailed: "重新生成失败",
@@ -114,7 +114,7 @@ const previewI18n = {
     }
   },
   en: {
-    home: { title: 'Banana Slides' },
+    home: { title: 'Lantai PPT Agent' },
     nav: { home: 'Home', materialGenerate: 'Generate Material' },
     slidePreview: {
       pageGenerating: "This page is generating, please wait...", generationStarted: "Image generation started, please wait...",
@@ -205,7 +205,7 @@ const previewI18n = {
       confirmRegenerateAll: "Will regenerate all pages (history will be saved). Continue?",
       confirmRegenerateTitle: "Confirm Regenerate",
       generationFailed: "Generation failed",
-      disabledExportTip: "{{count}} page(s) have no images yet. Please generate all page images first",
+      disabledExportTip: "No generated images yet. Please generate at least 1 page image first",
       messages: {
         exportSuccess: "Export successful", exportFailed: "Export failed",
         regenerateSuccess: "Regeneration complete", regenerateFailed: "Failed to regenerate",
@@ -242,7 +242,7 @@ import {
   Loader2,
   Info,
 } from 'lucide-react';
-import { Button, Loading, Modal, Textarea, useToast, useConfirm, MaterialSelector, ProjectSettingsModal, ExportTasksPanel, TextStyleSelector } from '@/components/shared';
+import { Button, Loading, Modal, Textarea, useToast, useConfirm, MaterialSelector, ProjectSettingsModal, ExportTasksPanel, TextStyleSelector, CreditEstimateBadge } from '@/components/shared';
 import { MaterialGeneratorModal } from '@/components/shared/MaterialGeneratorModal';
 import { TemplateSelector, getTemplateFile } from '@/components/shared/TemplateSelector';
 import { listUserTemplates, type UserTemplate } from '@/api/endpoints';
@@ -1139,13 +1139,15 @@ export const SlidePreview: React.FC = () => {
     if (!projectId) return;
 
     const pageIds = getSelectedPageIdsForExport();
+    const generatedPageIds = pagesWithImages.map(page => page.id).filter((id): id is string => Boolean(id));
+    const exportPageIds = pageIds || (hasAllImages ? undefined : generatedPageIds);
     const exportTaskId = `export-${Date.now()}`;
 
     try {
       if (type === 'pptx' || type === 'pdf' || type === 'images') {
         // Synchronous export - direct download, create completed task directly
         const exportApi = { pptx: apiExportPPTX, pdf: apiExportPDF, images: apiExportImages };
-        const response = await exportApi[type](projectId, pageIds);
+        const response = await exportApi[type](projectId, exportPageIds);
         const downloadUrl = response.data?.download_url || response.data?.download_url_absolute;
         if (downloadUrl) {
           addTask({
@@ -1155,7 +1157,7 @@ export const SlidePreview: React.FC = () => {
             type: type as ExportTaskType,
             status: 'COMPLETED',
             downloadUrl,
-            pageIds: pageIds,
+            pageIds: exportPageIds,
           });
           window.open(downloadUrl, '_blank');
         }
@@ -1167,12 +1169,12 @@ export const SlidePreview: React.FC = () => {
           projectId,
           type: 'editable-pptx',
           status: 'PROCESSING',
-          pageIds: pageIds,
+          pageIds: exportPageIds,
         });
         
         show({ message: t('slidePreview.exportStarted'), type: 'success' });
         
-        const response = await apiExportEditablePPTX(projectId, undefined, pageIds);
+        const response = await apiExportEditablePPTX(projectId, undefined, exportPageIds);
         const taskId = response.data?.task_id;
         
         if (taskId) {
@@ -1183,7 +1185,7 @@ export const SlidePreview: React.FC = () => {
             projectId,
             type: 'editable-pptx',
             status: 'PROCESSING',
-            pageIds: pageIds,
+            pageIds: exportPageIds,
           });
           
           // Start polling in background (non-blocking)
@@ -1197,7 +1199,7 @@ export const SlidePreview: React.FC = () => {
           projectId,
           type: 'video',
           status: 'PROCESSING',
-          pageIds: pageIds,
+          pageIds: exportPageIds,
         });
 
         show({ message: t('slidePreview.exportStarted'), type: 'success' });
@@ -1205,7 +1207,7 @@ export const SlidePreview: React.FC = () => {
         const activeVoice = elevenLabsEnabled ? elevenLabsVoiceId : videoVoice;
         const voiceLang = elevenLabsEnabled ? 'zh' : (VIDEO_VOICE_OPTIONS.flatMap(g => g.voices).find(v => v.id === videoVoice)?.lang || 'zh');
         const response = await apiExportVideo(projectId, {
-          pageIds,
+          pageIds: exportPageIds,
           enableKenBurns: videoEnableKenBurns,
           includeNoImagePages: videoIncludeNoImage,
           voice: activeVoice,
@@ -1227,7 +1229,7 @@ export const SlidePreview: React.FC = () => {
             projectId,
             type: 'video',
             status: 'PROCESSING',
-            pageIds: pageIds,
+            pageIds: exportPageIds,
           });
 
           pollExportTask(exportTaskId, projectId, taskId);
@@ -1440,6 +1442,7 @@ export const SlidePreview: React.FC = () => {
     (p) => p.generated_image_path
   );
   const missingImageCount = currentProject.pages.filter(p => !p.generated_image_path).length;
+  const canExportImages = isMultiSelectMode ? selectedPageIds.size > 0 : hasImages;
   const isEnglishUi = i18n.language?.startsWith('en');
   const getNarrationOptionLabel = (options: Array<{ value: string; zh: string; en: string }>, value: string) => {
     const match = options.find(item => item.value === value);
@@ -1579,7 +1582,7 @@ export const SlidePreview: React.FC = () => {
                 setShowExportTasksPanel(false);
               }}
               disabled={isMultiSelectMode && selectedPageIds.size === 0}
-              title={!isMultiSelectMode && !hasAllImages ? t('preview.disabledExportTip', { count: missingImageCount }) : undefined}
+              title={!canExportImages ? t('preview.disabledExportTip', { count: missingImageCount }) : undefined}
               className="text-xs md:text-sm"
             >
               <span className="hidden sm:inline">
@@ -1602,7 +1605,7 @@ export const SlidePreview: React.FC = () => {
                 )}
                 <button
                   onClick={() => handleExport('pptx')}
-                  disabled={!hasAllImages}
+                  disabled={!canExportImages}
                   className="w-full px-4 py-2 text-left hover:bg-gray-50 dark:hover:bg-background-hover transition-colors text-sm disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   {t('preview.exportPptx')}
@@ -1613,21 +1616,26 @@ export const SlidePreview: React.FC = () => {
                     setEditablePptxDialogIconTransparent(currentProject?.enable_icon_subject_extraction ?? true);
                     setShowEditablePptxDialog(true);
                   }}
-                  disabled={!hasAllImages}
-                  className="w-full px-4 py-2 text-left hover:bg-gray-50 dark:hover:bg-background-hover transition-colors text-sm disabled:opacity-40 disabled:cursor-not-allowed"
+                  disabled={!canExportImages}
+                  className="flex w-full items-center justify-between gap-3 px-4 py-2 text-left hover:bg-gray-50 dark:hover:bg-background-hover transition-colors text-sm disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-                  {t('preview.exportEditablePptx')}
+                  <span>{t('preview.exportEditablePptx')}</span>
+                  <CreditEstimateBadge
+                    operation="editable_export"
+                    pageCount={isMultiSelectMode && selectedPageIds.size > 0 ? selectedPageIds.size : pagesWithImages.length}
+                    className="shrink-0"
+                  />
                 </button>
                 <button
                   onClick={() => handleExport('pdf')}
-                  disabled={!hasAllImages}
+                  disabled={!canExportImages}
                   className="w-full px-4 py-2 text-left hover:bg-gray-50 dark:hover:bg-background-hover transition-colors text-sm disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   {t('preview.exportPdf')}
                 </button>
                 <button
                   onClick={() => handleExport('images')}
-                  disabled={!hasAllImages}
+                  disabled={!canExportImages}
                   className="w-full px-4 py-2 text-left hover:bg-gray-50 dark:hover:bg-background-hover transition-colors text-sm disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   {t('preview.exportImages')}
@@ -2018,9 +2026,16 @@ export const SlidePreview: React.FC = () => {
               className="w-full text-sm md:text-base"
               disabled={isMultiSelectMode && selectedPageIds.size === 0}
             >
-              {isMultiSelectMode && selectedPageIds.size > 0
-                ? t('preview.generateSelected', { count: selectedPageIds.size })
-                : t('preview.batchGenerate', { count: currentProject.pages.length })}
+              <span>
+                {isMultiSelectMode && selectedPageIds.size > 0
+                  ? t('preview.generateSelected', { count: selectedPageIds.size })
+                  : t('preview.batchGenerate', { count: currentProject.pages.length })}
+              </span>
+              <CreditEstimateBadge
+                operation="images"
+                pageCount={isMultiSelectMode && selectedPageIds.size > 0 ? selectedPageIds.size : currentProject.pages.length}
+                className="ml-2 bg-white/20 text-white dark:text-white"
+              />
             </Button>
           </div>
           

@@ -20,7 +20,7 @@ const accent = '#AFFF00';
 
 const navLinks = [
   { label: '首页', href: '#hero' },
-  { label: '理念', href: '#formula' },
+  { label: 'Harness', href: '#formula' },
   { label: '场景', href: '#scenarios' },
   { label: '参考', href: '#references' },
   { label: '入口', href: '#entry' },
@@ -29,60 +29,60 @@ const navLinks = [
 const scenarios = [
   {
     name: '创新创业比赛',
-    tagline: '让优势被看见',
-    description: '用张力组织节奏，把核心竞争力放在评委一眼能看见的位置。',
+    tagline: '让证据进入链路',
+    description: '从材料接入、论证编排到视觉校验，把核心竞争力放进可追踪的交付链。',
     image: '/images/scene-pitch.png',
     color: '#84cc16',
     tint: 'from-lime-400/20 via-lime-400/10 to-transparent',
-    badges: ['竞争力', '节奏张力', '数据论证', '记忆点'],
+    badges: ['材料接入', '论证链路', '评审焦点', '交付记录'],
   },
   {
     name: '工作汇报',
-    tagline: '让进展被理解',
-    description: '把复杂进展整理成清晰层级，让结论先行、证据有据可依。',
+    tagline: '让过程可复盘',
+    description: '把复杂进展整理成阶段、证据与结论，让每一页都能回到来源和判断。',
     image: '/images/scene-report.png',
     color: '#f59e0b',
     tint: 'from-amber-400/20 via-amber-400/10 to-transparent',
-    badges: ['结论先行', '清晰层级', '数据可视化', '一致风格'],
+    badges: ['阶段状态', '结论先行', '证据留痕', '风格一致'],
   },
   {
     name: '融资路演',
-    tagline: '让判断被相信',
-    description: '用笃定的叙事与关键指标，把信念传递给每一位听众。',
+    tagline: '让判断有校验',
+    description: '用 Harness 式检查点组织叙事、指标和风险，把信念变成经得住追问的页面。',
     image: '/images/scene-roadshow.png',
     color: accent,
     tint: 'from-[#AFFF00]/20 via-[#AFFF00]/5 to-transparent',
-    badges: ['叙事信念', '关键指标', '增长曲线', '强焦点'],
+    badges: ['叙事编排', '指标校验', '风险补位', '强焦点'],
   },
 ];
 
 const formula = [
   {
     icon: Layers,
-    title: '结构',
-    subtitle: '理解与重组',
-    description: '梳理论点、证据与结论的顺序',
+    title: '接入',
+    subtitle: 'Ingest',
+    description: '统一收束材料、数据、截图和旧稿',
     color: accent,
   },
   {
     icon: Type,
-    title: '风格',
-    subtitle: '语气与节奏',
-    description: '为不同场景匹配表达语言',
+    title: '编排',
+    subtitle: 'Plan',
+    description: '把意图、论点和证据排成可执行链路',
     color: '#FF6B35',
   },
   {
     icon: ImageIcon,
-    title: '视觉',
-    subtitle: '层级与留白',
-    description: '让信息有重量，焦点有秩序',
+    title: '校验',
+    subtitle: 'Verify',
+    description: '先看结构与风格，再批量生成页面',
     color: '#00D4FF',
   },
   {
     icon: FileOutput,
-    title: '导出',
-    subtitle: '稳定可展示',
-    description: '生成一组可直接使用的页面',
+    title: '交付',
+    subtitle: 'Ship',
+    description: '输出可展示、可编辑、可追踪的 PPT',
     color: accent,
   },
 ];
@@ -90,27 +90,27 @@ const formula = [
 const entries = [
   {
     icon: Wand2,
-    title: 'No Think PPT',
-    description: '从一个主题开始，无需思考结构，直接得到完整初稿。',
-    cta: '从主题开始',
+    title: '主题生成',
+    description: '从一个主题开始，让 Agent 自动搭建结构、节奏与页面初稿。',
+    cta: '启动链路',
   },
   {
     icon: FileText,
-    title: '从内容生成',
-    description: '把材料、数据与文字交给系统，转化为页面与视觉。',
-    cta: '从内容开始',
+    title: '材料接入',
+    description: '把材料、数据与文字交给系统，转化为可编排的页面资产。',
+    cta: '接入材料',
   },
   {
     icon: Copy,
-    title: '借鉴优秀 PPT',
-    description: '上传参考作品，学习它的结构、语气与视觉语言。',
-    cta: '从参考开始',
+    title: '参考复用',
+    description: '上传参考作品，抽取它的结构、语气与视觉约束。',
+    cta: '接入参考',
   },
   {
     icon: RefreshCw,
-    title: 'PPT 翻新',
-    description: '让旧稿重新获得秩序，焕发清晰而有力的表达。',
-    cta: '从旧稿开始',
+    title: '旧稿重构',
+    description: '让旧稿进入工程流水线，重新获得秩序、风格和交付质量。',
+    cta: '重构旧稿',
   },
 ];
 
@@ -124,9 +124,9 @@ const references = [
 ];
 
 const footerLinks = [
-  { title: '入口', links: ['No Think PPT', '从内容生成', '借鉴优秀 PPT', 'PPT 翻新'] },
+  { title: '入口', links: ['主题生成', '材料接入', '参考复用', '旧稿重构'] },
   { title: '场景', links: ['创新创业比赛', '工作汇报', '教学课件', '融资路演'] },
-  { title: '关于', links: ['产品理念', '更新日志', '加入我们', '联系我们'] },
+  { title: '文化', links: ['Harness 工程', '校验优先', '来源留痕', '稳定交付'] },
   { title: '条款', links: ['隐私政策', '服务条款', '数据安全'] },
 ];
 
@@ -262,9 +262,9 @@ export const Landing: React.FC = () => {
               onClick={() => scrollToId('#hero')}
               className="landing-rise flex items-baseline gap-1.5 text-left text-2xl font-black tracking-normal"
             >
-              <span className="text-[#AFFF00]">启发</span>
+              <span className="text-[#AFFF00]">兰台</span>
               <span className={`font-mono text-sm ${scrolled ? 'text-white/70' : 'text-[#121212]/60'}`}>
-                Banana Slides
+                PPT Agent
               </span>
             </button>
 
@@ -289,7 +289,7 @@ export const Landing: React.FC = () => {
               onClick={goCreate}
               className="landing-glow hidden rounded-full bg-[#AFFF00] px-6 py-2.5 text-sm font-bold tracking-normal text-[#121212] md:block"
             >
-              开始创建
+              去登录
             </button>
 
             <button
@@ -327,7 +327,7 @@ export const Landing: React.FC = () => {
                   onClick={goCreate}
                   className="mt-2 w-full rounded-full bg-[#AFFF00] px-6 py-3 text-sm font-bold text-[#121212]"
                 >
-                  开始创建
+                  去登录
                 </button>
               </div>
             </div>
@@ -343,18 +343,18 @@ export const Landing: React.FC = () => {
             <div className="max-w-xl space-y-5">
               <div className="landing-rise inline-flex items-center gap-2 rounded-full bg-[#121212] px-3 py-1.5 font-mono text-xs tracking-normal text-white">
                 <span className="h-2 w-2 rounded-full bg-[#AFFF00]" />
-                启发 · BANANA SLIDES
+                兰台 · PPT AGENT · HARNESS ENGINEERING
               </div>
 
               <div className="space-y-1">
                 <h1 className="landing-hero-line text-4xl font-black leading-[0.95] tracking-normal text-[#121212] sm:text-5xl md:text-7xl">
-                  每一次表达
+                  兰台·PPT Agent
                 </h1>
                 <h1 className="landing-hero-line landing-hero-line-alt text-4xl font-black leading-[0.95] tracking-normal text-[#84cc16] sm:text-5xl md:text-7xl">
-                  都始于混沌
+                  以 Harness 方式交付
                 </h1>
                 <p className="landing-rise max-w-md pt-3 text-base leading-relaxed text-[#121212]/70 md:text-lg">
-                  想法、材料、数据、截图、旧文件散落各处。真正困难的，不是打开 PPT，而是让它们形成可以被理解、被相信、被记住的秩序。
+                  不是临时拼页的灵感工具，而是把材料接入、结构编排、风格校验和文件导出串成一条可复盘流水线的 PPT 工程系统。
                 </p>
               </div>
 
@@ -372,12 +372,12 @@ export const Landing: React.FC = () => {
                   onClick={() => scrollToId('#formula')}
                   className="rounded-full border-2 border-[#121212] px-6 py-3 text-sm font-bold tracking-normal text-[#121212] transition-colors hover:bg-[#121212] hover:text-white"
                 >
-                  了解理念
+                  了解 Harness
                 </button>
               </div>
 
               <div className="landing-rise flex flex-wrap gap-4 pt-2">
-                {['结构化', '视觉化', '多场景', '参考生成'].map((benefit) => (
+                {['材料接入', '结构编排', '风格校验', '稳定交付'].map((benefit) => (
                   <div key={benefit} className="flex items-center gap-2 font-mono text-xs text-[#121212]/60">
                     <span className="h-1.5 w-1.5 rounded-full bg-[#AFFF00]" />
                     {benefit}
@@ -403,7 +403,7 @@ export const Landing: React.FC = () => {
             <div className="landing-section-title mb-10 text-center">
               <span className="font-mono text-xs tracking-normal text-[#121212]/60">多场景表达</span>
               <h2 className="mt-2 text-3xl font-black tracking-normal text-[#121212] md:text-5xl">
-                不同表达，需要 <span style={{ color: currentScenario.color }}>不同语言</span>
+                不同表达，需要 <span style={{ color: currentScenario.color }}>不同 Harness</span>
               </h2>
             </div>
 
@@ -497,10 +497,10 @@ export const Landing: React.FC = () => {
           <div className="absolute inset-0 bg-gradient-to-b from-[#121212] via-[#0a0a0a] to-[#121212]" />
           <div className="relative z-10 mx-auto max-w-5xl px-5 md:px-6">
             <div className="landing-section-title mb-10 text-center">
-              <span className="font-mono text-[10px] uppercase tracking-[0.3em] text-[#AFFF00]">系统的角色</span>
-              <h2 className="mt-2 text-3xl font-black tracking-normal text-white md:text-4xl">启发不是替你表达，它帮助表达成形</h2>
+              <span className="font-mono text-[10px] uppercase tracking-[0.3em] text-[#AFFF00]">HARNESS CULTURE</span>
+              <h2 className="mt-2 text-3xl font-black tracking-normal text-white md:text-4xl">兰台不是替你拍脑袋，它把表达变成工程</h2>
               <p className="mx-auto mt-4 max-w-xl text-sm leading-relaxed text-white/50 md:text-base">
-                你提供内容、意图、参考与判断。系统负责理解、重组、视觉化与生成，输入经过四层转换，成为一组稳定的页面。
+                你提供内容、意图、参考与判断。系统用接入、编排、校验、交付四个工程环节，把输入转成稳定、可追踪、可继续迭代的页面。
               </p>
               <span className="mx-auto mt-3 block h-[2px] w-12 rounded-full bg-[#AFFF00]" />
             </div>
@@ -535,10 +535,10 @@ export const Landing: React.FC = () => {
             <div className="landing-section-title mb-10 text-center">
               <span className="font-mono text-xs tracking-normal text-[#121212]/60">使用入口</span>
               <h2 className="mt-2 text-3xl font-black tracking-normal text-[#121212] md:text-5xl">
-                从任何 <span className="text-[#AFFF00]">起点开始</span>
+                从任何 <span className="text-[#AFFF00]">链路起点</span> 开始
               </h2>
               <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-[#121212]/60">
-                一个想法、一段内容、一份旧 PPT、一份你欣赏的参考作品，启发都会把它们转化为结构、页面和视觉表达。
+                一个想法、一段内容、一份旧 PPT、一份你欣赏的参考作品，兰台都会把它们接入 Harness，转化为结构、页面和视觉表达。
               </p>
             </div>
 
@@ -581,7 +581,7 @@ export const Landing: React.FC = () => {
                 优秀作品不是用来 <span className="text-[#AFFF00]">复制的</span>
               </h2>
               <p className="mx-auto mt-4 max-w-2xl text-sm leading-relaxed text-white/50">
-                你想借鉴的，往往不是某个背景色，而是它如何组织节奏、铺陈信息。上传参考 PPT，输入你的内容，启发学习它的结构、语气与视觉语言，再生成属于你的新表达。
+                你想借鉴的，往往不是某个背景色，而是它如何组织节奏、铺陈信息。上传参考 PPT，输入你的内容，兰台把参考当成 Harness 约束，再生成属于你的新表达。
               </p>
             </div>
 
@@ -623,8 +623,8 @@ export const Landing: React.FC = () => {
           <div className="relative z-10 mx-auto max-w-7xl px-5 md:px-6">
             <div className="landing-section-title mb-12 text-center">
               <h2 className="text-3xl font-black leading-[1.05] tracking-normal text-white md:text-5xl">
-                <span className="block">让你的想法</span>
-                <span className="block text-[#AFFF00]">抵达它应有的形式</span>
+                <span className="block">让每一次 PPT 生产</span>
+                <span className="block text-[#AFFF00]">都有工程化交付链</span>
               </h2>
             </div>
 
@@ -645,11 +645,11 @@ export const Landing: React.FC = () => {
                   开始创建
                 </button>
               </div>
-              <p className="mt-2 text-center font-mono text-xs text-white/40">从混沌到秩序，从秩序到说服。</p>
+              <p className="mt-2 text-center font-mono text-xs text-white/40">从材料到页面，从校验到交付。</p>
             </div>
 
             <p className="mx-auto mb-10 max-w-xl text-center text-sm leading-relaxed text-white/60">
-              启发 Banana Slides 把复杂内容生成清晰、有力、可展示的演示文稿。让材料成为结构，让结构成为叙事，让叙事成为画面。
+              兰台·PPT Agent 把复杂内容放入 Harness 工程链路：材料成为结构，结构进入校验，校验后的页面稳定交付。
             </p>
 
             <div className="grid grid-cols-2 gap-6 border-t border-white/10 py-8 md:grid-cols-4">
@@ -671,16 +671,16 @@ export const Landing: React.FC = () => {
 
             <div className="flex flex-col items-center justify-between gap-3 border-t border-white/10 pt-6 md:flex-row">
               <span className="flex items-baseline gap-1.5 text-xl font-black tracking-normal">
-                <span className="text-[#AFFF00]">启发</span>
-                <span className="font-mono text-sm text-white/60">Banana Slides</span>
+                <span className="text-[#AFFF00]">兰台</span>
+                <span className="font-mono text-sm text-white/60">PPT Agent</span>
               </span>
-              <p className="font-mono text-xs text-white/40">© 2026 启发 Banana Slides. 保留所有权利。</p>
-              <p className="font-mono text-xs text-white/30">从混沌到秩序</p>
+              <p className="font-mono text-xs text-white/40">© 2026 兰台·PPT Agent. 保留所有权利。</p>
+              <p className="font-mono text-xs text-white/30">Harness your slides</p>
             </div>
           </div>
 
           <div className="pointer-events-none absolute bottom-0 left-1/2 -translate-x-1/2 select-none text-[15rem] font-black leading-none text-white/[0.02] md:text-[30rem]">
-            启发
+            兰台
           </div>
         </footer>
       </main>

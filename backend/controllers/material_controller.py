@@ -8,6 +8,12 @@ from utils import success_response, error_response, not_found, bad_request
 from utils.auth import current_user_id, owned_project_or_404
 from services import FileService
 from services.ai_service_manager import get_ai_service
+from services.credit_service import (
+    InsufficientCredits,
+    attach_task_credit_progress,
+    estimate_operation,
+    reserve_credits,
+)
 from services.prompt_registry import prompt_registry
 from services.task_manager import task_manager, generate_material_image_task, process_material_image_task
 from pathlib import Path
@@ -30,6 +36,14 @@ ALLOWED_MATERIAL_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp',
 ALLOWED_ASPECT_RATIOS = frozenset({'16:9', '21:9', '4:3', '3:2', '5:4', '1:1', '4:5', '2:3', '3:4', '9:16'})
 ALLOWED_MATERIAL_OPERATIONS = frozenset({'generate', 'edit_full', 'region_edit', 'erase_region'})
 ALLOWED_REGION_APPLY_MODES = frozenset({'overlay_selection', 'replace_full'})
+
+
+def _credit_error_response(exc: InsufficientCredits):
+    return error_response(
+        'INSUFFICIENT_CREDITS',
+        f'积分不足：需要 {exc.required}，当前可用 {exc.available}',
+        402,
+    )
 
 
 def _generate_image_caption(filepath: str) -> str:
@@ -411,6 +425,7 @@ def generate_material_image(project_id):
                 additional_ref_images.append(str(extra_path))
 
             # Create async task for material generation
+            estimate = estimate_operation('material_image', page_count=1)
             task = Task(
                 user_id=current_user_id(),
                 project_id=task_project_id,
@@ -423,6 +438,16 @@ def generate_material_image(project_id):
                 'failed': 0
             })
             db.session.add(task)
+            db.session.flush()
+            reserve_credits(
+                user_id=current_user_id(),
+                amount=estimate.amount,
+                operation=estimate.operation,
+                project_id=None if task_project_id == 'global' else task_project_id,
+                task_id=task.id,
+                metadata={**estimate.details, 'endpoint': 'generate_material_image'},
+            )
+            attach_task_credit_progress(task, estimate)
             db.session.commit()
 
             # Get app instance for background task
@@ -448,7 +473,8 @@ def generate_material_image(project_id):
             # Return task_id immediately (不再清理temp_dir，由后台任务清理)
             return success_response({
                 'task_id': task.id,
-                'status': 'PENDING'
+                'status': 'PENDING',
+                'credit_estimate': estimate.to_dict(),
             }, status_code=202)
         
         except Exception as e:
@@ -457,6 +483,9 @@ def generate_material_image(project_id):
                 shutil.rmtree(temp_dir, ignore_errors=True)
             raise
 
+    except InsufficientCredits as e:
+        db.session.rollback()
+        return _credit_error_response(e)
     except Exception as e:
         db.session.rollback()
         return error_response('AI_SERVICE_ERROR', str(e), 503)
@@ -557,6 +586,8 @@ def process_material_image(project_id):
                 if saved:
                     additional_ref_images.append(saved)
 
+            operation_for_credit = 'material_image' if operation == 'generate' else 'image_edit'
+            estimate = estimate_operation(operation_for_credit, page_count=1)
             task = Task(
                 user_id=current_user_id(),
                 project_id=task_project_id,
@@ -572,6 +603,16 @@ def process_material_image(project_id):
                 'selection': selection if operation in {'region_edit', 'erase_region'} else None,
             })
             db.session.add(task)
+            db.session.flush()
+            reserve_credits(
+                user_id=current_user_id(),
+                amount=estimate.amount,
+                operation=estimate.operation,
+                project_id=None if task_project_id == 'global' else task_project_id,
+                task_id=task.id,
+                metadata={**estimate.details, 'endpoint': 'process_material_image', 'operation': operation},
+            )
+            attach_task_credit_progress(task, estimate)
             db.session.commit()
 
             app = current_app._get_current_object()
@@ -597,13 +638,17 @@ def process_material_image(project_id):
 
             return success_response({
                 'task_id': task.id,
-                'status': 'PENDING'
+                'status': 'PENDING',
+                'credit_estimate': estimate.to_dict(),
             }, status_code=202)
         except Exception:
             if temp_dir.exists():
                 shutil.rmtree(temp_dir, ignore_errors=True)
             raise
 
+    except InsufficientCredits as e:
+        db.session.rollback()
+        return _credit_error_response(e)
     except Exception as e:
         db.session.rollback()
         return error_response('AI_SERVICE_ERROR', str(e), 503)

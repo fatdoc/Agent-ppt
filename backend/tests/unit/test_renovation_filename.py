@@ -158,3 +158,23 @@ class TestRenovationFilename:
         pdf_files = list(template_dir.glob('*.pdf'))
         assert pdf_files, "ASCII 文件名的翻新项目也应有 .pdf 文件"
         assert pdf_files[0].name == 'original.pdf'
+
+    def test_created_project_is_owned_and_readable(self, client, app):
+        """翻新项目必须绑定当前用户，否则跳转详情页后 GET 会返回 404。"""
+        response = _post_renovation(client, '归属测试.pdf', _make_minimal_pdf())
+        assert response.status_code == 202
+
+        payload = response.get_json()['data']
+        project_id = payload['project_id']
+        task_id = payload['task_id']
+
+        get_response = client.get(f'/api/projects/{project_id}')
+        assert get_response.status_code == 200
+
+        with app.app_context():
+            from models import Project, Task
+
+            project = Project.query.get(project_id)
+            task = Task.query.get(task_id)
+            assert project.user_id is not None
+            assert task.user_id == project.user_id

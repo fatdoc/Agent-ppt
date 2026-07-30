@@ -45,6 +45,7 @@
 *.pyc
 .env
 .DS_Store
+*.log
 .idea/
 *.egg-info/
 

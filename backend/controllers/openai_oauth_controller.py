@@ -22,8 +22,19 @@ from flask import Blueprint, request
 
 from models import db, Settings
 from utils import success_response, error_response
+from utils.auth import ai_config_editable_for_user, current_user
 
 logger = logging.getLogger(__name__)
+
+
+def _self_service_locked_response():
+    if ai_config_editable_for_user(current_user()):
+        return None
+    return error_response(
+        "AI_CONFIG_LOCKED",
+        "模型配置由管理员统一管理，无法在前端连接或断开 OpenAI 账号",
+        403,
+    )
 
 openai_oauth_bp = Blueprint(
     "openai_oauth", __name__, url_prefix="/api/settings/openai-oauth"
@@ -46,6 +57,9 @@ def _build_redirect_uri() -> str:
 @openai_oauth_bp.route("/authorize", methods=["GET"])
 def authorize():
     """Generate PKCE params, start callback server, return authorization URL."""
+    locked = _self_service_locked_response()
+    if locked:
+        return locked
     code_verifier = secrets.token_urlsafe(64)
     digest = hashlib.sha256(code_verifier.encode()).digest()
     code_challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
@@ -79,6 +93,9 @@ def authorize():
 @openai_oauth_bp.route("/disconnect", methods=["POST"])
 def disconnect():
     """Clear stored OAuth tokens."""
+    locked = _self_service_locked_response()
+    if locked:
+        return locked
     settings = Settings.get_settings()
     settings.openai_oauth_access_token = None
     settings.openai_oauth_refresh_token = None
@@ -149,6 +166,9 @@ def manual_callback():
     Used when port 1455 is blocked and the automatic callback server
     cannot receive the redirect.
     """
+    locked = _self_service_locked_response()
+    if locked:
+        return locked
     data = request.get_json(silent=True) or {}
     callback_url = data.get("callback_url", "")
     if not callback_url:

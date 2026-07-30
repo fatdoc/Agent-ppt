@@ -147,6 +147,35 @@ class TestExtractFromImagesResult:
             provider._extract_from_images_result(12345)
 
 
+class TestNativeImageEditReferences:
+    """Uploaded replacement references must reach the native images API."""
+
+    def test_images_edit_receives_current_page_and_all_uploaded_references(self):
+        provider = _make_provider()
+        provider.client.images.edit.return_value = SimpleNamespace(
+            data=[SimpleNamespace(b64_json=_make_b64_png(), url=None)]
+        )
+        current_page = Image.new('RGB', (1600, 900), color='white')
+        replacement_car = Image.new('RGB', (640, 480), color='blue')
+        second_reference = Image.new('RGB', (320, 320), color='green')
+
+        result = provider.generate_image(
+            "replace the car",
+            ref_images=[current_page, replacement_car, second_reference],
+            aspect_ratio='16:9',
+            resolution='1K',
+        )
+
+        assert isinstance(result, Image.Image)
+        payload = provider.client.images.edit.call_args.kwargs['image']
+        assert isinstance(payload, list)
+        assert [item.name for item in payload] == [
+            'current_page.png',
+            'user_reference_1.png',
+            'user_reference_2.png',
+        ]
+
+
 class TestOpenAICompatibleGatewayFallback:
     """Test compatibility with LiteLLM-style gateways that require provider prefixes."""
 
