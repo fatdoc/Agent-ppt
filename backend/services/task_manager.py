@@ -18,6 +18,7 @@ from PIL import Image, ImageDraw, ImageFilter
 from models import db, Task, Page, Material, PageImageVersion
 from services.credit_service import settle_task_credits
 from services.harness_generation_service import ensure_page_visual_plans
+from services.file_artifact_service import register_mineru_artifact
 from services.visual_guidance_service import VisualGuidanceService
 from utils import get_filtered_pages
 from utils.image_utils import check_image_resolution
@@ -1305,6 +1306,7 @@ def process_ppt_renovation_task(task_id: str, project_id: str, ai_service,
             project = Project.query.get(project_id)
             if not project:
                 raise ValueError(f"Project {project_id} not found")
+            owner_user_id = project.user_id
 
             # Get the PDF path from project
             pdf_path = None
@@ -1374,6 +1376,11 @@ def process_ppt_renovation_task(task_id: str, project_id: str, ai_service,
 
                         # Supplement with header/footer from layout.json
                         if extract_id:
+                            register_mineru_artifact(
+                                extract_id,
+                                user_id=owner_user_id,
+                                project_id=project_id,
+                            )
                             hf_text = file_parser_service.extract_header_footer_from_layout(extract_id)
                             if hf_text:
                                 md_text = hf_text + '\n\n' + md_text
@@ -1846,6 +1853,7 @@ def export_editable_pptx_with_recursive_analysis_task(
                 enable_icon_subject_extraction=enable_icon_subject_extraction,
                 fail_fast=fail_fast,
                 ai_service=caption_ai_service,
+                checkpoint_dir=os.path.join(app.config['UPLOAD_FOLDER'], project_id, '.editable-export-checkpoints'),
             )
             
             logger.info(f"✓ 可编辑PPTX已创建: {output_path}")
@@ -1905,10 +1913,9 @@ def export_editable_pptx_with_recursive_analysis_task(
                 # 在 progress 中保存详细错误信息
                 task.set_progress({
                     "total": 100,
-                    "completed": 0,
+                    **(task.get_progress() or {}),
                     "failed": 1,
-                    "current_step": "导出失败",
-                    "percent": 0,
+                    "current_step": "导出失败；再次导出将复用已保存的页面结果",
                     "error_type": e.error_type,
                     "error_details": e.details,
                     "help_text": e.help_text

@@ -1,112 +1,135 @@
-"""
-Path utilities for handling MinerU file paths and prefix matching
-"""
-import os
+"""Safe path helpers used by upload and MinerU file handling."""
+from __future__ import annotations
+
 import logging
+import os
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
+
 
 logger = logging.getLogger(__name__)
+PathInput = Union[os.PathLike, str]
 
 
-def convert_mineru_path_to_local(mineru_path: str, project_root: Optional[Path] = None) -> Optional[Path]:
-    """
-    将 /files/mineru/{extract_id}/{rel_path} 格式的路径转换为本地文件系统路径
-    
-    Args:
-        mineru_path: MinerU URL 路径，格式为 /files/mineru/{extract_id}/{rel_path}
-        project_root: 项目根目录路径（如果为 None，则自动计算）
-        
-    Returns:
-        本地文件系统路径（Path 对象），如果转换失败则返回 None
-    """
+def is_path_within(path: PathInput, root: PathInput) -> bool:
+    """Return whether ``path`` resolves inside ``root`` (symlinks included)."""
     try:
-        if not mineru_path.startswith('/files/mineru/'):
+        real_root = os.path.realpath(os.fspath(root))
+        real_path = os.path.realpath(os.fspath(path))
+        return os.path.commonpath([real_path, real_root]) == real_root
+    except (TypeError, ValueError, OSError):
+        return False
+
+
+def resolve_path_within(path: PathInput, root: PathInput) -> Path:
+    """Resolve a path and reject traversal outside the supplied root."""
+    resolved_root = Path(os.path.realpath(os.fspath(root)))
+    candidate = Path(path)
+    if not candidate.is_absolute():
+        candidate = resolved_root / candidate
+    resolved_path = Path(os.path.realpath(candidate))
+    if not is_path_within(resolved_path, resolved_root):
+        raise ValueError(f"Path escapes allowed root: {path}")
+    return resolved_path
+
+
+def _default_project_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
+def _resolve_mineru_root(
+    project_root: Optional[Path] = None,
+    upload_folder: Optional[PathInput] = None,
+) -> Path:
+    if upload_folder is not None:
+        upload_root = Path(upload_folder)
+    elif project_root is not None:
+        upload_root = project_root / "uploads"
+    else:
+        upload_root = None
+        try:
+            from flask import current_app, has_app_context
+
+            if has_app_context():
+                configured = current_app.config.get("UPLOAD_FOLDER")
+                if configured:
+                    upload_root = Path(configured)
+        except (RuntimeError, ImportError, TypeError, AttributeError):
+            pass
+
+        if upload_root is None:
+            configured = os.getenv("UPLOAD_FOLDER")
+            upload_root = Path(configured) if configured else _default_project_root() / "uploads"
+
+    if not upload_root.is_absolute():
+        root = (project_root or _default_project_root()).resolve()
+        upload_root = resolve_path_within(upload_root, root)
+
+    return Path(os.path.realpath(upload_root)) / "mineru_files"
+
+
+def convert_mineru_path_to_local(
+    mineru_path: str,
+    project_root: Optional[Path] = None,
+    upload_folder: Optional[PathInput] = None,
+) -> Optional[Path]:
+    """Convert a ``/files/mineru/...`` URL to a contained local path."""
+    try:
+        if not mineru_path.startswith("/files/mineru/"):
             return None
-        
-        # Remove '/files/mineru/' prefix
-        rel_path = mineru_path.replace('/files/mineru/', '')
-        
-        # Get project root if not provided
-        if project_root is None:
-            # Navigate to project root (assuming this file is in backend/utils/)
-            current_file = Path(__file__).resolve()
-            backend_dir = current_file.parent.parent
-            project_root = backend_dir.parent
-        
-        # Construct full path: {project_root}/uploads/mineru_files/{rel_path}
-        local_path = project_root / 'uploads' / 'mineru_files' / rel_path
-        
-        return local_path
-    except Exception as e:
-        logger.warning(f"Failed to convert MinerU path to local: {mineru_path}, error: {str(e)}")
+        relative_path = mineru_path[len("/files/mineru/"):].lstrip("/\\")
+        mineru_root = _resolve_mineru_root(project_root, upload_folder)
+        return resolve_path_within(relative_path, mineru_root)
+    except (OSError, TypeError, ValueError) as exc:
+        logger.warning("Rejected MinerU path %s: %s", mineru_path, exc)
         return None
 
 
-def find_mineru_file_with_prefix(mineru_path: str, project_root: Optional[Path] = None) -> Optional[Path]:
-    """
-    查找 MinerU 文件，支持前缀匹配
-    
-    首先尝试直接路径匹配，如果失败则尝试前缀匹配。
-    前缀匹配逻辑：如果文件名看起来像是一个前缀+扩展名（前缀长度 >= 5），
-    则在目录中查找以该前缀开头的文件。
-    
-    Args:
-        mineru_path: MinerU URL 路径，格式为 /files/mineru/{extract_id}/{rel_path}
-        project_root: 项目根目录路径（如果为 None，则自动计算）
-        
-    Returns:
-        找到的文件路径（Path 对象），如果未找到则返回 None
-    """
-    # First try direct path conversion
-    local_path = convert_mineru_path_to_local(mineru_path, project_root)
-    
+def find_mineru_file_with_prefix(
+    mineru_path: str,
+    project_root: Optional[Path] = None,
+    upload_folder: Optional[PathInput] = None,
+) -> Optional[Path]:
+    """Find a MinerU file, retaining the legacy filename-prefix fallback."""
+    local_path = convert_mineru_path_to_local(mineru_path, project_root, upload_folder)
     if local_path is None:
         return None
-    
-    # Direct file matching
-    if local_path.exists() and local_path.is_file():
-        return local_path
-    
-    # Try prefix match using the generic function
-    return find_file_with_prefix(local_path)
+
+    mineru_root = _resolve_mineru_root(project_root, upload_folder)
+    if local_path.is_file():
+        return local_path if is_path_within(local_path, mineru_root) else None
+
+    matched_path = find_file_with_prefix(local_path)
+    if matched_path and is_path_within(matched_path, mineru_root):
+        return Path(os.path.realpath(matched_path))
+    return None
 
 
 def find_file_with_prefix(file_path: Path) -> Optional[Path]:
-    """
-    查找文件，支持前缀匹配
-    
-    首先检查文件是否存在，如果不存在则尝试前缀匹配。
-    前缀匹配逻辑：如果文件名看起来像是一个前缀+扩展名（前缀长度 >= 5），
-    则在目录中查找以该前缀开头的文件。
-    
-    Args:
-        file_path: 要查找的文件路径（Path 对象）
-        
-    Returns:
-        找到的文件路径（Path 对象），如果未找到则返回 None
-    """
-    # Direct file matching
-    if file_path.exists() and file_path.is_file():
+    """Find an exact file or a same-extension filename with the requested prefix."""
+    if file_path.is_file():
         return file_path
-    
-    # Try prefix match if not found and filename looks like a prefix with extension
-    filename = file_path.name
-    dirpath = file_path.parent
-    
-    if '.' in filename and dirpath.exists() and dirpath.is_dir():
-        prefix, ext = os.path.splitext(filename)
-        if len(prefix) >= 5:
-            try:
-                for fname in os.listdir(dirpath):
-                    fp, fe = os.path.splitext(fname)
-                    if fp.lower().startswith(prefix.lower()) and fe.lower() == ext.lower():
-                        matched_path = dirpath / fname
-                        if matched_path.is_file():
-                            logger.debug(f"Prefix match found: {file_path} -> {matched_path}")
-                            return matched_path
-            except OSError as e:
-                logger.warning(f"Failed to list directory {dirpath}: {str(e)}")
-    
-    return None
 
+    filename = file_path.name
+    directory = file_path.parent
+    if "." not in filename or not directory.is_dir():
+        return None
+
+    prefix, extension = os.path.splitext(filename)
+    if len(prefix) < 5:
+        return None
+
+    try:
+        for name in os.listdir(directory):
+            candidate_prefix, candidate_extension = os.path.splitext(name)
+            if (
+                candidate_prefix.lower().startswith(prefix.lower())
+                and candidate_extension.lower() == extension.lower()
+            ):
+                candidate = directory / name
+                if candidate.is_file():
+                    logger.debug("Prefix match found: %s -> %s", file_path, candidate)
+                    return candidate
+    except OSError as exc:
+        logger.warning("Failed to list directory %s: %s", directory, exc)
+    return None

@@ -5,10 +5,11 @@ import logging
 from flask import Blueprint, request, current_app
 from models import db, Project, Page, PageImageVersion, Task
 from utils import success_response, error_response, not_found, bad_request
-from utils.auth import current_user_id, owned_project_or_404
+from utils.auth import current_user_id, owned_page_or_404, owned_project_or_404
 from services import FileService, ProjectContext
 from services.ai_service_manager import get_ai_service
 from services.harness_generation_service import is_harness_project
+from services.file_artifact_service import register_mineru_artifact
 from services.credit_service import (
     InsufficientCredits,
     attach_task_credit_progress,
@@ -104,9 +105,8 @@ def delete_page(project_id, page_id):
     DELETE /api/projects/{project_id}/pages/{page_id} - Delete page
     """
     try:
-        page = Page.query.get(page_id)
-
-        if not page or page.project_id != project_id:
+        page = owned_page_or_404(project_id, page_id)
+        if not page:
             return not_found('Page')
 
         # Delete page image if exists
@@ -117,9 +117,7 @@ def delete_page(project_id, page_id):
         db.session.delete(page)
 
         # Update project
-        project = owned_project_or_404(project_id)
-        if project:
-            project.updated_at = datetime.utcnow()
+        page.project.updated_at = datetime.utcnow()
 
         db.session.commit()
 
@@ -141,9 +139,8 @@ def update_page(project_id, page_id):
     }
     """
     try:
-        page = Page.query.get(page_id)
-
-        if not page or page.project_id != project_id:
+        page = owned_page_or_404(project_id, page_id)
+        if not page:
             return not_found('Page')
 
         data = request.get_json()
@@ -182,9 +179,8 @@ def update_page_outline(project_id, page_id):
     }
     """
     try:
-        page = Page.query.get(page_id)
-        
-        if not page or page.project_id != project_id:
+        page = owned_page_or_404(project_id, page_id)
+        if not page:
             return not_found('Page')
         
         data = request.get_json()
@@ -196,9 +192,7 @@ def update_page_outline(project_id, page_id):
         page.updated_at = datetime.utcnow()
         
         # Update project
-        project = owned_project_or_404(project_id)
-        if project:
-            project.updated_at = datetime.utcnow()
+        page.project.updated_at = datetime.utcnow()
         
         db.session.commit()
         
@@ -224,9 +218,8 @@ def update_page_description(project_id, page_id):
     }
     """
     try:
-        page = Page.query.get(page_id)
-        
-        if not page or page.project_id != project_id:
+        page = owned_page_or_404(project_id, page_id)
+        if not page:
             return not_found('Page')
         
         data = request.get_json()
@@ -238,9 +231,7 @@ def update_page_description(project_id, page_id):
         page.updated_at = datetime.utcnow()
         
         # Update project
-        project = owned_project_or_404(project_id)
-        if project:
-            project.updated_at = datetime.utcnow()
+        page.project.updated_at = datetime.utcnow()
         
         db.session.commit()
         
@@ -262,9 +253,8 @@ def generate_page_description(project_id, page_id):
     }
     """
     try:
-        page = Page.query.get(page_id)
-        
-        if not page or page.project_id != project_id:
+        page = owned_page_or_404(project_id, page_id)
+        if not page:
             return not_found('Page')
         
         project = owned_project_or_404(project_id)
@@ -363,9 +353,8 @@ def generate_page_image(project_id, page_id):
     }
     """
     try:
-        page = Page.query.get(page_id)
-        
-        if not page or page.project_id != project_id:
+        page = owned_page_or_404(project_id, page_id)
+        if not page:
             return not_found('Page')
         
         project = owned_project_or_404(project_id)
@@ -563,9 +552,8 @@ def edit_page_image(project_id, page_id):
     - context_images: file uploads (multiple files with key "context_images")
     """
     try:
-        page = Page.query.get(page_id)
-        
-        if not page or page.project_id != project_id:
+        page = owned_page_or_404(project_id, page_id)
+        if not page:
             return not_found('Page')
         
         if not page.generated_image_path:
@@ -737,9 +725,8 @@ def get_page_image_versions(project_id, page_id):
     GET /api/projects/{project_id}/pages/{page_id}/image-versions - Get all image versions for a page
     """
     try:
-        page = Page.query.get(page_id)
-        
-        if not page or page.project_id != project_id:
+        page = owned_page_or_404(project_id, page_id)
+        if not page:
             return not_found('Page')
         
         versions = PageImageVersion.query.filter_by(page_id=page_id)\
@@ -760,9 +747,8 @@ def set_current_image_version(project_id, page_id, version_id):
     Set a specific version as the current one
     """
     try:
-        page = Page.query.get(page_id)
-        
-        if not page or page.project_id != project_id:
+        page = owned_page_or_404(project_id, page_id)
+        if not page:
             return not_found('Page')
         
         version = PageImageVersion.query.get(version_id)
@@ -806,9 +792,8 @@ def regenerate_renovation_page(project_id, page_id):
     This re-runs the renovation pipeline for a single page.
     """
     try:
-        page = Page.query.get(page_id)
-
-        if not page or page.project_id != project_id:
+        page = owned_page_or_404(project_id, page_id)
+        if not page:
             return not_found('Page')
 
         project = owned_project_or_404(project_id)
@@ -868,6 +853,11 @@ def regenerate_renovation_page(project_id, page_id):
 
         # Supplement with header/footer from layout.json
         if extract_id:
+            register_mineru_artifact(
+                extract_id,
+                user_id=project.user_id,
+                project_id=project.id,
+            )
             hf_text = file_parser_service.extract_header_footer_from_layout(extract_id)
             if hf_text:
                 md_text = hf_text + '\n\n' + md_text
@@ -938,9 +928,8 @@ def update_page_narration(project_id, page_id):
     }
     """
     try:
-        page = Page.query.get(page_id)
-
-        if not page or page.project_id != project_id:
+        page = owned_page_or_404(project_id, page_id)
+        if not page:
             return not_found('Page')
 
         data = request.get_json()
@@ -951,9 +940,7 @@ def update_page_narration(project_id, page_id):
         page.set_narration_text(data['narration_text'])
         page.updated_at = datetime.utcnow()
 
-        project = owned_project_or_404(project_id)
-        if project:
-            project.updated_at = datetime.utcnow()
+        page.project.updated_at = datetime.utcnow()
 
         db.session.commit()
 
@@ -977,9 +964,8 @@ def generate_page_narration(project_id, page_id):
     }
     """
     try:
-        page = Page.query.get(page_id)
-
-        if not page or page.project_id != project_id:
+        page = owned_page_or_404(project_id, page_id)
+        if not page:
             return not_found('Page')
 
         project = owned_project_or_404(project_id)

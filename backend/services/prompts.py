@@ -702,8 +702,7 @@ def get_narration_generation_prompt(
         language: 输出语言
         config: 可配置的演讲稿生成参数
     """
-    lang_cfg = LANGUAGE_CONFIG.get(language, LANGUAGE_CONFIG['zh'])
-    lang_instruction = lang_cfg['instruction']
+    lang_instruction = get_language_instruction(language)
     total_pages = len(pages)
     fallback_topic = ''
     if pages:

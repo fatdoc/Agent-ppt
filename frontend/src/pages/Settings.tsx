@@ -1189,7 +1189,8 @@ export const Settings: React.FC = () => {
 
       // 启动异步测试，获取任务ID
       const response = await action(testSettings);
-      const taskId = response.data.task_id;
+      const taskId = response.data?.task_id;
+      if (!taskId) throw new Error(t('settings.serviceTest.testFailed'));
 
       // isActive tracks whether this test round is still pending — avoids stale closure
       let isActive = true;
@@ -1207,14 +1208,16 @@ export const Settings: React.FC = () => {
       pollInterval = setInterval(async () => {
         try {
           const statusResponse = await api.getTestStatus(taskId);
-          const taskStatus = statusResponse.data.status;
+          const task = statusResponse.data;
+          if (!task) throw new Error(t('settings.serviceTest.testFailed'));
+          const taskStatus = task.status;
 
           if (taskStatus === 'COMPLETED') {
-            const detail = formatDetail(statusResponse.data.result || {});
-            const message = statusResponse.data.message || t('settings.messages.testSuccess');
+            const detail = formatDetail(task.result || {});
+            const message = task.message || t('settings.messages.testSuccess');
             finish({ status: 'success', message, detail }, message, 'success');
           } else if (taskStatus === 'FAILED') {
-            const errorMessage = statusResponse.data.error || t('settings.serviceTest.testFailed');
+            const errorMessage = task.error || t('settings.serviceTest.testFailed');
             finish({ status: 'error', message: errorMessage }, `${t('settings.serviceTest.testFailed')}: ${errorMessage}`, 'error');
           }
           // 如果是 PENDING 或 PROCESSING，继续轮询

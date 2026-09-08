@@ -9,6 +9,7 @@ from werkzeug.utils import secure_filename
 from PIL import Image
 from models import Project
 from models import db
+from utils.path_utils import resolve_path_within
 
 
 def convert_image_to_rgb(image: Image.Image) -> Image.Image:
@@ -306,10 +307,7 @@ class FileService:
         Returns:
             Absolute file path
         """
-        result = (self.upload_folder / relative_path.replace('\\', '/')).resolve()
-        if not str(result).startswith(str(self.upload_folder.resolve())):
-            raise ValueError(f"Path traversal detected: {relative_path}")
-        return str(result)
+        return str(resolve_path_within(relative_path.replace('\\', '/'), self.upload_folder))
     
     def delete_template(self, project_id: str) -> bool:
         """

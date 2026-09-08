@@ -6,6 +6,7 @@ Create Date: 2026-06-20 00:00:00.000000
 
 """
 import uuid
+import secrets
 
 import sqlalchemy as sa
 from alembic import op
@@ -58,7 +59,9 @@ def _ensure_default_user() -> str:
         {
             "id": user_id,
             "username": "admin",
-            "password_hash": generate_password_hash("admin123"),
+            # A migrated owner is needed for legacy rows, but a migration must
+            # never create a remotely usable, shared credential.
+            "password_hash": generate_password_hash(secrets.token_urlsafe(48)),
         },
     )
     return user_id

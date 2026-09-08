@@ -155,6 +155,13 @@ def test_parse_file_uses_local_mineru_gradio_zip_response(tmp_path):
     shutil.rmtree(extracted_image.parents[1])
 
 
+def test_mineru_versioned_base_has_no_duplicate_api_prefix():
+    for base in ('https://mineru.net/api/v4', 'https://mineru.net/api/v4/'):
+        service = FileParserService(mineru_provider='cloud', mineru_api_base=base)
+        assert service.get_upload_url_api == 'https://mineru.net/api/v4/file-urls/batch'
+        assert service.get_result_api_template == 'https://mineru.net/api/v4/extract-results/batch/{}'
+
+
 def test_mineru_provider_is_not_inferred_from_api_base():
     """Provider selection must follow explicit configuration, not hidden inference."""
     service = FileParserService(

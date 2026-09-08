@@ -17,6 +17,7 @@ from models import db, ReferenceFile, Project
 from utils.response import success_response, error_response, bad_request, not_found
 from utils.auth import current_user_id, owned_project_or_404
 from services.file_parser_service import FileParserService
+from services.file_artifact_service import register_mineru_artifact
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +102,13 @@ def _parse_file_async(file_id: str, file_path: str, filename: str, app):
             
             # Update database
             reference_file.mineru_batch_id = batch_id
+            if extract_id:
+                register_mineru_artifact(
+                    extract_id,
+                    user_id=reference_file.user_id,
+                    project_id=reference_file.project_id,
+                    reference_file_id=reference_file.id,
+                )
             if error_message:
                 reference_file.parse_status = 'failed'
                 reference_file.error_message = error_message

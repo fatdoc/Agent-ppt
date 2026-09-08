@@ -16,7 +16,17 @@ from flask_migrate import Migrate
 # Load environment variables from project root .env file
 _project_root = Path(__file__).parent.parent
 _env_file = _project_root / '.env'
-load_dotenv(dotenv_path=_env_file, override=True)
+
+
+def _load_project_dotenv(env_file=_env_file):
+    """Load development defaults unless the operator explicitly opts out."""
+    enabled = os.getenv('LOAD_DOTENV', 'true').strip().lower() in {'1', 'true', 'yes', 'on'}
+    if enabled:
+        # Explicit deployment/test environment values always win.
+        load_dotenv(dotenv_path=env_file, override=False)
+
+
+_load_project_dotenv()
 
 from flask import Flask
 from flask_cors import CORS
@@ -49,6 +59,7 @@ def set_sqlite_pragma(dbapi_conn, connection_record):
 
     cursor = dbapi_conn.cursor()
     try:
+        cursor.execute("PRAGMA foreign_keys=ON")
         cursor.execute("PRAGMA journal_mode=WAL")
         cursor.execute("PRAGMA synchronous=NORMAL")
         cursor.execute("PRAGMA busy_timeout=60000")  # 60 seconds timeout
@@ -62,6 +73,7 @@ def create_app():
     
     # Load configuration from Config class
     app.config.from_object(Config)
+    _validate_security_configuration(app)
 
     # Allow DATABASE_URL env var to override config at runtime (supports test isolation)
     if os.getenv('DATABASE_URL'):
@@ -104,7 +116,7 @@ def create_app():
 
     # Initialize extensions
     db.init_app(app)
-    CORS(app, origins=cors_origins)
+    CORS(app, origins=cors_origins, supports_credentials=cors_origins != '*')
     # Database migrations (Alembic via Flask-Migrate)
     Migrate(app, db)
     
@@ -136,7 +148,7 @@ def create_app():
     @app.before_request
     def _authenticate_user():
         from flask import g, request
-        from utils.auth import authenticate_request
+        from utils.auth import authenticate_request, validate_csrf_request
         if request.path in ('/', '/health'):
             return
         if request.path in ('/api/auth/config', '/api/auth/login', '/api/auth/register'):
@@ -148,6 +160,9 @@ def create_app():
         auth_error = authenticate_request()
         if auth_error:
             return auth_error
+        csrf_error = validate_csrf_request()
+        if csrf_error:
+            return csrf_error
         user = getattr(g, 'current_user', None)
         if user:
             _load_settings_to_config(app, user.id)
@@ -224,6 +239,15 @@ def create_app():
         }
     
     return app
+
+
+def _validate_security_configuration(app):
+    """Fail closed for production settings that make signed sessions forgeable."""
+    if os.getenv('FLASK_ENV', '').strip().lower() != 'production':
+        return
+    secret_key = str(app.config.get('SECRET_KEY') or '')
+    if secret_key == 'your-secret-key-change-this' or len(secret_key) < 32:
+        raise RuntimeError('Production SECRET_KEY must be explicitly set to at least 32 characters')
 
 
 def _load_settings_to_config(app, user_id=None):

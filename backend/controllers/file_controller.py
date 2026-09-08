@@ -4,9 +4,10 @@ File Controller - handles static file serving
 from flask import Blueprint, send_from_directory, current_app
 from utils import error_response, not_found
 from utils.auth import current_user_id
-from models import Material, Project, UserTemplate
-from utils.path_utils import find_file_with_prefix
+from models import FileArtifact, Material, Page, Project, ReferenceFile, UserTemplate
+from utils.path_utils import find_file_with_prefix, is_path_within, resolve_path_within
 import os
+import re
 from pathlib import Path
 from werkzeug.utils import secure_filename
 
@@ -28,9 +29,10 @@ def serve_file(project_id, file_type, filename):
             return not_found('File')
 
         user_id = current_user_id()
+        if not user_id:
+            return not_found('File')
         query = Project.query.filter(Project.id == project_id)
-        if user_id:
-            query = query.filter(Project.user_id == user_id)
+        query = query.filter(Project.user_id == user_id)
         if not query.first():
             return not_found('File')
         
@@ -68,9 +70,10 @@ def serve_user_template(template_id, filename):
     """
     try:
         user_id = current_user_id()
+        if not user_id:
+            return not_found('File')
         query = UserTemplate.query.filter(UserTemplate.id == template_id)
-        if user_id:
-            query = query.filter(UserTemplate.user_id == user_id)
+        query = query.filter(UserTemplate.user_id == user_id)
         if not query.first():
             return not_found('File')
 
@@ -108,12 +111,13 @@ def serve_global_material(filename):
     try:
         safe_filename = secure_filename(filename)
         user_id = current_user_id()
+        if not user_id:
+            return not_found('File')
         query = Material.query.filter(
             Material.project_id.is_(None),
             Material.filename == safe_filename,
         )
-        if user_id:
-            query = query.filter(Material.user_id == user_id)
+        query = query.filter(Material.user_id == user_id)
         if not query.first():
             return not_found('File')
 
@@ -149,7 +153,40 @@ def serve_mineru_file(extract_id, filepath):
         filepath: Relative file path within the extract
     """
     try:
-        root_dir = os.path.join(current_app.config['UPLOAD_FOLDER'], 'mineru_files', extract_id)
+        user_id = current_user_id()
+        if not user_id or not re.fullmatch(r'[A-Za-z0-9_.-]{1,100}', extract_id):
+            return not_found('File')
+
+        artifact = FileArtifact.query.filter_by(
+            extract_id=extract_id,
+            user_id=user_id,
+            deleted_at=None,
+        ).first()
+        if artifact:
+            root_relative_path = artifact.root_relative_path
+        else:
+            marker = f'/files/mineru/{extract_id}/'
+            legacy_reference = ReferenceFile.query.filter(
+                ReferenceFile.user_id == user_id,
+                ReferenceFile.markdown_content.contains(marker),
+            ).first()
+            legacy_page = (
+                Page.query
+                .join(Project, Page.project_id == Project.id)
+                .filter(
+                    Project.user_id == user_id,
+                    Page.description_content.contains(marker),
+                )
+                .first()
+            )
+            if not legacy_reference and not legacy_page:
+                return not_found('File')
+            root_relative_path = f'mineru_files/{extract_id}'
+
+        try:
+            root_dir = resolve_path_within(root_relative_path, current_app.config['UPLOAD_FOLDER'])
+        except ValueError:
+            return error_response('INVALID_PATH', 'Invalid file path', 403)
         full_path = Path(root_dir) / filepath
 
         # This prevents path traversal attacks
@@ -158,7 +195,7 @@ def serve_mineru_file(extract_id, filepath):
         try:
             # Check if the path is trying to escape the root directory
             resolved_full_path = full_path.resolve()
-            if not str(resolved_full_path).startswith(str(resolved_root_dir)):
+            if not is_path_within(resolved_full_path, resolved_root_dir):
                 return error_response('INVALID_PATH', 'Invalid file path', 403)
         except Exception:
             # If we can't resolve the path at all, it's invalid
@@ -173,7 +210,7 @@ def serve_mineru_file(extract_id, filepath):
                 resolved_matched_path = matched_path.resolve(strict=True)
                 
                 # Verify the matched file is still within the root directory
-                if not str(resolved_matched_path).startswith(str(resolved_root_dir)):
+                if not is_path_within(resolved_matched_path, resolved_root_dir):
                     return error_response('INVALID_PATH', 'Invalid file path', 403)
             except FileNotFoundError:
                 return not_found('File')

@@ -1,6 +1,8 @@
 import { apiClient, getAuthHeaders } from './client';
-import type { Project, Task, ApiResponse, CreateProjectRequest, Page, CreditAccount, CreditEstimate, CreditLedgerEntry, GenerationMode, HarnessTemplate } from '@/types';
+import type { Project, Task, ApiResponse, CreateProjectRequest, Page, CreditAccount, CreditEstimate, CreditLedgerEntry, GenerationMode, HarnessTemplate, Material } from '@/types';
 import type { Settings } from '../types/index';
+
+export type { Material } from '@/types';
 
 export interface AgentModeCreatePlanRequest {
   topic: string;
@@ -74,8 +76,8 @@ export const getAuthConfig = async (): Promise<ApiResponse<{ enabled: boolean }>
 export const login = async (
   identifier: string,
   password: string
-): Promise<ApiResponse<{ user: AuthUser; token: string }>> => {
-  const response = await apiClient.post<ApiResponse<{ user: AuthUser; token: string }>>('/api/auth/login', {
+): Promise<ApiResponse<{ user: AuthUser }>> => {
+  const response = await apiClient.post<ApiResponse<{ user: AuthUser }>>('/api/auth/login', {
     identifier,
     password,
   });
@@ -86,8 +88,8 @@ export const register = async (
   username: string,
   password: string,
   email?: string
-): Promise<ApiResponse<{ user: AuthUser; token: string }>> => {
-  const response = await apiClient.post<ApiResponse<{ user: AuthUser; token: string }>>('/api/auth/register', {
+): Promise<ApiResponse<{ user: AuthUser }>> => {
+  const response = await apiClient.post<ApiResponse<{ user: AuthUser }>>('/api/auth/register', {
     username,
     password,
     email,
@@ -313,9 +315,15 @@ export interface OutlineStreamPage {
   part?: string;
 }
 
+export interface OutlineStreamDone {
+  total: number;
+  pages: Page[];
+  complete?: boolean;
+}
+
 export interface OutlineStreamCallbacks {
   onPage: (page: OutlineStreamPage) => void;
-  onDone: (data: { total: number; pages: Page[] }) => void;
+  onDone: (data: OutlineStreamDone) => void;
   onError: (message: string) => void;
 }
 
@@ -336,6 +344,7 @@ export const generateOutlineStream = async (
       ...(accessCode ? { 'X-Access-Code': accessCode } : {}),
     },
     body: JSON.stringify({ language: lang, lock_page_count: lockPageCount }),
+    credentials: 'same-origin',
   });
 
   if (!response.ok || !response.body) {
@@ -427,9 +436,15 @@ export interface DescriptionStreamEvent {
   extra_fields?: Record<string, string>;
 }
 
+export interface DescriptionStreamDone {
+  total: number;
+  pages: Page[];
+  warning?: string;
+}
+
 export interface DescriptionStreamCallbacks {
   onDescription: (data: DescriptionStreamEvent) => void;
-  onDone: (data: { total: number; pages: Page[] }) => void;
+  onDone: (data: DescriptionStreamDone) => void;
   onError: (message: string) => void;
 }
 
@@ -450,6 +465,7 @@ export const generateDescriptionsStream = async (
       ...(accessCode ? { 'X-Access-Code': accessCode } : {}),
     },
     body: JSON.stringify({ language: lang, detail_level: detailLevel || 'default' }),
+    credentials: 'same-origin',
   });
 
   if (!response.ok || !response.body) {
@@ -1057,23 +1073,6 @@ export const processMaterialImage = async (
   );
   return response.data;
 };
-
-/**
- * 素材信息接口
- */
-export interface Material {
-  id: string;
-  project_id?: string | null;
-  filename: string;
-  url: string;
-  relative_path: string;
-  created_at: string;
-  // 可选的附加信息：用于展示友好名称
-  prompt?: string;
-  original_filename?: string;
-  source_filename?: string;
-  name?: string;
-}
 
 /**
  * 获取素材列表

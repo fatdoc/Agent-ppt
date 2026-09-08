@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from flask import current_app, g
+from sqlalchemy.exc import IntegrityError
 
 from models import Page, Project, PublicPptGeneration, Task, UserTemplate, db
 from services import FileService, InputGenerationOptions, InputGenerationService, ProjectContext
@@ -264,7 +265,21 @@ def create_generation(
     )
     generation.set_request_data(normalized)
     db.session.add(generation)
-    db.session.commit()
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        if not idempotency_key:
+            raise
+        existing = PublicPptGeneration.query.filter_by(
+            user_id=user_id,
+            idempotency_key=idempotency_key,
+        ).first()
+        if not existing:
+            raise
+        if _canonical_json(existing.get_request_data()) != _canonical_json(normalized):
+            raise IdempotencyConflict('Idempotency-Key was already used with a different request')
+        return existing, False
     return generation, True
 
 

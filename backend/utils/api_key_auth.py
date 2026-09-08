@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import hmac
-from datetime import datetime
+import os
+from datetime import datetime, timedelta
 
 from flask import g, request
 
 from models import ApiKey, db
+from utils.auth import single_user_mode_allows, single_user_mode_maintenance_response
 from utils.response import error_response
 
 
@@ -33,9 +35,14 @@ def authenticate_api_key(required_scope: str = "ppt:generate"):
         return error_response("INSUFFICIENT_SCOPE", f"API key requires scope: {required_scope}", 403)
     if not api_key.user or not api_key.user.is_active:
         return error_response("INVALID_API_KEY", "The API key owner is inactive", 401)
+    if not single_user_mode_allows(api_key.user):
+        return single_user_mode_maintenance_response()
 
-    api_key.last_used_at = datetime.utcnow()
-    db.session.commit()
+    now = datetime.utcnow()
+    write_interval = max(0, int(os.getenv('API_KEY_LAST_USED_WRITE_INTERVAL_SECONDS', '300')))
+    if not api_key.last_used_at or now - api_key.last_used_at >= timedelta(seconds=write_interval):
+        api_key.last_used_at = now
+        db.session.commit()
     g.current_api_key = api_key
     g.current_user = api_key.user
     return None

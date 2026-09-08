@@ -58,6 +58,7 @@ class FileParserService:
         "/api/v4/extract/task",
         "/api/v4/file-urls/batch",
         "/api/v4/extract-results/batch",
+        "/api/v4",
     )
     
     def __init__(self, mineru_token: str = "", mineru_api_base: str = "",

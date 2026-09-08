@@ -344,7 +344,7 @@ describe('initializeProject - reference file association', () => {
     })
 
     expect(mockCreateProject).toHaveBeenCalledWith(expect.objectContaining({
-      creation_type: 'descriptions',
+      creation_type: 'outline',
       outline_text: '第一页：封面\n第二页：方案',
       description_text: '第一页：封面采用大标题居中\n\n第二页：方案采用三栏布局',
     }))

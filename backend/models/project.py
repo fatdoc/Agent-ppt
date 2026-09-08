@@ -14,7 +14,7 @@ class Project(db.Model):
     __tablename__ = 'projects'
     
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id = db.Column(db.String(36), db.ForeignKey('users.id'), nullable=True, index=True)
+    user_id = db.Column(db.String(36), db.ForeignKey('users.id', ondelete='CASCADE'), nullable=True, index=True)
     project_title = db.Column(db.String(255), nullable=True)
     idea_prompt = db.Column(db.Text, nullable=True)
     outline_text = db.Column(db.Text, nullable=True)  # 用户输入的大纲文本（用于outline类型）
@@ -25,6 +25,7 @@ class Project(db.Model):
     creation_type = db.Column(db.String(20), nullable=False, default='idea')  # idea|outline|descriptions
     template_image_path = db.Column(db.String(500), nullable=True)
     template_style = db.Column(db.Text, nullable=True)  # 风格描述文本（无模板图模式）
+    template_mode = db.Column(db.String(10), nullable=False, server_default='single', default='single')
     generation_mode = db.Column(db.String(30), nullable=False, server_default='fast', default='fast')
     harness_template = db.Column(db.String(80), nullable=True)
     harness_payload = db.Column(db.Text, nullable=True)
@@ -50,6 +51,13 @@ class Project(db.Model):
                            cascade='all, delete-orphan')
     materials = db.relationship('Material', back_populates='project', lazy='select',
                            cascade='all, delete-orphan')
+    template_assets = db.relationship(
+        'ProjectTemplateAsset',
+        back_populates='project',
+        lazy='select',
+        cascade='all, delete-orphan',
+        order_by='ProjectTemplateAsset.sort_order',
+    )
     user = db.relationship('User', back_populates='projects')
     
     def to_dict(self, include_pages=False):
@@ -76,6 +84,7 @@ class Project(db.Model):
             'creation_type': self.creation_type,
             'template_image_url': f'/files/{self.id}/template/{self.template_image_path.split("/")[-1]}' if self.template_image_path else None,
             'template_style': self.template_style,
+            'template_mode': self.template_mode or 'single',
             'generation_mode': self.generation_mode or 'fast',
             'harness_template': self.harness_template,
             'harness_payload': self.get_harness_payload(),

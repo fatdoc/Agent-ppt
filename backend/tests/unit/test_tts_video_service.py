@@ -11,8 +11,6 @@ import tempfile
 import threading
 import time
 import uuid
-import importlib
-import importlib.util
 from unittest.mock import patch, MagicMock
 
 # 确保 backend 目录在路径中
@@ -21,28 +19,11 @@ sys.path.insert(0, os.path.abspath(_backend_dir))
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 直接加载 tts_video_service 模块（绕过 services/__init__.py）
+# 使用正常包导入，避免替换 sys.modules 污染其他测试
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _load_module_directly(module_name: str, file_path: str):
-    """从文件直接加载模块，避免触发 __init__.py 的级联导入"""
-    spec = importlib.util.spec_from_file_location(module_name, file_path)
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = mod
-    spec.loader.exec_module(mod)
-    return mod
-
-_services_dir = os.path.join(os.path.abspath(_backend_dir), 'services')
-
-_tts_mod = _load_module_directly(
-    'services.tts_video_service',
-    os.path.join(_services_dir, 'tts_video_service.py'),
-)
-
-_prompts_mod = _load_module_directly(
-    'services.prompts',
-    os.path.join(_services_dir, 'prompts.py'),
-)
+from services import prompts as _prompts_mod
+from services import tts_video_service as _tts_mod
 
 get_default_voice = _tts_mod.get_default_voice
 check_ffmpeg_available = _tts_mod.check_ffmpeg_available
@@ -612,8 +593,12 @@ class TestExportVideoRoute:
     def _create_project_with_image_page(self, app, allow_partial: bool):
         from PIL import Image
         from models import db, Project, Page
+        from utils.auth import get_or_create_default_user
+
+        owner = get_or_create_default_user()
 
         project = Project(
+            user_id=owner.id,
             idea_prompt='视频导出测试',
             creation_type='idea',
             export_allow_partial=allow_partial,

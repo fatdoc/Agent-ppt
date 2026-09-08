@@ -3,6 +3,11 @@ from pathlib import Path
 import pytest
 
 from services.prompt_registry import PromptRegistry, prompt_registry
+from services.prompts import (
+    LANGUAGE_CONFIG,
+    get_language_instruction,
+    get_narration_generation_prompt,
+)
 
 
 def test_prompt_registry_loads_yaml_templates():
@@ -43,3 +48,38 @@ def test_prompt_registry_reports_missing_variables(tmp_path: Path):
     with pytest.raises(KeyError, match="missing variables: name"):
         registry.render("demo.prompt")
 
+
+@pytest.mark.parametrize("language", ["zh", "ja", "en", "auto"])
+def test_language_config_references_registered_prompts(language):
+    config = LANGUAGE_CONFIG[language]
+    instruction_id = config["instruction_id"]
+
+    if instruction_id is None:
+        assert get_language_instruction(language) == ""
+    else:
+        assert prompt_registry.get(instruction_id)
+        assert get_language_instruction(language)
+
+
+@pytest.mark.parametrize(
+    ("language", "expected_instruction"),
+    [
+        ("zh", "请使用全中文输出"),
+        ("ja", "すべて日本語で出力してください"),
+        ("en", "Please output all in English"),
+    ],
+)
+def test_narration_prompt_uses_language_registry_contract(language, expected_instruction):
+    prompt = get_narration_generation_prompt(
+        pages=[{
+            "page_index": 1,
+            "title": "Contract smoke test",
+            "points": ["Prompt registry"],
+            "description_text": "Verify the narration template contract.",
+        }],
+        language=language,
+    )
+
+    assert expected_instruction in prompt
+    assert "{{" not in prompt
+    assert "=== SLIDE 1 ===" in prompt

@@ -19,7 +19,7 @@ class PublicPptGeneration(db.Model):
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id = db.Column(db.String(36), db.ForeignKey("users.id"), nullable=False, index=True)
     api_key_id = db.Column(db.String(36), db.ForeignKey("api_keys.id"), nullable=False, index=True)
-    project_id = db.Column(db.String(36), db.ForeignKey("projects.id"), nullable=False, unique=True, index=True)
+    project_id = db.Column(db.String(36), db.ForeignKey("projects.id"), nullable=False, unique=True)
     description_task_id = db.Column(db.String(36), db.ForeignKey("tasks.id"), nullable=False)
     image_task_id = db.Column(db.String(36), db.ForeignKey("tasks.id"), nullable=False)
     idempotency_key = db.Column(db.String(128), nullable=True)

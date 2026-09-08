@@ -1143,6 +1143,49 @@ class ExportService:
         return merged_results, failed_extractions
     
     @staticmethod
+    def _extract_styles_with_checkpoints(images, extractor, workers, fail_fast,
+                                         checkpoint, keys, report_progress):
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        styles, failures, pending = {}, [], []
+        reused = 0
+        for img in images:
+            key = keys.get(img.image_id)
+            saved = checkpoint.load_styles(key, img.image_id) if key else None
+            expected = {item[0] for item in ExportService._collect_text_elements_for_extraction(img.elements)}
+            if saved is not None and expected.issubset(saved):
+                styles.update(saved)
+                reused += 1
+            else:
+                pending.append(img)
+        report_progress("断点恢复", f"已复用 {reused}/{len(images)} 页文字样式，待处理 {len(pending)} 页", 50)
+
+        def process(img):
+            if not ExportService._collect_text_elements_for_extraction(img.elements):
+                result, errors = {}, []
+            else:
+                result, errors = ExportService._batch_extract_text_styles_hybrid(
+                    [img], extractor, max_workers=1, fail_fast=fail_fast,
+                )
+            expected = {item[0] for item in ExportService._collect_text_elements_for_extraction(img.elements)}
+            key = keys.get(img.image_id)
+            valid_styles = all(not (style.confidence == 0 and style.metadata.get('error'))
+                               for style in result.values())
+            if key and not errors and valid_styles and expected.issubset(result):
+                checkpoint.save_styles(key, img.image_id, result)
+            return result, errors
+
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = [executor.submit(process, img) for img in pending]
+            for completed, future in enumerate(as_completed(futures), start=reused + 1):
+                result, errors = future.result()
+                styles.update(result)
+                failures.extend(errors)
+                report_progress("样式提取", f"已完成 {completed}/{len(images)} 页文字样式（复用 {reused} 页）",
+                                50 + int(20 * completed / len(images)))
+        return styles, failures
+
+    @staticmethod
     def create_editable_pptx_with_recursive_analysis(
         image_paths: List[str] = None,
         output_file: str = None,
@@ -1158,6 +1201,7 @@ class ExportService:
         enable_icon_subject_extraction: bool = False,  # 是否对小尺寸图标走百度智能抠图
         fail_fast: bool = True,  # 是否在遇到错误时立即停止（False则收集警告继续）
         ai_service = None,  # 可选：任务级固定的 AI 服务，避免后台任务配置漂移
+        checkpoint_dir: str = None,  # 项目内持久化断点目录；再次导出自动恢复
     ) -> Tuple[Optional[bytes], ExportWarnings]:
         """
         使用递归图片可编辑化服务创建可编辑PPTX
@@ -1204,6 +1248,30 @@ class ExportService:
                 except Exception as e:
                     logger.warning(f"进度回调失败: {e}")
         
+        checkpoint = None
+        checkpoint_keys = {}
+        if checkpoint_dir and image_paths:
+            from services.editable_export_checkpoint import EditableExportCheckpoint, provider_signature
+            from config import get_config
+            from flask import current_app, has_app_context
+            defaults = get_config()
+            config_names = (
+                'MINERU_PROVIDER', 'MINERU_API_BASE', 'MINERU_LOCAL_API_BASE',
+                'MINERU_LOCAL_BACKEND', 'MINERU_LOCAL_PARSE_METHOD', 'INPAINTING_PROVIDER',
+            )
+            provider_config = {
+                name: current_app.config.get(name, getattr(defaults, name, None))
+                if has_app_context() else getattr(defaults, name, None)
+                for name in config_names
+            }
+            checkpoint = EditableExportCheckpoint(checkpoint_dir, {
+                'max_depth': max_depth, 'extractor': export_extractor_method,
+                'inpaint': export_inpaint_method, 'icons': enable_icon_subject_extraction,
+                'providers': provider_signature(ai_service), 'config': provider_config,
+            })
+            checkpoint_keys = {path: checkpoint.key(path) for path in image_paths}
+        image_checkpoint_keys = {}
+
         # 如果已提供分析结果，直接使用；否则需要分析
         if editable_images is not None:
             logger.info(f"使用已提供的 {len(editable_images)} 个分析结果创建PPTX")
@@ -1222,28 +1290,40 @@ class ExportService:
                 f"inpaint={export_inpaint_method}, "
                 f"icon_subject_extraction={enable_icon_subject_extraction}"
             )
-            config = ServiceConfig.from_defaults(
-                max_depth=max_depth,
-                extractor_method=export_extractor_method,
-                inpaint_method=export_inpaint_method,
-                enable_icon_subject_extraction=enable_icon_subject_extraction,
-                ai_service=ai_service,
-            )
-            editability_service = ImageEditabilityService(config)
+            results = [checkpoint.load_analysis(checkpoint_keys[path]) if checkpoint else None
+                       for path in image_paths]
+            editability_service = None
+            if any(result is None for result in results):
+                config = ServiceConfig.from_defaults(
+                    max_depth=max_depth,
+                    extractor_method=export_extractor_method,
+                    inpaint_method=export_inpaint_method,
+                    enable_icon_subject_extraction=enable_icon_subject_extraction,
+                    ai_service=ai_service,
+                )
+                editability_service = ImageEditabilityService(config)
+
+            def analyze_page(img_path):
+                result = editability_service.make_image_editable(img_path)
+                if checkpoint and result.metadata.get('checkpoint_complete', True):
+                    # Save in the worker: other successful pages survive fail-fast
+                    # even if the coordinator has already encountered a failure.
+                    checkpoint.save_analysis(checkpoint_keys[img_path], result)
+                return result
             
             # 2. 并发处理所有页面，生成EditableImage结构
             report_progress("版面分析", f"开始分析 {total_pages} 张图片（并发数: {max_workers}）...", 5)
             from concurrent.futures import ThreadPoolExecutor, as_completed
             
             editable_images = []
-            completed_count = 0
+            completed_count = sum(result is not None for result in results)
+            report_progress("断点恢复", f"已复用 {completed_count}/{total_pages} 页版面分析，待处理 {total_pages - completed_count} 页",
+                            5 + int(35 * completed_count / total_pages))
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 futures = {
-                    executor.submit(editability_service.make_image_editable, img_path): idx
-                    for idx, img_path in enumerate(image_paths)
+                    executor.submit(analyze_page, img_path): idx
+                    for idx, img_path in enumerate(image_paths) if results[idx] is None
                 }
-                
-                results = [None] * len(image_paths)
                 for future in as_completed(futures):
                     idx = futures[future]
                     try:
@@ -1285,6 +1365,12 @@ class ExportService:
                         )
                 
                 editable_images = results
+                if checkpoint:
+                    image_checkpoint_keys = {
+                        result.image_id: checkpoint_keys[path]
+                        for path, result in zip(image_paths, results)
+                        if not result.image_id.startswith('fallback-') and result.metadata.get('checkpoint_complete', True)
+                    }
         
         # 2.5. 使用混合策略提取所有文本元素的样式（如果提供了提取器）
         # 混合策略：全局识别（粗体/斜体/下划线/对齐）+ 单个裁剪识别（颜色）
@@ -1310,12 +1396,18 @@ class ExportService:
                     style_workers,
                     max_workers * 2,
                 )
-                text_styles_cache, failed_extractions = ExportService._batch_extract_text_styles_hybrid(
-                    editable_images=editable_images,
-                    text_attribute_extractor=text_attribute_extractor,
-                    max_workers=style_workers,
-                    fail_fast=fail_fast
-                )
+                if checkpoint:
+                    text_styles_cache, failed_extractions = ExportService._extract_styles_with_checkpoints(
+                        editable_images, text_attribute_extractor, style_workers, fail_fast,
+                        checkpoint, image_checkpoint_keys, report_progress,
+                    )
+                else:
+                    text_styles_cache, failed_extractions = ExportService._batch_extract_text_styles_hybrid(
+                        editable_images=editable_images,
+                        text_attribute_extractor=text_attribute_extractor,
+                        max_workers=style_workers,
+                        fail_fast=fail_fast
+                    )
                 
                 # 记录样式提取失败的元素（详细）
                 for element_id, reason in failed_extractions:

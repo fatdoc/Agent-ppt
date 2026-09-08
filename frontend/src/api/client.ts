@@ -3,24 +3,32 @@ import axios from 'axios';
 // 开发环境：通过 Vite proxy 转发
 // 生产环境：通过 nginx proxy 转发
 const API_BASE_URL = '';
-const AUTH_TOKEN_KEY = 'banana-auth-token';
 
-export const getAuthToken = (): string => localStorage.getItem(AUTH_TOKEN_KEY) || '';
+// Remove the credential left by pre-cookie releases. It is no longer read,
+// and keeping it around would unnecessarily extend exposure to an XSS bug.
+if (typeof window !== 'undefined') {
+  window.localStorage.removeItem('banana-auth-token');
+}
 
-export const setAuthToken = (token: string): void => {
-  if (token) localStorage.setItem(AUTH_TOKEN_KEY, token);
-  else localStorage.removeItem(AUTH_TOKEN_KEY);
+const readCookie = (name: string): string => {
+  const prefix = `${encodeURIComponent(name)}=`;
+  const match = document.cookie.split('; ').find((item) => item.startsWith(prefix));
+  return match ? decodeURIComponent(match.slice(prefix.length)) : '';
 };
 
-export const getAuthHeaders = (): Record<string, string> => {
-  const token = getAuthToken();
-  return token ? { Authorization: `Bearer ${token}` } : {};
+export const getCsrfHeaders = (): Record<string, string> => {
+  const token = readCookie('banana_csrf_token');
+  return token ? { 'X-CSRF-Token': token } : {};
 };
+
+// Compatibility name for streaming helpers; now carries CSRF, not auth.
+export const getAuthHeaders = getCsrfHeaders;
 
 // 创建 axios 实例
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
   timeout: 300000, // 5分钟超时（AI生成可能很慢）
+  withCredentials: true,
 });
 
 // 请求拦截器
@@ -32,9 +40,9 @@ apiClient.interceptors.request.use(
       config.headers['X-Access-Code'] = accessCode;
     }
 
-    const authToken = getAuthToken();
-    if (authToken && config.headers) {
-      config.headers.Authorization = `Bearer ${authToken}`;
+    const method = (config.method || 'get').toLowerCase();
+    if (!['get', 'head', 'options'].includes(method) && config.headers) {
+      Object.assign(config.headers, getCsrfHeaders());
     }
 
     // 如果请求体是 FormData，删除 Content-Type 让浏览器自动设置

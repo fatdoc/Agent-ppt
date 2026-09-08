@@ -7,7 +7,7 @@ class UserStyleTemplate(db.Model):
     __tablename__ = 'user_style_templates'
 
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id = db.Column(db.String(36), db.ForeignKey('users.id'), nullable=True, index=True)
+    user_id = db.Column(db.String(36), db.ForeignKey('users.id', ondelete='CASCADE'), nullable=True, index=True)
     name = db.Column(db.String(200), nullable=False)
     description = db.Column(db.Text, nullable=False)
     color = db.Column(db.String(20), nullable=True)

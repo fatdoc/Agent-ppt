@@ -256,6 +256,8 @@ class AgentRun(db.Model):
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id = db.Column(db.String(36), db.ForeignKey("users.id"), nullable=True, index=True)
     project_id = db.Column(db.String(36), db.ForeignKey("projects.id"), nullable=True, index=True)
+    # Compatibility-only audit field. Deliberately omitted from API payloads.
+    legacy_project_id = db.Column(db.String(36), nullable=True, index=True)
     run_type = db.Column(db.String(64), nullable=False, default="agent_mode_v1")
     status = db.Column(db.String(32), nullable=False, default="running")
     input_json = db.Column(db.Text, nullable=True)

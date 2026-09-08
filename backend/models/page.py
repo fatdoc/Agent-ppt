@@ -23,12 +23,27 @@ class Page(db.Model):
     generated_image_path = db.Column(db.String(500), nullable=True)  # Original PNG image path
     cached_image_path = db.Column(db.String(500), nullable=True)  # Compressed JPG thumbnail path
     narration_text = db.Column(db.Text, nullable=True)  # Plain text narration for TTS video export
+    template_asset_id = db.Column(
+        db.String(36),
+        db.ForeignKey('project_template_assets.id', ondelete='SET NULL'),
+        nullable=True,
+        index=True,
+    )
+    template_style_text = db.Column(db.Text, nullable=True)
+    template_selection_source = db.Column(db.String(20), nullable=True)
+    template_match_reason = db.Column(db.Text, nullable=True)
+    template_match_confidence = db.Column(db.Float, nullable=True)
     status = db.Column(db.String(50), nullable=False, default='DRAFT')
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Relationships
     project = db.relationship('Project', back_populates='pages')
+    template_asset = db.relationship(
+        'ProjectTemplateAsset',
+        back_populates='pages_referenced',
+        foreign_keys=[template_asset_id],
+    )
     image_versions = db.relationship('PageImageVersion', back_populates='page', 
                                      lazy='dynamic', cascade='all, delete-orphan',
                                      order_by='PageImageVersion.version_number.desc()')
@@ -89,6 +104,11 @@ class Page(db.Model):
             'outline_content': self.get_outline_content(),
             'description_content': self.get_description_content(),
             'narration_text': self.narration_text,
+            'template_asset_id': self.template_asset_id,
+            'template_style_text': self.template_style_text,
+            'template_selection_source': self.template_selection_source,
+            'template_match_reason': self.template_match_reason,
+            'template_match_confidence': self.template_match_confidence,
             'generated_image_url': display_image_url,
             'status': self.status,
             'created_at': self.created_at.isoformat() if self.created_at else None,
@@ -102,4 +122,3 @@ class Page(db.Model):
     
     def __repr__(self):
         return f'<Page {self.id}: {self.order_index} - {self.status}>'
-

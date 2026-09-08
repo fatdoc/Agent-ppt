@@ -20,6 +20,12 @@ from models import (
 )
 from services import FileService
 from services.ai_service_manager import get_ai_service
+from services.credit_service import (
+    attach_task_credit_progress,
+    estimate_operation,
+    reserve_credits,
+    settle_task_credits,
+)
 from services.task_manager import generate_images_task, task_manager
 from utils.auth import current_user_id
 from utils.page_utils import get_filtered_pages
@@ -162,6 +168,16 @@ class AgentToolRegistry:
             task.set_progress({"total": len(pages), "completed": 0, "failed": 0})
             db.session.add(task)
             db.session.flush()
+            estimate = estimate_operation('images', page_count=len(pages))
+            reserve_credits(
+                user_id=current_user_id(),
+                amount=estimate.amount,
+                operation=estimate.operation,
+                project_id=project.id,
+                task_id=task.id,
+                metadata={**estimate.details, 'endpoint': 'agent_mode', 'job_type': job_type},
+            )
+            attach_task_credit_progress(task, estimate)
             for job in jobs:
                 job.task_id = task.id
                 job.status = "queued"
@@ -172,27 +188,37 @@ class AgentToolRegistry:
 
         result = self._record("generate_images_for_slides.submit", {"project_id": project.id, "page_ids": page_ids, "job_type": job_type}, run)
         task = Task.query.get(result["task_id"])
+        db.session.commit()
 
         file_service = FileService(current_app.config["UPLOAD_FOLDER"])
         ai_service = get_ai_service()
         outline = self._outline_for_pages(get_filtered_pages(project.id, None))
         app = current_app._get_current_object()
-        task_manager.submit_task(
-            task.id,
-            generate_images_task,
-            project.id,
-            ai_service,
-            file_service,
-            outline,
-            False,
-            current_app.config.get("MAX_IMAGE_WORKERS", 4),
-            project.image_aspect_ratio,
-            current_app.config["DEFAULT_RESOLUTION"],
-            app,
-            None,
-            current_app.config.get("OUTPUT_LANGUAGE", "zh"),
-            page_ids,
-        )
+        try:
+            task_manager.submit_task(
+                task.id,
+                generate_images_task,
+                project.id,
+                ai_service,
+                file_service,
+                outline,
+                False,
+                current_app.config.get("MAX_IMAGE_WORKERS", 4),
+                project.image_aspect_ratio,
+                current_app.config["DEFAULT_RESOLUTION"],
+                app,
+                None,
+                current_app.config.get("OUTPUT_LANGUAGE", "zh"),
+                page_ids,
+            )
+        except Exception:
+            task.status = 'FAILED'
+            task.error_message = 'Failed to submit background image task'
+            for job in jobs:
+                job.status = 'failed'
+            settle_task_credits(task.id, force_release=True)
+            db.session.commit()
+            raise
         return task
 
     @staticmethod

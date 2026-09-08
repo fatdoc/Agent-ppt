@@ -13,7 +13,6 @@ import {
 } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
 import { getAuthConfig, getCurrentUser, getSettings, login, logout, register, type AuthUser } from '@/api/endpoints';
-import { setAuthToken } from '@/api/client';
 import { useProjectStore } from '@/store/useProjectStore';
 import type { Settings } from '@/types';
 import { Button } from './Button';
@@ -79,8 +78,7 @@ export function AuthGuard({ children }: { children: ReactNode }) {
       const response = mode === 'login'
         ? await login(identifier.trim(), password)
         : await register(username.trim(), password, email.trim() || undefined);
-      if (!response.data?.token || !response.data.user) throw new Error('Missing auth token');
-      setAuthToken(response.data.token);
+      if (!response.data?.user) throw new Error('Missing authenticated user');
       setUser(response.data.user);
       setCurrentProject(null);
       localStorage.removeItem('currentProjectId');
@@ -97,9 +95,8 @@ export function AuthGuard({ children }: { children: ReactNode }) {
     try {
       await logout();
     } catch {
-      // Local token removal is enough for this client.
+      // The UI still clears local state if the backend is temporarily unavailable.
     }
-    setAuthToken('');
     setCurrentProject(null);
     localStorage.removeItem('currentProjectId');
     sessionStorage.removeItem('banana-settings');

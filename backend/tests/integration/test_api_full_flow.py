@@ -26,8 +26,8 @@ from PIL import Image
 
 # Skip these tests if service is not running (for backend-integration-test stage)
 pytestmark = pytest.mark.skipif(
-    os.environ.get('SKIP_SERVICE_TESTS', '').lower() == 'true',
-    reason="Skipping tests that require running backend service"
+    os.environ.get('RUN_SERVICE_TESTS', '').lower() != 'true',
+    reason="Set RUN_SERVICE_TESTS=true to target an explicitly prepared backend service",
 )
 
 
@@ -385,4 +385,3 @@ class TestAPIFullFlow:
         response = requests.delete(f"{BASE_URL}/api/projects/{pid}", timeout=10)
         assert response.status_code == 200
         print('✓ Project deleted successfully\n')
-

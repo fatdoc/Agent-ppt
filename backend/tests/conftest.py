@@ -23,6 +23,9 @@ os.environ['TESTING'] = 'true'
 os.environ['USE_MOCK_AI'] = 'true'  # 标记使用mock AI服务
 os.environ['GOOGLE_API_KEY'] = os.environ.get('GOOGLE_API_KEY', 'mock-api-key-for-testing')
 os.environ['FLASK_ENV'] = 'testing'
+# A few authorization matrix tests deliberately exercise the temporary legacy
+# web bearer compatibility path. Production defaults to cookie-only auth.
+os.environ['AUTH_ALLOW_LEGACY_BEARER'] = 'true'
 
 
 @pytest.fixture(scope='session')

@@ -29,6 +29,8 @@ from .user_style_template import UserStyleTemplate
 from .credit import CreditAccount, CreditLedger
 from .api_key import ApiKey
 from .public_ppt_generation import PublicPptGeneration
+from .file_artifact import FileArtifact
+from .project_template_asset import ProjectTemplateAsset
 from .agent_mode import (
     AgentRun,
     AgentStep,
@@ -45,5 +47,5 @@ __all__ = [
     'Material', 'ReferenceFile', 'Settings', 'UserStyleTemplate', 'CreditAccount',
     'CreditLedger', 'AgentRun', 'AgentStep', 'AgentToolCall', 'DeckVersion',
     'DeckVisualSystem', 'GenerationJob', 'PageVisualPlan', 'SlideVersion',
-    'ApiKey', 'PublicPptGeneration'
+    'ApiKey', 'PublicPptGeneration', 'FileArtifact', 'ProjectTemplateAsset'
 ]

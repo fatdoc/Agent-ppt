@@ -10,6 +10,11 @@ class CreditAccount(db.Model):
     """Per-user credit balance."""
 
     __tablename__ = 'credit_accounts'
+    __table_args__ = (
+        db.CheckConstraint('balance >= 0', name='ck_credit_accounts_balance_nonnegative'),
+        db.CheckConstraint('reserved_balance >= 0', name='ck_credit_accounts_reserved_nonnegative'),
+        db.CheckConstraint('reserved_balance <= balance', name='ck_credit_accounts_reserved_within_balance'),
+    )
 
     user_id = db.Column(db.String(36), db.ForeignKey('users.id'), primary_key=True)
     balance = db.Column(db.Integer, nullable=False, default=0)
@@ -42,11 +47,17 @@ class CreditLedger(db.Model):
     """Immutable-ish credit movements for audit and task settlement."""
 
     __tablename__ = 'credit_ledger'
+    __table_args__ = (
+        db.UniqueConstraint('task_id', 'entry_type', name='uq_credit_ledger_task_entry_type'),
+    )
 
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id = db.Column(db.String(36), db.ForeignKey('users.id'), nullable=False, index=True)
     task_id = db.Column(db.String(36), db.ForeignKey('tasks.id'), nullable=True, index=True)
     project_id = db.Column(db.String(36), db.ForeignKey('projects.id'), nullable=True, index=True)
+    # Compatibility-only audit fields. Deliberately omitted from API payloads.
+    legacy_task_id = db.Column(db.String(36), nullable=True, index=True)
+    legacy_project_id = db.Column(db.String(36), nullable=True, index=True)
     entry_type = db.Column(db.String(30), nullable=False, index=True)
     operation = db.Column(db.String(80), nullable=False, index=True)
     amount = db.Column(db.Integer, nullable=False)
@@ -54,6 +65,7 @@ class CreditLedger(db.Model):
     reserved_after = db.Column(db.Integer, nullable=False)
     metadata_json = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
+    settled_at = db.Column(db.DateTime, nullable=True)
 
     user = db.relationship('User', back_populates='credit_ledger')
     task = db.relationship('Task', back_populates='credit_entries')
@@ -82,4 +94,5 @@ class CreditLedger(db.Model):
             'reserved_after': self.reserved_after,
             'metadata': self.get_metadata(),
             'created_at': self.created_at.isoformat() if self.created_at else None,
+            'settled_at': self.settled_at.isoformat() if self.settled_at else None,
         }

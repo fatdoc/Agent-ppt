@@ -27,6 +27,7 @@ from services.agent_mode_tools import AgentToolRegistry
 from services.ai_service_manager import get_ai_service
 from services.harness_skills import get_scenario_pack, list_scenario_pack_ids, normalize_pack_id
 from services.harness_skills.base import HARNESS_MAX_PAGE_COUNT
+from services.credit_service import debit_credits_now, estimate_operation
 from utils.auth import current_user_id
 
 
@@ -55,6 +56,13 @@ class AgentModeService:
         pack = get_scenario_pack(harness_template)
         if pack is None:
             raise ValueError(f"harness_template must be one of: {', '.join(list_scenario_pack_ids())}")
+        plan_estimate = estimate_operation('outline', page_count=page_count)
+        debit_credits_now(
+            user_id=current_user_id(),
+            amount=plan_estimate.amount,
+            operation='agent_plan',
+            metadata={**plan_estimate.details, 'harness_template': harness_template},
+        )
         run = AgentRun(user_id=current_user_id(), run_type="agent_mode_v1", status="running")
         run.set_input({
             "topic": topic,

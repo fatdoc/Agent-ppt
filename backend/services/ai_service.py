@@ -38,6 +38,7 @@ from .prompts import (
 )
 from .ai_providers import get_text_provider, get_image_provider, get_caption_provider, TextProvider, ImageProvider
 from config import get_config
+from utils.path_utils import resolve_path_within
 
 logger = logging.getLogger(__name__)
 
@@ -940,10 +941,12 @@ class AIService:
                             # 通用 /files/ 路径（materials、项目文件等），转换为文件系统路径
                             upload_folder = get_config().UPLOAD_FOLDER
                             relative_path = ref_img[len('/files/'):].lstrip('/')
-                            local_path = os.path.abspath(os.path.join(upload_folder, relative_path))
-                            if not local_path.startswith(os.path.abspath(upload_folder)):
+                            try:
+                                local_path = str(resolve_path_within(relative_path, upload_folder))
+                            except ValueError:
                                 logger.warning(f"Path traversal attempt blocked: {ref_img}, skipping...")
-                            elif os.path.exists(local_path):
+                                continue
+                            if os.path.exists(local_path):
                                 opened = Image.open(local_path)
                                 ref_images.append(opened)
                                 owned_images.append(opened)

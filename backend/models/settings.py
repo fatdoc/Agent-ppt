@@ -12,7 +12,7 @@ class Settings(db.Model):
     __tablename__ = 'settings'
 
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.String(36), db.ForeignKey('users.id'), nullable=True, unique=True, index=True)
+    user_id = db.Column(db.String(36), db.ForeignKey('users.id', ondelete='CASCADE'), nullable=True, unique=True, index=True)
     ai_provider_format = db.Column(db.String(20), nullable=True)   # AI提供商格式: openai, gemini (NULL=use .env)
     api_base_url = db.Column(db.String(500), nullable=True)        # API基础URL
     api_key = db.Column(db.String(500), nullable=True)             # API密钥
@@ -25,6 +25,7 @@ class Settings(db.Model):
     text_model = db.Column(db.String(100), nullable=True)  # 文本大模型名称（覆盖 Config.TEXT_MODEL）
     image_model = db.Column(db.String(100), nullable=True)  # 图片大模型名称（覆盖 Config.IMAGE_MODEL）
     mineru_provider = db.Column(db.String(20), nullable=True)  # MinerU 提供方式：cloud/local（NULL=use .env）
+    enable_image_quality_control = db.Column(db.Boolean, nullable=False, default=False, server_default='0')
     mineru_api_base = db.Column(db.String(255), nullable=True)  # MinerU 服务地址（覆盖 Config.MINERU_API_BASE）
     mineru_token = db.Column(db.String(500), nullable=True)  # MinerU API Token（覆盖 Config.MINERU_TOKEN）
     image_caption_model = db.Column(db.String(100), nullable=True)  # 图片识别模型（覆盖 Config.IMAGE_CAPTION_MODEL）

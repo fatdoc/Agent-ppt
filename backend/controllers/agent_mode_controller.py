@@ -39,7 +39,8 @@ def create_agent_plan():
 @agent_mode_bp.route('/projects/<project_id>/deck-versions/<deck_version_id>', methods=['GET'])
 def get_agent_plan(project_id, deck_version_id):
     try:
-        owned_project_or_404(project_id)
+        if not owned_project_or_404(project_id):
+            return not_found('Project')
         return success_response(AgentModeService().get_deck_version(project_id, deck_version_id))
     except ValueError:
         return not_found('DeckVersion')
@@ -48,7 +49,8 @@ def get_agent_plan(project_id, deck_version_id):
 @agent_mode_bp.route('/projects/<project_id>/deck-versions/<deck_version_id>/slides/<slide_version_id>/content', methods=['PUT'])
 def revise_slide_content(project_id, deck_version_id, slide_version_id):
     try:
-        owned_project_or_404(project_id)
+        if not owned_project_or_404(project_id):
+            return not_found('Project')
         slide = _get_slide_version(project_id, deck_version_id, slide_version_id)
         if slide.locked:
             return bad_request('Cannot overwrite locked slide')
@@ -75,7 +77,8 @@ def revise_slide_content(project_id, deck_version_id, slide_version_id):
 @agent_mode_bp.route('/projects/<project_id>/deck-versions/<deck_version_id>/slides/<slide_version_id>/visual-plan', methods=['PUT'])
 def revise_slide_visual_plan(project_id, deck_version_id, slide_version_id):
     try:
-        owned_project_or_404(project_id)
+        if not owned_project_or_404(project_id):
+            return not_found('Project')
         slide = _get_slide_version(project_id, deck_version_id, slide_version_id)
         if slide.locked:
             return bad_request('Cannot overwrite locked slide')
@@ -111,7 +114,8 @@ def revise_slide_visual_plan(project_id, deck_version_id, slide_version_id):
 @agent_mode_bp.route('/projects/<project_id>/deck-versions/<deck_version_id>/slides/<slide_version_id>/lock', methods=['POST'])
 def set_slide_lock(project_id, deck_version_id, slide_version_id):
     try:
-        owned_project_or_404(project_id)
+        if not owned_project_or_404(project_id):
+            return not_found('Project')
         slide = _get_slide_version(project_id, deck_version_id, slide_version_id)
         data = request.get_json() or {}
         slide.locked = bool(data.get('locked', True))
@@ -135,7 +139,8 @@ def generate_remaining(project_id, deck_version_id):
 @agent_mode_bp.route('/projects/<project_id>/generation-jobs', methods=['GET'])
 def list_generation_jobs(project_id):
     try:
-        owned_project_or_404(project_id)
+        if not owned_project_or_404(project_id):
+            return not_found('Project')
         jobs = GenerationJob.query.filter_by(project_id=project_id).order_by(GenerationJob.created_at.desc()).all()
         return success_response({'jobs': [job.to_dict() for job in jobs]})
     except Exception as exc:
@@ -145,6 +150,8 @@ def list_generation_jobs(project_id):
 def _submit_generation(project_id: str, deck_version_id: str, *, job_type: str, preview_only: bool):
     try:
         project = owned_project_or_404(project_id)
+        if not project:
+            return not_found('Project')
         deck_version = DeckVersion.query.filter_by(project_id=project_id, id=deck_version_id).first()
         if not deck_version:
             return not_found('DeckVersion')

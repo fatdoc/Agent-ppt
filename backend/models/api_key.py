@@ -18,7 +18,7 @@ class ApiKey(db.Model):
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id = db.Column(db.String(36), db.ForeignKey("users.id"), nullable=False, index=True)
     name = db.Column(db.String(120), nullable=False)
-    key_prefix = db.Column(db.String(40), nullable=False, unique=True, index=True)
+    key_prefix = db.Column(db.String(40), nullable=False, unique=True)
     key_hash = db.Column(db.String(64), nullable=False, unique=True)
     scopes_json = db.Column(db.Text, nullable=False, default='["ppt:generate"]')
     is_active = db.Column(db.Boolean, nullable=False, default=True, server_default="1")

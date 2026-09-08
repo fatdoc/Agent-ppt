@@ -196,7 +196,12 @@ class ImageEditabilityService:
             elements=elements,
             clean_background=clean_background,
             depth=depth,
-            parent_id=parent_id
+            parent_id=parent_id,
+            metadata={'checkpoint_complete': (
+                not extraction_result.has_error
+                and (not elements or not self._inpaint_registry or clean_background is not None)
+                and all(not elem.metadata.get('checkpoint_incomplete') for elem in elements)
+            )},
         )
         
         logger.info(f"{'  ' * depth}[{image_id}] 处理完成")
@@ -361,8 +366,10 @@ class ImageEditabilityService:
                     cutout = self._segmentation_provider.extract_subject(src)
             except Exception as e:
                 logger.warning(f"{'  ' * depth}  ✗ 图标 {elem.element_id} 主体抠图异常: {e}")
+                elem.metadata['checkpoint_incomplete'] = True
                 continue
             if cutout is None:
+                elem.metadata['checkpoint_incomplete'] = True
                 continue
             cutout_path = output_dir / f"{elem.element_id}.png"
             cutout.save(str(cutout_path))
@@ -531,8 +538,11 @@ class ImageEditabilityService:
                 element, child_editable, error = future.result()
                 
                 if error:
+                    element.metadata['checkpoint_incomplete'] = True
                     logger.error(f"{'  ' * depth}  ✗ {element.element_id} 失败: {error}")
                 else:
+                    if not child_editable.metadata.get('checkpoint_complete', True):
+                        element.metadata['checkpoint_incomplete'] = True
                     element.children = child_editable.elements
                     element.inpainted_background_path = child_editable.clean_background
                     logger.info(f"{'  ' * depth}  ✓ {element.element_id} 完成: {len(child_editable.elements)} 个子元素")

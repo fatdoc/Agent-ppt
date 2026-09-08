@@ -426,11 +426,13 @@ export const MaterialGeneratorModal: React.FC<MaterialGeneratorModalProps> = ({
       try {
         attempts += 1;
         const response = await getTaskStatus(targetProjectId, taskId);
-        const task: Task = response.data;
+        const task: Task | undefined = response.data;
+        if (!task) {
+          throw new Error(t('material.messages.generateFailed'));
+        }
 
         if (task.status === 'COMPLETED') {
-          const progress = task.progress || {};
-          const imageUrl = progress.image_url;
+          const imageUrl = task.progress?.image_url as string | undefined;
           if (imageUrl) {
             const nextPreviewUrl = getImageUrl(imageUrl);
             setPreviewUrl(nextPreviewUrl);

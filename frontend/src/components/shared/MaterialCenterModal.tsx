@@ -164,7 +164,7 @@ function reducer(s: State, a: Action): State {
     case 'SET_PREVIEW':
       return { ...s, preview: a.preview };
     case 'RESET_EPHEMERAL':
-      return { ...s, selected: new Set(), showAllProjects: false, preview: null };
+      return { ...s, selected: new Set(), preview: null };
     default:
       return s;
   }

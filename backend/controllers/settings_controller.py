@@ -1465,10 +1465,10 @@ def run_settings_test(test_name: str):
             logger.info(f"Applying test setting overrides: {list(override_settings.keys())}")
             test_settings.update(override_settings)
 
-        # 创建任务记录（使用特殊的 project_id='settings-test'）
+        # 设置测试不属于项目；project_id 外键只能引用真实项目。
         task = Task(
             user_id=current_user_id(),
-            project_id='settings-test',  # 特殊标记，表示这是设置测试任务
+            project_id=None,
             task_type=f'TEST_{test_name.upper().replace("-", "_")}',
             status='PENDING'
         )
@@ -1494,6 +1494,7 @@ def run_settings_test(test_name: str):
         }, '测试任务已启动')
 
     except Exception as e:
+        db.session.rollback()
         logger.error(f"Failed to start test: {str(e)}", exc_info=True)
         return error_response(
             "SETTINGS_TEST_ERROR",

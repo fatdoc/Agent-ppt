@@ -7,7 +7,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from models import CreditAccount, CreditLedger, Page, Project, Task, db
+import sqlalchemy as sa
+
+from models import CreditAccount, CreditLedger, Page, Project, Task, User, db
 
 
 class InsufficientCredits(Exception):
@@ -15,6 +17,10 @@ class InsufficientCredits(Exception):
         self.required = required
         self.available = available
         super().__init__(f"积分不足：需要 {required}，当前可用 {available}")
+
+
+class CreditInvariantError(RuntimeError):
+    """Raised when persisted credit state violates settlement invariants."""
 
 
 @dataclass(frozen=True)
@@ -39,22 +45,51 @@ def initial_balance() -> int:
     return max(0, int(os.getenv('CREDIT_INITIAL_BALANCE', '3000')))
 
 
+def user_has_unlimited_credits(user_id: str | None) -> bool:
+    """Administrators are not subject to the credit quota."""
+    if not user_id:
+        return False
+    user = db.session.get(User, user_id)
+    return bool(user and user.is_admin)
+
+
 def get_or_create_account(user_id: str) -> CreditAccount:
     account = CreditAccount.query.get(user_id)
     if account:
         return account
 
     amount = initial_balance()
-    account = CreditAccount(
-        user_id=user_id,
-        balance=amount,
-        reserved_balance=0,
-        lifetime_credited=amount,
-        lifetime_spent=0,
-    )
-    db.session.add(account)
-    db.session.flush()
-    if amount:
+    now = datetime.utcnow()
+    values = {
+        'user_id': user_id,
+        'balance': amount,
+        'reserved_balance': 0,
+        'lifetime_credited': amount,
+        'lifetime_spent': 0,
+        'created_at': now,
+        'updated_at': now,
+    }
+    dialect = db.session.get_bind().dialect.name
+    if dialect == 'sqlite':
+        statement = sa.insert(CreditAccount).values(**values).prefix_with('OR IGNORE')
+    elif dialect == 'postgresql':
+        from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+        statement = (
+            postgresql_insert(CreditAccount)
+            .values(**values)
+            .on_conflict_do_nothing(index_elements=['user_id'])
+        )
+    else:
+        # The supported runtime is SQLite. This generic path preserves a clear
+        # failure mode for any future dialect until it receives an atomic
+        # insert-if-absent implementation.
+        statement = sa.insert(CreditAccount).values(**values)
+
+    inserted = db.session.execute(statement).rowcount == 1
+    account = db.session.get(CreditAccount, user_id)
+    if not account:
+        raise CreditInvariantError(f'Credit account creation failed for user {user_id}')
+    if inserted and amount:
         _add_ledger(
             account,
             entry_type='grant',
@@ -67,6 +102,8 @@ def get_or_create_account(user_id: str) -> CreditAccount:
 
 def account_payload(user_id: str, recent_limit: int = 20) -> dict[str, Any]:
     account = get_or_create_account(user_id)
+    account_data = account.to_dict()
+    account_data['unlimited'] = user_has_unlimited_credits(user_id)
     entries = (
         CreditLedger.query
         .filter_by(user_id=user_id)
@@ -75,7 +112,7 @@ def account_payload(user_id: str, recent_limit: int = 20) -> dict[str, Any]:
         .all()
     )
     return {
-        'account': account.to_dict(),
+        'account': account_data,
         'recent_entries': [entry.to_dict() for entry in entries],
         'pricing': pricing_rules(),
     }
@@ -192,11 +229,26 @@ def reserve_credits(
         return None
 
     account = get_or_create_account(user_id)
-    if account.available_balance < amount:
+    if user_has_unlimited_credits(user_id):
+        return None
+    db.session.flush()
+    now = datetime.utcnow()
+    result = db.session.execute(
+        sa.update(CreditAccount)
+        .where(
+            CreditAccount.user_id == user_id,
+            CreditAccount.balance - CreditAccount.reserved_balance >= amount,
+        )
+        .values(
+            reserved_balance=CreditAccount.reserved_balance + amount,
+            updated_at=now,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    if result.rowcount != 1:
+        db.session.refresh(account)
         raise InsufficientCredits(amount, account.available_balance)
-
-    account.reserved_balance += amount
-    account.updated_at = datetime.utcnow()
+    db.session.refresh(account)
     entry = _add_ledger(
         account,
         entry_type='reserve',
@@ -211,6 +263,8 @@ def reserve_credits(
 
 def ensure_credits_available(user_id: str | None, amount: int) -> None:
     if not credit_enabled() or not user_id or amount <= 0:
+        return
+    if user_has_unlimited_credits(user_id):
         return
     account = get_or_create_account(user_id)
     if account.available_balance < amount:
@@ -229,12 +283,27 @@ def debit_credits_now(
         return None
 
     account = get_or_create_account(user_id)
-    if account.available_balance < amount:
+    if user_has_unlimited_credits(user_id):
+        return None
+    db.session.flush()
+    now = datetime.utcnow()
+    result = db.session.execute(
+        sa.update(CreditAccount)
+        .where(
+            CreditAccount.user_id == user_id,
+            CreditAccount.balance - CreditAccount.reserved_balance >= amount,
+        )
+        .values(
+            balance=CreditAccount.balance - amount,
+            lifetime_spent=CreditAccount.lifetime_spent + amount,
+            updated_at=now,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    if result.rowcount != 1:
+        db.session.refresh(account)
         raise InsufficientCredits(amount, account.available_balance)
-
-    account.balance -= amount
-    account.lifetime_spent += amount
-    account.updated_at = datetime.utcnow()
+    db.session.refresh(account)
     return _add_ledger(
         account,
         entry_type='debit',
@@ -263,23 +332,23 @@ def settle_task_credits(
     )
     if not reserve:
         return
-
-    already_settled = (
-        CreditLedger.query
-        .filter(
-            CreditLedger.task_id == task_id,
-            CreditLedger.entry_type.in_(['debit', 'release']),
-        )
-        .first()
-    )
-    if already_settled:
+    if reserve.settled_at:
         return
+
+    settled_at = datetime.utcnow()
+    claimed = db.session.execute(
+        sa.update(CreditLedger)
+        .where(CreditLedger.id == reserve.id, CreditLedger.settled_at.is_(None))
+        .values(settled_at=settled_at)
+        .execution_options(synchronize_session=False)
+    )
+    if claimed.rowcount != 1:
+        return
+    reserve.settled_at = settled_at
 
     account = get_or_create_account(reserve.user_id)
     reserved_amount = max(0, reserve.amount)
-    account.reserved_balance = max(0, account.reserved_balance - reserved_amount)
-
-    if force_release:
+    if force_release or user_has_unlimited_credits(reserve.user_id):
         debit_amount = 0
     elif completed_units is not None and total_units and total_units > 0:
         ratio = max(0.0, min(1.0, completed_units / total_units))
@@ -288,9 +357,28 @@ def settle_task_credits(
         debit_amount = reserved_amount
 
     release_amount = reserved_amount - debit_amount
+    account_update = db.session.execute(
+        sa.update(CreditAccount)
+        .where(
+            CreditAccount.user_id == reserve.user_id,
+            CreditAccount.reserved_balance >= reserved_amount,
+            CreditAccount.balance >= debit_amount,
+        )
+        .values(
+            reserved_balance=CreditAccount.reserved_balance - reserved_amount,
+            balance=CreditAccount.balance - debit_amount,
+            lifetime_spent=CreditAccount.lifetime_spent + debit_amount,
+            updated_at=settled_at,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    if account_update.rowcount != 1:
+        raise CreditInvariantError(
+            f'Cannot settle task {task_id}: account balance/reservation invariant failed'
+        )
+    db.session.refresh(account)
+
     if debit_amount > 0:
-        account.balance -= debit_amount
-        account.lifetime_spent += debit_amount
         _add_ledger(
             account,
             entry_type='debit',
@@ -320,7 +408,6 @@ def settle_task_credits(
                 'total_units': total_units,
             },
         )
-    account.updated_at = datetime.utcnow()
 
 
 def attach_task_credit_progress(task: Task, estimate: CreditEstimate) -> None:

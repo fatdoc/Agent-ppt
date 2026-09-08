@@ -37,6 +37,21 @@ export interface ImageVersion {
   created_at?: string;
 }
 
+// 素材库图片。保持与后端 Material.to_dict() 的响应契约一致。
+export interface Material {
+  id: string;
+  project_id?: string | null;
+  filename: string;
+  url: string;
+  relative_path: string;
+  created_at: string;
+  caption?: string | null;
+  prompt?: string;
+  original_filename?: string;
+  source_filename?: string;
+  name?: string;
+}
+
 // 页面
 export interface Page {
   page_id: string;  // 后端返回 page_id
@@ -143,6 +158,7 @@ export interface CreditEstimate {
 
 export interface CreditAccount {
   user_id: string;
+  unlimited: boolean;
   balance: number;
   reserved_balance: number;
   available_balance: number;
