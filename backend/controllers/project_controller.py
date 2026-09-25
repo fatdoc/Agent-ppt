@@ -547,11 +547,31 @@ def delete_project(project_id):
         if not project:
             return not_found('Project')
         
+        # Serialize with editable conversion submission/publication. Deleting its
+        # task would strand the reservation and let a worker recreate deleted files.
+        db.session.execute(db.update(Project).where(Project.id == project_id).values(updated_at=Project.updated_at))
+        if Task.query.filter_by(project_id=project_id, task_type='GENERATE_EDITOR_DOCUMENT').filter(Task.status.in_(['PENDING', 'PROCESSING'])).first():
+            db.session.rollback()
+            return error_response('EDITOR_GENERATION_ACTIVE', '可编辑 PPT 正在转换，请等待任务结束后再删除项目', 409)
+
         # Editor snapshots have restrictive FKs; delete only this authorized
         # project's rows in the same transaction as its existing ORM cascades.
         from models.editor_document import EditorDocument, EditorRevision
         EditorRevision.query.filter_by(project_id=project_id).delete(synchronize_session=False)
         EditorDocument.query.filter_by(project_id=project_id).delete(synchronize_session=False)
+        # Preserve billing history when deleting a project that has paid tasks.
+        # Only detach references; never delete/rewrite amounts or user ownership.
+        from models import CreditLedger
+        task_ids = [row.id for row in Task.query.filter_by(project_id=project_id).all()]
+        entries = CreditLedger.query.filter(db.or_(CreditLedger.project_id == project_id, CreditLedger.task_id.in_(task_ids))).all()
+        for entry in entries:
+            if entry.project_id == project_id:
+                entry.legacy_project_id = entry.legacy_project_id or entry.project_id
+                entry.project_id = None
+            if entry.task_id in task_ids:
+                entry.legacy_task_id = entry.legacy_task_id or entry.task_id
+                entry.task_id = None
+        db.session.flush()
         db.session.delete(project)
         db.session.commit()
 

@@ -103,7 +103,7 @@ def document(project_id):
     if not owned_project_or_404(project_id): return not_found('Project')
     doc=db.session.get(EditorDocument,project_id)
     if request.method=='GET':
-        if not doc:return error_response('EDITOR_DOCUMENT_NOT_FOUND','此项目尚无语义文档。图片自动转换尚未实现。',404)
+        if not doc:return error_response('EDITOR_DOCUMENT_NOT_FOUND','请在图片预览页点击“生成可编辑 PPT”，完成后自动进入在线编辑。',404)
         return success_response(document_data(revision_row(project_id,doc.revision)))
     if len(request.get_data(cache=True))>MAX_BYTES:return error_response('EDITOR_PAYLOAD_TOO_LARGE','文档超过 4 MiB',413)
     try:
@@ -225,7 +225,7 @@ def export_document(project_id):
 def download_export(project_id,task_id):
     from models import Task
     if not owned_project_or_404(project_id):return not_found('Project')
-    task=Task.query.filter_by(id=task_id,project_id=project_id,user_id=current_user_id(),task_type='EXPORT_SEMANTIC_EDITOR',status='COMPLETED').first()
+    task=Task.query.filter_by(id=task_id,project_id=project_id,user_id=current_user_id(),status='COMPLETED').filter(Task.task_type.in_(['EXPORT_SEMANTIC_EDITOR','GENERATE_EDITOR_DOCUMENT'])).first()
     if not task:return not_found('Export')
     name=f"editor-r{task.get_progress()['revision']}-{task.id}.pptx"
     path=Path(current_app.config['UPLOAD_FOLDER'])/project_id/'exports'/name

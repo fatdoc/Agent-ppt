@@ -26,7 +26,7 @@ const previewI18n = {
     preview: {
       title: "预览", pageCount: "共 {{count}} 页", export: "导出",
       exportPptx: "导出为 PPTX", exportPdf: "导出为 PDF",
-      exportEditablePptx: "导出可编辑 PPTX（Beta）", exportImages: "导出为图片",
+      exportEditablePptx: "旧版可编辑导出（仅下载）", exportImages: "导出为图片",
       exportVideo: "导出为讲解视频",
       videoExportTitle: "讲解视频导出设置",
       videoExportSubtitle: "在最后一步统一配置旁白风格，适配路演、总结、发布会或学术报告等不同场景。",
@@ -132,7 +132,7 @@ const previewI18n = {
     preview: {
       title: "Preview", pageCount: "{{count}} pages", export: "Export",
       exportPptx: "Export as PPTX", exportPdf: "Export as PDF",
-      exportEditablePptx: "Export Editable PPTX (Beta)", exportImages: "Export as Images",
+      exportEditablePptx: "Legacy editable export (download only)", exportImages: "Export as Images",
       exportVideo: "Export as Narration Video",
       videoExportTitle: "Narration Video Export Settings",
       videoExportSubtitle: "Tune the narration strategy in the final export step for demos, annual recaps, launches, or academic talks.",
@@ -249,6 +249,7 @@ import { listUserTemplates, type UserTemplate } from '@/api/endpoints';
 import { materialUrlToFile } from '@/components/shared/MaterialSelector';
 import type { Material } from '@/api/endpoints';
 import { SlideCard } from '@/components/preview/SlideCard';
+import { EditableGeneration } from '@/components/preview/EditableGeneration';
 import { useProjectStore } from '@/store/useProjectStore';
 import { useExportTasksStore, type ExportTaskType } from '@/store/useExportTasksStore';
 import { getImageUrl } from '@/api/client';
@@ -1539,7 +1540,7 @@ export const SlidePreview: React.FC = () => {
               <span className="hidden lg:inline">{t('preview.refresh')}</span>
             </Button>
           
-          <button className="px-3 py-2 text-sm border rounded-lg" onClick={() => navigate(`/project/${projectId}/editor`)}>在线编辑</button>
+          {projectId && <EditableGeneration projectId={projectId} allImagesReady={currentProject.pages.length > 0 && hasAllImages} />}
           {/* 导出任务按钮 — 始终显示，面板内部决定是否有内容 */}
           <div className="relative z-[90]">
               <Button
@@ -1675,6 +1676,9 @@ export const SlidePreview: React.FC = () => {
           </div>
         </div>
       </header>
+      <div className="px-4 py-2 text-xs md:text-sm bg-yellow-50 text-gray-700 border-b border-yellow-100 flex-shrink-0">
+        {isEnglishUi ? 'Outline → Page descriptions → Images (ready to export) → Generate editable PPT → Online editor' : '大纲 → 逐页描述 → 图片生成（可直接导出）→ 生成可编辑 PPT → 在线编辑'}
+      </div>
 
       {/* 视频导出设置弹窗 */}
       {showVideoExportDialog && (
