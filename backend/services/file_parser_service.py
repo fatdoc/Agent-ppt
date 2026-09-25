@@ -11,7 +11,8 @@ import requests
 import tempfile
 import uuid
 from typing import Optional, List
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
+from services.provider_config import ContextThreadPoolExecutor as ThreadPoolExecutor
 from pathlib import Path
 from PIL import Image
 from markitdown import MarkItDown

@@ -11,7 +11,7 @@ Supports modes:
 """
 import threading
 from .base import TextProvider, strip_think_tags
-from ..lazyllm_env import ensure_lazyllm_namespace_key
+from ..lazyllm_env import get_lazyllm_api_key
 
 class LazyLLMTextProvider(TextProvider):
     """Text generation using lazyllm"""
@@ -36,13 +36,14 @@ class LazyLLMTextProvider(TextProvider):
         self._model = model
         self._vlm_client = None
         self._vlm_lock = threading.Lock()
-        ensure_lazyllm_namespace_key(source, namespace='BANANA')
+        self._api_key = get_lazyllm_api_key(source)
         # Omit type so lazyllm auto-detects LLM vs VLM from the model name.
         # VLM-only models (e.g. qwen-vl-max) are auto-set to VLM; regular
         # LLM models default to LLM. This avoids the AssertionError lazyllm
         # raises when type='llm' is passed explicitly for a VLM model.
         self.client = lazyllm.namespace('BANANA').OnlineModule(
             source=source,
+            api_key=self._api_key,
             model=model,
         )
         # Detect VLM-only status from the type lazyllm actually assigned.
@@ -62,9 +63,8 @@ class LazyLLMTextProvider(TextProvider):
             with self._vlm_lock:
                 if self._vlm_client is None:
                     import lazyllm
-                    ensure_lazyllm_namespace_key(self._source, namespace='BANANA')
                     self._vlm_client = lazyllm.namespace('BANANA').OnlineModule(
-                        source=self._source, model=self._model, type='vlm',
+                        source=self._source, model=self._model, type='vlm', api_key=self._api_key,
                     )
         message = self._vlm_client(prompt, lazyllm_files=[image_path])
         return strip_think_tags(message)

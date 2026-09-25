@@ -27,20 +27,13 @@ def get_lazyllm_api_key(source: str, namespace: str = "BANANA") -> str:
     source_upper = (source or "").upper()
     if not source_upper:
         return ""
+    from services.provider_config import active_provider_snapshot
+    snapshot = active_provider_snapshot()
+    if snapshot is not None:
+        return snapshot.values.get(f"{source_upper}_API_KEY", "")
     return os.getenv(f"{source_upper}_API_KEY", "")
 
 
 def ensure_lazyllm_namespace_key(source: str, namespace: str = "BANANA") -> bool:
-    """
-    Ensure LazyLLM namespace key exists by mapping from vendor-prefixed key.
-    """
-    source_upper = (source or "").upper()
-    if not source_upper:
-        return False
-
-    namespace_key = f"{namespace}_{source_upper}_API_KEY"
-    resolved_key = get_lazyllm_api_key(source, namespace=namespace)
-    if resolved_key:
-        os.environ[namespace_key] = resolved_key
-        return True
-    return False
+    """Compatibility probe. Credentials are now supplied directly to OnlineModule."""
+    return bool(get_lazyllm_api_key(source, namespace))

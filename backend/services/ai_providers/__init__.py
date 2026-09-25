@@ -37,7 +37,11 @@ LAZYLLM_VENDORS = {'qwen', 'doubao', 'deepseek', 'glm', 'siliconflow', 'sensenov
 
 
 def _get_openai_oauth_token() -> Optional[str]:
-    """Try to get a valid OpenAI OAuth token from the database."""
+    """Use captured OAuth credentials; refresh only before task submission."""
+    from services.provider_config import active_provider_snapshot
+    snapshot = active_provider_snapshot()
+    if snapshot is not None:
+        return snapshot.values.get('PROVIDER_OAUTH_TOKEN')
     try:
         from flask import current_app
         if not current_app:
@@ -63,6 +67,10 @@ def get_provider_format() -> str:
         "gemini", "openai", "vertex", "lazyllm", or a lazyllm vendor name
         (e.g., "doubao", "qwen", "deepseek")
     """
+    from services.provider_config import active_provider_snapshot
+    snapshot = active_provider_snapshot()
+    if snapshot is not None:
+        return str(snapshot.values.get('AI_PROVIDER_FORMAT') or 'gemini').lower()
     # Try to get from Flask app config first (database settings)
     try:
         from flask import current_app
@@ -86,6 +94,11 @@ def _resolve_setting(key: str, fallback: Optional[str] = None) -> Optional[str]:
         2. OS environment variable
         3. *fallback* argument (may be ``None``)
     """
+    from services.provider_config import active_provider_snapshot
+    snapshot = active_provider_snapshot()
+    if snapshot is not None:
+        val = snapshot.values.get(key)
+        return str(val) if val is not None else fallback
     # 1) Try Flask app.config
     try:
         from flask import current_app
@@ -105,7 +118,7 @@ def _resolve_setting(key: str, fallback: Optional[str] = None) -> Optional[str]:
 
     # 3) Fallback
     if fallback is not None:
-        logger.debug("Setting %s using fallback: %s", key, fallback)
+        logger.debug("Setting %s using fallback", key)
     return fallback
 
 
@@ -131,7 +144,7 @@ def _build_provider_config() -> Dict[str, Any]:
                 "OPENAI_API_KEY or GOOGLE_API_KEY (from database settings or environment) "
                 "is required when AI_PROVIDER_FORMAT=openai."
             )
-        logger.info("Provider config — format: openai, api_base: %s", cfg['api_base'])
+        logger.info("Provider config — format: openai")
 
     elif fmt == 'anthropic':
         cfg['api_key'] = _resolve_setting('ANTHROPIC_API_KEY') or _resolve_setting('OPENAI_API_KEY')
@@ -141,7 +154,7 @@ def _build_provider_config() -> Dict[str, Any]:
                 "ANTHROPIC_API_KEY (from database settings or environment) "
                 "is required when AI_PROVIDER_FORMAT=anthropic."
             )
-        logger.info("Provider config — format: anthropic, api_base: %s", cfg['api_base'])
+        logger.info("Provider config — format: anthropic")
 
     elif fmt == 'vertex':
         cfg['project_id'] = _resolve_setting('VERTEX_PROJECT_ID')
@@ -162,7 +175,7 @@ def _build_provider_config() -> Dict[str, Any]:
             )
         cfg['api_key'] = oauth_token
         cfg['api_base'] = 'https://chatgpt.com/backend-api/codex'
-        logger.info("Provider config — format: codex (OAuth), api_base: %s", cfg['api_base'])
+        logger.info("Provider config — format: codex (OAuth)")
 
     elif fmt in LAZYLLM_VENDORS or fmt == 'lazyllm':
         # fmt is a specific vendor (e.g., 'doubao') or generic 'lazyllm' (legacy)
@@ -182,8 +195,7 @@ def _build_provider_config() -> Dict[str, Any]:
         cfg['api_base'] = _resolve_setting('GOOGLE_API_BASE')
         if not cfg['api_key']:
             raise ValueError("GOOGLE_API_KEY (from database settings or environment) is required")
-        logger.info("Provider config — format: gemini, api_base: %s, api_key: %s",
-                     cfg['api_base'], '***' if cfg['api_key'] else 'None')
+        logger.info("Provider config — format: gemini")
 
     return cfg
 
@@ -224,7 +236,7 @@ def _get_model_type_provider_config(model_type: str) -> Dict[str, Any]:
                 f"API key is required for {model_type} model with Gemini provider. "
                 f"Set {prefix}_API_KEY or GOOGLE_API_KEY."
             )
-        logger.info("Per-model config — %s: gemini, api_base: %s", model_type, api_base)
+        logger.info("Per-model config — %s: gemini", model_type)
         return {'format': 'gemini', 'api_key': api_key, 'api_base': api_base}
 
     elif source_lower == 'openai':
@@ -239,7 +251,7 @@ def _get_model_type_provider_config(model_type: str) -> Dict[str, Any]:
                 f"API key is required for {model_type} model with OpenAI provider. "
                 f"Set {prefix}_API_KEY or OPENAI_API_KEY."
             )
-        logger.info("Per-model config — %s: openai, api_base: %s", model_type, api_base)
+        logger.info("Per-model config — %s: openai", model_type)
         return {'format': 'openai', 'api_key': api_key, 'api_base': api_base}
 
     elif source_lower == 'codex':
@@ -263,7 +275,7 @@ def _get_model_type_provider_config(model_type: str) -> Dict[str, Any]:
                 f"API key is required for {model_type} model with Anthropic provider. "
                 f"Set {prefix}_API_KEY or ANTHROPIC_API_KEY."
             )
-        logger.info("Per-model config — %s: anthropic, api_base: %s", model_type, api_base)
+        logger.info("Per-model config — %s: anthropic", model_type)
         return {'format': 'anthropic', 'api_key': api_key, 'api_base': api_base}
 
     else:

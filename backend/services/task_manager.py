@@ -7,7 +7,8 @@ import logging
 import os
 import shutil
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
+from services.provider_config import ContextThreadPoolExecutor as ThreadPoolExecutor
 from typing import Callable, List, Dict, Any, Optional
 from datetime import datetime
 from math import gcd
@@ -118,22 +119,74 @@ class TaskManager:
         self.lock = threading.Lock()
     
     def submit_task(self, task_id: str, func: Callable, *args, **kwargs):
-        """Submit a background task"""
-        future = self.executor.submit(func, task_id, *args, **kwargs)
-        
+        """Capture configuration at submission; never resolve a new user's settings in workers.
+
+        Optional reserved kwargs: provider_snapshot, execution_context. Existing
+        callables still receive exactly (task_id, *args, **kwargs).
+        """
+        from flask import current_app, has_app_context
+        from services.provider_config import capture_provider_snapshot, provider_snapshot_scope
+        from services.task_execution import TaskExecutionContext, task_execution_scope
+        snapshot = kwargs.pop('provider_snapshot', None)
+        control = kwargs.pop('execution_context', None)
+        app = current_app._get_current_object() if has_app_context() else kwargs.get('app')
+        if snapshot is None and has_app_context():
+            snapshot = capture_provider_snapshot()
+        project_id = None
+        if has_app_context():
+            task = db.session.get(Task, task_id)
+            if task is None:
+                from models import PublicPptGeneration
+                task = db.session.get(PublicPptGeneration, task_id)
+            if task is not None:
+                project_id = task.project_id
+                if snapshot is not None and task.user_id != snapshot.user_id:
+                    raise ValueError('Task and provider snapshot owner mismatch')
+        if control is None:
+            control = TaskExecutionContext(task_id, snapshot.user_id if snapshot else None, project_id)
+        if control.task_id != task_id or (snapshot and control.user_id != snapshot.user_id) or (project_id is not None and control.project_id != project_id):
+            raise ValueError('Task execution context owner mismatch')
+
+        def run():
+            with provider_snapshot_scope(snapshot), task_execution_scope(control):
+                try:
+                    control.checkpoint()
+                    return func(task_id, *args, **kwargs)
+                except Exception as exc:
+                    # Never serialize provider exception text: remote responses can
+                    # echo credentials. Persist a stable classification instead.
+                    if app is not None:
+                        with app.app_context():
+                            task = db.session.get(Task, task_id)
+                            if task is not None:
+                                task.status = 'FAILED'
+                                task.error_message = 'TASK_EXECUTION_FAILED'
+                                task.completed_at = datetime.utcnow()
+                                _settle_task_credits_safe(task_id, force_release=True)
+                            else:
+                                from services.public_ppt_generation_service import fail_queued_generation
+                                fail_queued_generation(task_id, 'TASK_EXECUTION_FAILED')
+                    from services.provider_config import redact_provider_text
+                    message = redact_provider_text(str(exc))
+                    if message != str(exc):
+                        raise RuntimeError(message) from None
+                    raise
+
         with self.lock:
+            if task_id in self.active_tasks:
+                raise ValueError('Task is already active')
+            future = self.executor.submit(run)
             self.active_tasks[task_id] = future
-        
-        # Add callback to clean up when done and log exceptions
         future.add_done_callback(lambda f: self._task_done_callback(task_id, f))
-    
+        return future
+
     def _task_done_callback(self, task_id: str, future):
         """Handle task completion and log any exceptions"""
         try:
             # Check if task raised an exception
             exception = future.exception()
             if exception:
-                logger.error(f"Task {task_id} failed with exception: {exception}", exc_info=exception)
+                logger.error("Task %s failed (%s)", task_id, type(exception).__name__)
         except Exception as e:
             logger.error(f"Error in task callback for {task_id}: {e}", exc_info=True)
         finally:

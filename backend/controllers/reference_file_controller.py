@@ -393,8 +393,13 @@ def trigger_file_parse(file_id):
             return error_response('FILE_NOT_FOUND', f'File not found: {file_path}', 404)
         
         # 启动异步解析
+        from services.provider_config import capture_provider_snapshot, provider_snapshot_scope
+        snapshot = capture_provider_snapshot()
+        def parse_with_snapshot(*args):
+            with provider_snapshot_scope(snapshot):
+                return _parse_file_async(*args)
         thread = threading.Thread(
-            target=_parse_file_async,
+            target=parse_with_snapshot,
             args=(reference_file.id, str(file_path), reference_file.filename, current_app._get_current_object())
         )
         thread.daemon = True

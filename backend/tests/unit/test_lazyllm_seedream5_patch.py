@@ -14,7 +14,7 @@ class TestSeedream5GuidanceScalePatch:
     @pytest.fixture
     def mock_lazyllm(self):
         """Mock the lazyllm module and its dependencies."""
-        with patch('services.ai_providers.image.lazyllm_provider.ensure_lazyllm_namespace_key'):
+        with patch('services.ai_providers.image.lazyllm_provider.get_lazyllm_api_key'):
             # Create mock lazyllm module structure
             mock_lazyllm_module = MagicMock()
             mock_namespace = MagicMock()

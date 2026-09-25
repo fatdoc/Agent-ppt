@@ -29,6 +29,7 @@ def _load_project_dotenv(env_file=_env_file):
 _load_project_dotenv()
 
 from flask import Flask
+from services.provider_config import ProviderScopedConfig, capture_provider_snapshot, provider_snapshot_scope
 from flask_cors import CORS
 from models import db
 from config import Config
@@ -67,12 +68,15 @@ def set_sqlite_pragma(dbapi_conn, connection_record):
         cursor.close()
 
 
-def create_app():
+def create_app(config_overrides=None):
     """Application factory"""
     app = Flask(__name__)
+    app.config = ProviderScopedConfig(app.root_path, app.config)
     
     # Load configuration from Config class
     app.config.from_object(Config)
+    if config_overrides:
+        app.config.update(config_overrides)
     _validate_security_configuration(app)
 
     # Allow DATABASE_URL env var to override config at runtime (supports test isolation)
@@ -86,7 +90,7 @@ def create_app():
 
     # Ensure upload folder exists
     project_root = os.path.dirname(backend_dir)
-    upload_folder = os.path.join(project_root, 'uploads')
+    upload_folder = (config_overrides or {}).get('UPLOAD_FOLDER') or os.getenv('UPLOAD_FOLDER') or app.config.get('UPLOAD_FOLDER') or os.path.join(project_root, 'uploads')
     os.makedirs(upload_folder, exist_ok=True)
     app.config['UPLOAD_FOLDER'] = upload_folder
     
@@ -106,6 +110,9 @@ def create_app():
         handlers=[logging.StreamHandler(sys.stdout)],
     )
     
+    from services.provider_config import install_provider_log_redaction
+    install_provider_log_redaction()
+
     # 设置第三方库的日志级别，避免过多的DEBUG日志
     logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
     logging.getLogger('httpcore').setLevel(logging.WARNING)
@@ -120,6 +127,9 @@ def create_app():
     # Database migrations (Alembic via Flask-Migrate)
     Migrate(app, db)
     
+    from services.task_execution import register_recovery_command
+    register_recovery_command(app)
+
     # Register blueprints
     app.register_blueprint(project_bp)
     app.register_blueprint(ppt_to_ppt_bp)
@@ -141,9 +151,6 @@ def create_app():
     app.register_blueprint(api_key_bp)
     app.register_blueprint(public_ppt_bp)
 
-    with app.app_context():
-        # Load settings from database and sync to app.config
-        _load_settings_to_config(app)
 
     @app.before_request
     def _authenticate_user():
@@ -165,7 +172,16 @@ def create_app():
             return csrf_error
         user = getattr(g, 'current_user', None)
         if user:
-            _load_settings_to_config(app, user.id)
+            scope = provider_snapshot_scope(capture_provider_snapshot(user_id=user.id))
+            scope.__enter__()
+            g.provider_snapshot_scope = scope
+
+    @app.teardown_request
+    def _release_provider_snapshot(error=None):
+        from flask import g
+        scope = g.pop('provider_snapshot_scope', None)
+        if scope is not None:
+            scope.__exit__(None, None, None)
 
     # Access code enforcement on all /api/ routes
     @app.before_request
@@ -248,151 +264,6 @@ def _validate_security_configuration(app):
     secret_key = str(app.config.get('SECRET_KEY') or '')
     if secret_key == 'your-secret-key-change-this' or len(secret_key) < 32:
         raise RuntimeError('Production SECRET_KEY must be explicitly set to at least 32 characters')
-
-
-def _load_settings_to_config(app, user_id=None):
-    """Load settings from database and apply to app.config on startup"""
-    from models import Settings
-    try:
-        if os.getenv('SERVER_MANAGED_AI_CONFIG', '').strip().lower() in {'1', 'true', 'yes', 'on'}:
-            logging.info("SERVER_MANAGED_AI_CONFIG enabled; using server environment model settings")
-            return
-
-        settings = Settings.get_settings(user_id=user_id)
-        
-        # Load AI provider format (always sync, has default value)
-        if settings.ai_provider_format:
-            app.config['AI_PROVIDER_FORMAT'] = settings.ai_provider_format
-            logging.info(f"Loaded AI_PROVIDER_FORMAT from settings: {settings.ai_provider_format}")
-        
-        # Load API configuration
-        # Note: We load even if value is None/empty to allow clearing settings
-        # But we only log if there's an actual value
-        if settings.api_base_url is not None:
-            # 将数据库中的统一 API Base 同步到 Google/OpenAI 两个配置，确保覆盖环境变量
-            app.config['GOOGLE_API_BASE'] = settings.api_base_url
-            app.config['OPENAI_API_BASE'] = settings.api_base_url
-            if settings.api_base_url:
-                logging.info(f"Loaded API_BASE from settings: {settings.api_base_url}")
-            else:
-                logging.info("API_BASE is empty in settings, using env var or default")
-
-        if settings.api_key is not None:
-            # 同步到两个提供商的 key，数据库优先于环境变量
-            app.config['GOOGLE_API_KEY'] = settings.api_key
-            app.config['OPENAI_API_KEY'] = settings.api_key
-            if settings.api_key:
-                logging.info("Loaded API key from settings")
-            else:
-                logging.info("API key is empty in settings, using env var or default")
-
-        # Load image generation settings (fall back to .env/Config when NULL)
-        resolution = settings.image_resolution or Config.DEFAULT_RESOLUTION
-        aspect_ratio = settings.image_aspect_ratio or Config.DEFAULT_ASPECT_RATIO
-        app.config['DEFAULT_RESOLUTION'] = resolution
-        app.config['DEFAULT_ASPECT_RATIO'] = aspect_ratio
-        logging.info(f"Loaded image settings: {resolution}, {aspect_ratio}")
-
-        # Load worker settings (fall back to .env/Config when NULL)
-        desc_workers = settings.max_description_workers or Config.MAX_DESCRIPTION_WORKERS
-        img_workers = settings.max_image_workers or Config.MAX_IMAGE_WORKERS
-        app.config['MAX_DESCRIPTION_WORKERS'] = desc_workers
-        app.config['MAX_IMAGE_WORKERS'] = img_workers
-        logging.info(f"Loaded worker settings: desc={desc_workers}, img={img_workers}")
-
-        # Load model settings (FIX for Issue #136: these were missing before)
-        if settings.text_model:
-            app.config['TEXT_MODEL'] = settings.text_model
-            logging.info(f"Loaded TEXT_MODEL from settings: {settings.text_model}")
-        
-        if settings.image_model:
-            app.config['IMAGE_MODEL'] = settings.image_model
-            logging.info(f"Loaded IMAGE_MODEL from settings: {settings.image_model}")
-        
-        # Load MinerU settings
-        mineru_api_base = settings.mineru_api_base or Config.MINERU_API_BASE
-        app.config['MINERU_PROVIDER'] = settings.mineru_provider or Config.MINERU_PROVIDER
-        app.config['MINERU_LOCAL_API_BASE'] = Config.MINERU_LOCAL_API_BASE
-        app.config['MINERU_LOCAL_BACKEND'] = Config.MINERU_LOCAL_BACKEND
-        app.config['MINERU_LOCAL_PARSE_METHOD'] = Config.MINERU_LOCAL_PARSE_METHOD
-        app.config['MINERU_LOCAL_RETURN_IMAGES'] = Config.MINERU_LOCAL_RETURN_IMAGES
-        app.config['MINERU_LOCAL_RESPONSE_FORMAT_ZIP'] = Config.MINERU_LOCAL_RESPONSE_FORMAT_ZIP
-        app.config['MINERU_LOCAL_RETURN_ORIGINAL_FILE'] = Config.MINERU_LOCAL_RETURN_ORIGINAL_FILE
-        if settings.mineru_api_base:
-            app.config['MINERU_API_BASE'] = mineru_api_base
-            logging.info(f"Loaded MINERU_API_BASE from settings: {mineru_api_base}")
-        
-        if settings.mineru_token:
-            app.config['MINERU_TOKEN'] = settings.mineru_token
-            logging.info("Loaded MINERU_TOKEN from settings")
-        
-        # Load image caption model
-        if settings.image_caption_model:
-            app.config['IMAGE_CAPTION_MODEL'] = settings.image_caption_model
-            logging.info(f"Loaded IMAGE_CAPTION_MODEL from settings: {settings.image_caption_model}")
-        
-        # Load output language
-        if settings.output_language:
-            app.config['OUTPUT_LANGUAGE'] = settings.output_language
-            logging.info(f"Loaded OUTPUT_LANGUAGE from settings: {settings.output_language}")
-        
-        # Load reasoning mode settings (separate for text and image)
-        app.config['ENABLE_TEXT_REASONING'] = settings.enable_text_reasoning
-        app.config['TEXT_THINKING_BUDGET'] = settings.text_thinking_budget
-        app.config['ENABLE_IMAGE_REASONING'] = settings.enable_image_reasoning
-        app.config['IMAGE_THINKING_BUDGET'] = settings.image_thinking_budget
-        logging.info(f"Loaded reasoning config: text={settings.enable_text_reasoning}(budget={settings.text_thinking_budget}), image={settings.enable_image_reasoning}(budget={settings.image_thinking_budget})")
-        
-        # Load Baidu API settings
-        if settings.baidu_api_key:
-            app.config['BAIDU_API_KEY'] = settings.baidu_api_key
-            logging.info("Loaded BAIDU_API_KEY from settings")
-
-        # Load LazyLLM source settings
-        if settings.text_model_source:
-            app.config['TEXT_MODEL_SOURCE'] = settings.text_model_source
-            logging.info(f"Loaded TEXT_MODEL_SOURCE from settings: {settings.text_model_source}")
-        if settings.image_model_source:
-            app.config['IMAGE_MODEL_SOURCE'] = settings.image_model_source
-            logging.info(f"Loaded IMAGE_MODEL_SOURCE from settings: {settings.image_model_source}")
-        if settings.image_caption_model_source:
-            app.config['IMAGE_CAPTION_MODEL_SOURCE'] = settings.image_caption_model_source
-            logging.info(f"Loaded IMAGE_CAPTION_MODEL_SOURCE from settings: {settings.image_caption_model_source}")
-
-        # Load per-model API credentials (for gemini/openai per-model overrides)
-        for model_type in ('text', 'image', 'image_caption'):
-            prefix = model_type.upper()
-            for suffix, setting_suffix in [('_API_KEY', '_api_key'), ('_API_BASE', '_api_base_url')]:
-                config_key = f'{prefix}{suffix}'
-                val = getattr(settings, f'{model_type}{setting_suffix}', None)
-                if val:
-                    app.config[config_key] = val
-                    if suffix == '_API_BASE':
-                        logging.info(f"Loaded {config_key} from settings: {val}")
-                    else:
-                        logging.info(f"Loaded {config_key} from settings")
-
-        # Sync LazyLLM vendor API keys to environment variables
-        # Only allow known vendor names to prevent environment variable injection
-        from services.ai_providers.lazyllm_env import ALLOWED_LAZYLLM_VENDORS
-        if settings.lazyllm_api_keys:
-            import json
-            try:
-                keys = json.loads(settings.lazyllm_api_keys)
-                for vendor, key in keys.items():
-                    if key and vendor.lower() in ALLOWED_LAZYLLM_VENDORS:
-                        os.environ[f"{vendor.upper()}_API_KEY"] = key
-                    elif key:
-                        logging.warning(f"Ignoring unknown lazyllm vendor: {vendor}")
-                logging.info(f"Loaded LazyLLM API keys for vendors: {[v for v, k in keys.items() if k and v.lower() in ALLOWED_LAZYLLM_VENDORS]}")
-            except (json.JSONDecodeError, TypeError):
-                logging.warning("Failed to parse lazyllm_api_keys from settings")
-
-    except Exception as e:
-        if isinstance(e, SQLAlchemyError) and "no such table: settings" in str(e):
-            logging.debug(f"Settings table not yet created (expected on first boot): {e}")
-        else:
-            logging.warning(f"Could not load settings from database: {e}")
 
 
 # Create app instance

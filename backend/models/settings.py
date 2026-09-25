@@ -277,6 +277,12 @@ class Settings(db.Model):
             if current_user is not None:
                 user_id = current_user.id
 
+        if user_id is None:
+            from services.provider_config import active_provider_snapshot
+            snapshot = active_provider_snapshot()
+            if snapshot is not None:
+                user_id = snapshot.user_id
+
         if user_id:
             settings = Settings.query.filter_by(user_id=user_id).first()
             if settings is None:
@@ -286,8 +292,6 @@ class Settings(db.Model):
             return settings
 
         settings = Settings.query.filter_by(user_id=None).first()
-        if settings is None:
-            settings = Settings.query.first()
 
         if settings is None:
             settings = Settings()

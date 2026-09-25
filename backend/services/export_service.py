@@ -742,7 +742,8 @@ class ExportService:
         Returns:
             字典，key为element_id，value为TextStyleResult
         """
-        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from concurrent.futures import as_completed
+        from services.provider_config import ContextThreadPoolExecutor as ThreadPoolExecutor
         
         if not text_items or not text_attribute_extractor:
             return {}
@@ -839,7 +840,8 @@ class ExportService:
         Returns:
             字典，key为element_id，value为TextStyleResult
         """
-        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from concurrent.futures import as_completed
+        from services.provider_config import ContextThreadPoolExecutor as ThreadPoolExecutor
         
         if not editable_images or not text_attribute_extractor:
             return {}
@@ -941,7 +943,8 @@ class ExportService:
             - results: 字典，key为element_id，value为TextStyleResult（合并后的结果）
             - failed_extractions: 失败列表，每项为 (element_id, error_reason)
         """
-        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from concurrent.futures import as_completed
+        from services.provider_config import ContextThreadPoolExecutor as ThreadPoolExecutor
         from services.image_editability.text_attribute_extractors import TextStyleResult
         
         if not editable_images or not text_attribute_extractor:
@@ -1145,7 +1148,8 @@ class ExportService:
     @staticmethod
     def _extract_styles_with_checkpoints(images, extractor, workers, fail_fast,
                                          checkpoint, keys, report_progress):
-        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from concurrent.futures import as_completed
+        from services.provider_config import ContextThreadPoolExecutor as ThreadPoolExecutor
 
         styles, failures, pending = {}, [], []
         reused = 0
@@ -1313,7 +1317,8 @@ class ExportService:
             
             # 2. 并发处理所有页面，生成EditableImage结构
             report_progress("版面分析", f"开始分析 {total_pages} 张图片（并发数: {max_workers}）...", 5)
-            from concurrent.futures import ThreadPoolExecutor, as_completed
+            from concurrent.futures import as_completed
+            from services.provider_config import ContextThreadPoolExecutor as ThreadPoolExecutor
             
             editable_images = []
             completed_count = sum(result is not None for result in results)

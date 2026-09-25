@@ -40,6 +40,8 @@ def error_response(error_code: str, message: str, status_code: int = 400):
     Returns:
         Flask response with JSON format
     """
+    from services.provider_config import redact_provider_text
+    message = redact_provider_text(message)
     return jsonify({
         "success": False,
         "error": {

@@ -22,7 +22,7 @@ from typing import Optional, List, Tuple
 from urllib.parse import urlparse
 from PIL import Image
 from .base import ImageProvider
-from ..lazyllm_env import ensure_lazyllm_namespace_key
+from ..lazyllm_env import get_lazyllm_api_key
 
 logger = logging.getLogger(__name__)
 
@@ -216,10 +216,11 @@ class LazyLLMImageProvider(ImageProvider):
                 "Please install backend dependencies including lazyllm."
             ) from exc
 
-        ensure_lazyllm_namespace_key(source, namespace='BANANA')
+        self._api_key = get_lazyllm_api_key(source)
         self._source = source
         self.client = lazyllm.namespace('BANANA').OnlineModule(
             source=source,
+            api_key=self._api_key,
             model=model,
             type='image_editing',
         )

@@ -33,9 +33,10 @@ def _authenticate_public_api():
 
     # Reuse the account's existing model configuration. In server-managed mode
     # this is a no-op; otherwise it mirrors the web API behavior.
-    from app import _load_settings_to_config
-
-    _load_settings_to_config(current_app._get_current_object(), g.current_user.id)
+    from services.provider_config import capture_provider_snapshot, provider_snapshot_scope
+    scope = provider_snapshot_scope(capture_provider_snapshot(user_id=g.current_user.id))
+    scope.__enter__()
+    g.provider_snapshot_scope = scope
     return None
 
 

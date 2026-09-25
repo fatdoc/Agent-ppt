@@ -44,7 +44,7 @@ class TestLazyLLMContentTypeFallback:
             sys.modules.pop(key, None)
 
     def _make_provider(self):
-        with patch('services.ai_providers.image.lazyllm_provider.ensure_lazyllm_namespace_key'):
+        with patch('services.ai_providers.image.lazyllm_provider.get_lazyllm_api_key'):
             from services.ai_providers.image.lazyllm_provider import LazyLLMImageProvider
             provider = LazyLLMImageProvider.__new__(LazyLLMImageProvider)
             provider._source = 'siliconflow'

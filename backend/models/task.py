@@ -3,6 +3,7 @@ Task model for tracking async operations
 """
 import uuid
 import json
+from sqlalchemy.orm import validates
 from datetime import datetime
 from . import db
 
@@ -30,6 +31,11 @@ class Task(db.Model):
     user = db.relationship('User')
     credit_entries = db.relationship('CreditLedger', back_populates='task', lazy='select')
     
+    @validates('error_message')
+    def _redact_error_message(self, key, value):
+        from services.provider_config import redact_provider_text
+        return redact_provider_text(value)
+
     def get_progress(self):
         """Parse progress from JSON string"""
         if self.progress:
@@ -42,7 +48,8 @@ class Task(db.Model):
     def set_progress(self, data):
         """Set progress as JSON string"""
         if data:
-            self.progress = json.dumps(data)
+            from services.provider_config import redact_provider_data
+            self.progress = json.dumps(redact_provider_data(data))
         else:
             self.progress = None
     

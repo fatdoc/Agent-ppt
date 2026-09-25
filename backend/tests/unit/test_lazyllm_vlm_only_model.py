@@ -47,7 +47,7 @@ class TestLazyLLMVLMOnlyModel:
 
     @pytest.fixture
     def patch_env(self):
-        with patch('services.ai_providers.text.lazyllm_provider.ensure_lazyllm_namespace_key'):
+        with patch('services.ai_providers.text.lazyllm_provider.get_lazyllm_api_key'):
             yield
 
     def test_llm_model_initializes_with_llm_type(self, patch_env):

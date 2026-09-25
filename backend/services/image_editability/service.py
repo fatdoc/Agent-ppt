@@ -501,7 +501,8 @@ class ImageEditabilityService:
             return
         
         # 并行处理多个子元素
-        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from concurrent.futures import as_completed
+        from services.provider_config import ContextThreadPoolExecutor as ThreadPoolExecutor
         
         def process_single_element(element):
             """处理单个子元素"""

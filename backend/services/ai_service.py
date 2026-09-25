@@ -124,6 +124,8 @@ class AIService:
             image_provider: Optional pre-configured ImageProvider. If None, created from factory.
         """
         config = get_config()
+        from services.provider_config import active_provider_snapshot
+        snapshot = active_provider_snapshot()
 
         # 优先使用 Flask app.config（可由 Settings 覆盖），否则回退到 Config 默认值
         try:
@@ -132,14 +134,16 @@ class AIService:
             current_app = None  # type: ignore
             has_app_context = lambda: False  # type: ignore
 
-        if has_app_context() and current_app and hasattr(current_app, "config"):
-            self.text_model = current_app.config.get("TEXT_MODEL", config.TEXT_MODEL)
-            self.image_model = current_app.config.get("IMAGE_MODEL", config.IMAGE_MODEL)
+        runtime_config = snapshot.values if snapshot is not None else (current_app.config if has_app_context() else {})
+
+        if snapshot is not None or (has_app_context() and current_app and hasattr(current_app, "config")):
+            self.text_model = runtime_config.get("TEXT_MODEL", config.TEXT_MODEL)
+            self.image_model = runtime_config.get("IMAGE_MODEL", config.IMAGE_MODEL)
             # 分离的文本和图像推理配置
-            self.enable_text_reasoning = current_app.config.get("ENABLE_TEXT_REASONING", False)
-            self.text_thinking_budget = current_app.config.get("TEXT_THINKING_BUDGET", 1024)
-            self.enable_image_reasoning = current_app.config.get("ENABLE_IMAGE_REASONING", False)
-            self.image_thinking_budget = current_app.config.get("IMAGE_THINKING_BUDGET", 1024)
+            self.enable_text_reasoning = runtime_config.get("ENABLE_TEXT_REASONING", False)
+            self.text_thinking_budget = runtime_config.get("TEXT_THINKING_BUDGET", 1024)
+            self.enable_image_reasoning = runtime_config.get("ENABLE_IMAGE_REASONING", False)
+            self.image_thinking_budget = runtime_config.get("IMAGE_THINKING_BUDGET", 1024)
         else:
             self.text_model = config.TEXT_MODEL
             self.image_model = config.IMAGE_MODEL
@@ -149,8 +153,8 @@ class AIService:
             self.image_thinking_budget = 1024
         
         # Caption model for multimodal (image→text) tasks
-        if has_app_context() and current_app and hasattr(current_app, "config"):
-            self.caption_model = current_app.config.get("IMAGE_CAPTION_MODEL", config.IMAGE_CAPTION_MODEL)
+        if snapshot is not None or (has_app_context() and current_app and hasattr(current_app, "config")):
+            self.caption_model = runtime_config.get("IMAGE_CAPTION_MODEL", config.IMAGE_CAPTION_MODEL)
         else:
             self.caption_model = config.IMAGE_CAPTION_MODEL
 

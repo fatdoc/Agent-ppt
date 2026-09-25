@@ -19,6 +19,7 @@ sys.path.insert(0, str(project_root))
 sys.path.insert(0, str(backend_path))
 
 # 设置测试环境变量 - 必须在导入app之前设置
+os.environ['LOAD_DOTENV'] = 'false'
 os.environ['TESTING'] = 'true'
 os.environ['USE_MOCK_AI'] = 'true'  # 标记使用mock AI服务
 os.environ['GOOGLE_API_KEY'] = os.environ.get('GOOGLE_API_KEY', 'mock-api-key-for-testing')
@@ -184,3 +185,25 @@ def assert_error_response(response, expected_status=None):
     assert data is not None
     assert data.get('success') is False or 'error' in data
     return data
+
+
+# Install before collection: some integration modules probe a running backend
+# while importing. Even those GETs must not touch a user's service or Settings.
+_original_socket_connect = None
+
+
+def pytest_sessionstart(session):
+    import socket
+    global _original_socket_connect
+    _original_socket_connect = socket.socket.connect
+    def offline_connect(sock, address):
+        if sock.family in (socket.AF_INET, socket.AF_INET6):
+            raise RuntimeError('Network disabled in offline tests; inject a fake provider')
+        return _original_socket_connect(sock, address)
+    socket.socket.connect = offline_connect
+
+
+def pytest_sessionfinish(session, exitstatus):
+    import socket
+    if _original_socket_connect is not None:
+        socket.socket.connect = _original_socket_connect

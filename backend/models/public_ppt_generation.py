@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from sqlalchemy.orm import validates
 import uuid
 from datetime import datetime
 
@@ -35,6 +36,11 @@ class PublicPptGeneration(db.Model):
     description_task = db.relationship("Task", foreign_keys=[description_task_id])
     image_task = db.relationship("Task", foreign_keys=[image_task_id])
     api_key = db.relationship("ApiKey")
+
+    @validates('error_message')
+    def _redact_error_message(self, key, value):
+        from services.provider_config import redact_provider_text
+        return redact_provider_text(value)
 
     def set_request_data(self, data: dict) -> None:
         self.request_json = json.dumps(data, ensure_ascii=False)
