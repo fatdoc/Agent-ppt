@@ -33,6 +33,7 @@ from services.provider_config import ProviderScopedConfig, capture_provider_snap
 from flask_cors import CORS
 from models import db
 from config import Config
+from controllers.editor_controller import editor_bp
 from controllers.material_controller import material_bp, material_global_bp
 from controllers.reference_file_controller import reference_file_bp
 from controllers.settings_controller import settings_bp
@@ -132,6 +133,7 @@ def create_app(config_overrides=None):
 
     # Register blueprints
     app.register_blueprint(project_bp)
+    app.register_blueprint(editor_bp)
     app.register_blueprint(ppt_to_ppt_bp)
     app.register_blueprint(agent_mode_bp)
     app.register_blueprint(page_bp)
@@ -172,7 +174,11 @@ def create_app(config_overrides=None):
             return csrf_error
         user = getattr(g, 'current_user', None)
         if user:
-            scope = provider_snapshot_scope(capture_provider_snapshot(user_id=user.id))
+            # Deterministic editor requests must not refresh OAuth or load keys.
+            from services.provider_config import ProviderConfigSnapshot
+            snapshot = (ProviderConfigSnapshot(user.id, 'local-editor-v1', {}, id(app.config))
+                        if request.blueprint == 'editor' else capture_provider_snapshot(user_id=user.id))
+            scope = provider_snapshot_scope(snapshot)
             scope.__enter__()
             g.provider_snapshot_scope = scope
 

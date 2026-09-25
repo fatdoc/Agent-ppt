@@ -70,3 +70,20 @@ _local_backup/
 
 # 本地 ML 模型（RMBG 等）
 /models/
+
+# Pinned PPTist source snapshot
+!editor-pptist/**/*.svg
+!editor-pptist/**/*.png
+!editor-pptist/**/*.webp
+!editor-pptist/**/*.ico
+!editor-pptist/**/*.md
+editor-pptist/node_modules/
+editor-pptist/dist/
+editor-pptist/*.tsbuildinfo
+frontend/public/editor-app/
+frontend/public/editor-fixture/
+.playwright-cli/
+!PPTIST_MVP_STATUS.md
+!PPTIST_INTEGRATION_CONTRACT.md
+outputs/pptist-qa/
+!PPTIST_DEPENDENCY_AUDIT.md

@@ -21,10 +21,20 @@ RUN if [ -n "$NPM_REGISTRY" ]; then \
     fi && \
     (npm install --frozen-lockfile || npm install)
 
+# Pinned Vue editor, built separately and served at the same origin.
+COPY editor-pptist/package.json editor-pptist/package-lock.json /editor-pptist/
+RUN cd /editor-pptist && npm ci --ignore-scripts
+COPY editor-pptist/src/ /editor-pptist/src/
+COPY editor-pptist/public/ /editor-pptist/public/
+COPY editor-pptist/index.html editor-pptist/env.d.ts editor-pptist/components.d.ts editor-pptist/tsconfig*.json editor-pptist/vite.config.ts /editor-pptist/
+COPY shared/ /shared/
+RUN cd /editor-pptist && npm run build
+
 # 复制前端源代码
 COPY frontend/ ./
 
 # 构建应用
+RUN mkdir -p public/editor-app && cp -R /editor-pptist/dist/. public/editor-app/
 RUN npm run build
 
 # 生产阶段

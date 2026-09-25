@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { apiClient } from '@/api/client';
 import * as api from '@/api/endpoints';
 import { devLog } from '@/utils/logger';
 import { getT } from '@/utils/i18nHelper';
@@ -12,7 +13,7 @@ const t = getT(exportI18n);
 
 // Note: Backend uses 'RUNNING' but we also accept 'PROCESSING' for compatibility
 export type ExportTaskStatus = 'PENDING' | 'PROCESSING' | 'RUNNING' | 'COMPLETED' | 'FAILED';
-export type ExportTaskType = 'pptx' | 'pdf' | 'editable-pptx' | 'images' | 'video';
+export type ExportTaskType = 'pptx' | 'pdf' | 'editable-pptx' | 'images' | 'video' | 'semantic-editor';
 
 export interface ExportTask {
   id: string;
@@ -117,7 +118,9 @@ export const useExportTasksStore = create<ExportTasksState>()(
       pollTask: async (id, projectId, taskId) => {
         const poll = async () => {
           try {
-            const response = await api.getTaskStatus(projectId, taskId);
+            const response = get().tasks.find(task => task.id === id)?.type === 'semantic-editor'
+              ? (await apiClient.get(`/api/projects/${projectId}/editor-document/export-tasks/${taskId}`)).data
+              : await api.getTaskStatus(projectId, taskId);
             const task = response.data;
 
             if (!task) {

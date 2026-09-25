@@ -49,3 +49,5 @@ __all__ = [
     'DeckVisualSystem', 'GenerationJob', 'PageVisualPlan', 'SlideVersion',
     'ApiKey', 'PublicPptGeneration', 'FileArtifact', 'ProjectTemplateAsset'
 ]
+
+from .editor_document import EditorDocument, EditorRevision

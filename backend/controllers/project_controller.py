@@ -547,15 +547,21 @@ def delete_project(project_id):
         if not project:
             return not_found('Project')
         
-        # Delete project files
-        from services import FileService
-        file_service = FileService(current_app.config['UPLOAD_FOLDER'])
-        file_service.delete_project_files(project_id)
-        
-        # Delete project from database (cascade will delete pages and tasks)
+        # Editor snapshots have restrictive FKs; delete only this authorized
+        # project's rows in the same transaction as its existing ORM cascades.
+        from models.editor_document import EditorDocument, EditorRevision
+        EditorRevision.query.filter_by(project_id=project_id).delete(synchronize_session=False)
+        EditorDocument.query.filter_by(project_id=project_id).delete(synchronize_session=False)
         db.session.delete(project)
         db.session.commit()
-        
+
+        # Never remove assets before a database transaction that may roll back.
+        # A cleanup failure leaves inaccessible orphan files, not a half-deleted
+        # live project; report it for operational cleanup without claiming rollback.
+        try:
+            FileService(current_app.config['UPLOAD_FOLDER']).delete_project_files(project_id)
+        except OSError:
+            logger.warning("Project deleted but asset cleanup failed: %s", project_id, exc_info=True)
         return success_response(message="Project deleted successfully")
     
     except Exception as e:

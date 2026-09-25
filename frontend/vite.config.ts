@@ -50,6 +50,7 @@ export default defineConfig(({ mode }) => {
         overlay: true, // 显示错误覆盖层
       },
       proxy: {
+        '/editor-app': { target: 'http://127.0.0.1:5188', changeOrigin: false },
         // API 请求代理到后端（端口从环境变量 BACKEND_PORT 读取）
         '/api': {
           target: backendUrl,
