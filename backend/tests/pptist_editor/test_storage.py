@@ -137,3 +137,68 @@ def test_asset_snapshot_freeze_and_history_access(client,case,app,tmp_path):
     assert client.get(url.replace(asset['sha256'],'0'*64),headers=c['owner']).status_code==404
     assert client.put(c['url'],json={'base_revision':1,'slides':d['slides']},headers=c['owner']).status_code==200
     assert client.get(url,headers=c['owner']).status_code==200
+
+
+def test_delete_project_with_editor_history_is_scoped_and_fk_clean(client, case, app):
+    from pathlib import Path
+    from sqlalchemy import text as sql
+    c = case
+    initialize(client, c)
+    assert client.post(c['url'] + '/restore', json={'base_revision': 1, 'revision': 1}, headers=c['owner']).status_code == 200
+    other_project = Project(user_id=c['raw']['user_id'], creation_type='idea')
+    db.session.add(other_project)
+    db.session.flush()
+    other_id = other_project.id
+    db.session.add_all([
+        EditorDocument(project_id=other_id, revision=1),
+        EditorRevision(project_id=other_id, revision=1, actor_user_id=c['raw']['user_id'], payload='[]'),
+    ])
+    db.session.commit()
+    root = Path(app.config['UPLOAD_FOLDER'])
+    target_file = root / c['project_id'] / 'asset.txt'
+    other_file = root / other_id / 'asset.txt'
+    for path in (target_file, other_file):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('retained until authorized deletion')
+    url = '/api/projects/' + c['project_id']
+    assert db.session.execute(sql('PRAGMA foreign_keys')).scalar() == 1
+    assert client.delete(url, headers=c['other']).status_code == 404
+    assert target_file.exists()
+    assert EditorRevision.query.filter_by(project_id=c['project_id']).count() == 2
+    result = client.delete(url, headers=c['owner'])
+    assert result.status_code == 200, result.json
+    assert db.session.get(Project, c['project_id']) is None
+    assert Page.query.filter_by(project_id=c['project_id']).count() == 0
+    assert EditorDocument.query.filter_by(project_id=c['project_id']).count() == 0
+    assert EditorRevision.query.filter_by(project_id=c['project_id']).count() == 0
+    assert not target_file.exists()
+    assert db.session.get(Project, other_id) is not None
+    assert EditorDocument.query.filter_by(project_id=other_id).count() == 1
+    assert EditorRevision.query.filter_by(project_id=other_id).count() == 1
+    assert other_file.exists()
+    assert db.session.execute(sql('PRAGMA foreign_key_check')).all() == []
+
+
+def test_delete_project_failure_rolls_back_editor_history_and_retains_files(client, case, app, monkeypatch):
+    from pathlib import Path
+    from sqlalchemy import text as sql
+    initialize(client, case)
+    target = Path(app.config['UPLOAD_FOLDER']) / case['project_id'] / 'asset.txt'
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text('must survive failed transaction')
+    before = EditorRevision.query.filter_by(project_id=case['project_id']).one().payload
+
+    def fail_commit():
+        # Force SQL deletion to run, then fail before commit to exercise rollback.
+        db.session.flush()
+        raise RuntimeError('injected commit failure')
+
+    monkeypatch.setattr(db.session, 'commit', fail_commit)
+    result = client.delete('/api/projects/' + case['project_id'], headers=case['owner'])
+    assert result.status_code == 500
+    assert db.session.get(Project, case['project_id']) is not None
+    assert Page.query.filter_by(project_id=case['project_id']).count() == 1
+    assert db.session.get(EditorDocument, case['project_id']).revision == 1
+    assert EditorRevision.query.filter_by(project_id=case['project_id']).one().payload == before
+    assert target.read_text() == 'must survive failed transaction'
+    assert db.session.execute(sql('PRAGMA foreign_key_check')).all() == []
