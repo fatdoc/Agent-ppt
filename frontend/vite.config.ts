@@ -50,7 +50,9 @@ export default defineConfig(({ mode }) => {
         overlay: true, // 显示错误覆盖层
       },
       proxy: {
-        '/editor-app': { target: 'http://127.0.0.1:5188', changeOrigin: false },
+        // Daily local runtime serves the built editor from public/editor-app.
+        // A separate Vue dev server is optional, never a required QA process.
+        ...(env.PPTIST_DEV_SERVER ? { '/editor-app': { target: env.PPTIST_DEV_SERVER, changeOrigin: false } } : {}),
         // API 请求代理到后端（端口从环境变量 BACKEND_PORT 读取）
         '/api': {
           target: backendUrl,
