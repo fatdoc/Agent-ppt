@@ -5,6 +5,12 @@ import { apiClient } from '../api/client';
 import { message, receive } from '../../../shared/pptistProtocol';
 type Doc = { revision: number; slides: unknown[]; width: number; height: number; readonly?: boolean; reason?: string };
 export default function PptistEditor() {
+  const { projectId }=useParams();
+  const [params]=useSearchParams();
+  // A reused route must not retain the previous project's draft or handshake.
+  return <PptistEditorSession key={`${projectId}:${params.get('fixture')==='1'}`} />;
+}
+function PptistEditorSession() {
   const { projectId }=useParams(); const navigate=useNavigate();const [params]=useSearchParams();
   const fixture=import.meta.env.DEV && params.get('fixture')==='1';
   const frame=useRef<HTMLIFrameElement>(null);
@@ -13,16 +19,20 @@ export default function PptistEditor() {
   const [taskId,setTaskId]=useState(''),[download,setDownload]=useState('');
   const [session,setSession]=useState(()=>crypto.randomUUID());
   const ready=useRef(false),loaded=useRef(false),dirty=useRef(false),saving=useRef(false),sequence=useRef(0),latest=useRef<unknown[]>([]),revision=useRef(0),timer=useRef<ReturnType<typeof setTimeout>>();
-  const activeSession=useRef(session);activeSession.current=session;
+  const activeSession=useRef<string>(session);activeSession.current=session;
+  useEffect(()=>{activeSession.current=session;return()=>{activeSession.current='';clearTimeout(timer.current);};},[]);
   async function save() {
     if(saving.current || !dirty.current) return;
     if(fixture){setStatus('人工测试样例 · 修改仅在当前会话，未保存到项目');return;}
-    const seq=sequence.current, sid=activeSession.current; saving.current=true;setStatus('正在保存…');
+    const seq=sequence.current, sid=activeSession.current, submitted=latest.current; saving.current=true;setStatus('正在保存…');
     let succeeded=false;
     try {
-      const result=await apiClient.put(`/api/projects/${projectId}/editor-document`,{base_revision:revision.current,slides:latest.current});
+      const result=await apiClient.put(`/api/projects/${projectId}/editor-document`,{base_revision:revision.current,slides:submitted});
       if(activeSession.current!==sid)return;
       revision.current=result.data.data.revision;succeeded=true;setError('');
+      // Reload only acknowledged content, never the initial document or a newer
+      // in-flight draft. Keep latest/dirty independently for serial saves.
+      setDoc(previous=>previous ? {...previous,...result.data.data,slides:result.data.data.slides??submitted} : previous);
       dirty.current=sequence.current!==seq;
       setStatus(dirty.current?'有新修改，等待保存':`已保存 · 版本 ${revision.current}`);
       frame.current?.contentWindow?.postMessage(message(sid,'SAVE_RESULT',{ok:true,sequence:seq,revision:revision.current}),location.origin);
@@ -30,7 +40,7 @@ export default function PptistEditor() {
       if(activeSession.current!==sid)return;
       setError(e.response?.data?.error?.message || '保存失败，当前草稿仍保留，请重试');setStatus('未保存');
       frame.current?.contentWindow?.postMessage(message(sid,'SAVE_RESULT',{ok:false,sequence:seq,message:'保存失败；草稿已保留'}),location.origin);
-    } finally {saving.current=false;if(succeeded&&dirty.current)timer.current=setTimeout(()=>void save(),300);}
+    } finally {if(activeSession.current===sid){saving.current=false;if(succeeded&&dirty.current)timer.current=setTimeout(()=>void save(),300);}}
   }
   async function restoreVersion(target:number) {
     if(dirty.current||saving.current){setError('请先保存当前修改，或下载草稿后重新加载，再恢复历史版本。');return;}
@@ -88,7 +98,7 @@ export default function PptistEditor() {
     }
     window.addEventListener('message',onMessage);load();
     const timeout=setTimeout(()=>{if(!ready.current)setError('编辑器未响应，请检查 /editor-app/ 构建或重试。');},15000);
-    return()=>{window.removeEventListener('message',onMessage);clearTimeout(timeout);clearTimeout(timer.current);};
+    return()=>{window.removeEventListener('message',onMessage);clearTimeout(timeout);};
   },[session,doc]);
   useEffect(()=>{const warn=(e:BeforeUnloadEvent)=>{if(dirty.current){e.preventDefault();e.returnValue='';}};window.addEventListener('beforeunload',warn);return()=>window.removeEventListener('beforeunload',warn);},[]);
   function retry(){ready.current=false;loaded.current=false;sequence.current=0;setError('');setSession(crypto.randomUUID());}
