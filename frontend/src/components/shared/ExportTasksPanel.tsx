@@ -191,6 +191,7 @@ const TaskItem: React.FC<{ task: ExportTask; pages: Page[]; onRemove: () => void
   const taskTypeLabels: Record<ExportTaskType, string> = {
     'pptx': t('export.exportPptx'),
     'pdf': t('export.exportPdf'),
+    'semantic-editor': '语义编辑 PPTX',
     'editable-pptx': t('export.exportEditablePptx'),
     'images': t('export.exportImages'),
     'video': t('export.exportVideo'),

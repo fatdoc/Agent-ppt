@@ -1539,6 +1539,7 @@ export const SlidePreview: React.FC = () => {
               <span className="hidden lg:inline">{t('preview.refresh')}</span>
             </Button>
           
+          <button className="px-3 py-2 text-sm border rounded-lg" onClick={() => navigate(`/project/${projectId}/editor`)}>在线编辑</button>
           {/* 导出任务按钮 — 始终显示，面板内部决定是否有内容 */}
           <div className="relative z-[90]">
               <Button

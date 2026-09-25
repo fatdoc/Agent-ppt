@@ -30,7 +30,7 @@ def test_combined_lineage_has_one_head(monkeypatch, tmp_path):
     database_url = f'sqlite:///{tmp_path / "graph.db"}'
     monkeypatch.setenv('DATABASE_URL', database_url)
     heads = ScriptDirectory.from_config(_config(database_url)).get_heads()
-    assert heads == ['030_batch01_safety_expand']
+    assert heads == ['031_pptist_editor_documents']
 
 
 def test_legacy_reference_fields_are_not_exposed_in_api_payloads():
@@ -54,7 +54,7 @@ def test_empty_database_upgrades_to_combined_head(monkeypatch, tmp_path):
     inspector = inspect(engine)
 
     with engine.connect() as connection:
-        assert connection.execute(text('SELECT version_num FROM alembic_version')).scalar_one() == '030_batch01_safety_expand'
+        assert connection.execute(text('SELECT version_num FROM alembic_version')).scalar_one() == '031_pptist_editor_documents'
         assert connection.execute(text('PRAGMA foreign_key_check')).fetchall() == []
         admin = connection.execute(text(
             "SELECT password_hash, password_reset_required FROM users WHERE username = 'admin'"
@@ -90,7 +90,7 @@ def test_local_027_and_upstream_784_each_converge_to_head(monkeypatch, tmp_path)
         command.upgrade(_config(database_url), 'head')
         engine = create_engine(database_url)
         with engine.connect() as connection:
-            assert connection.execute(text('SELECT version_num FROM alembic_version')).scalar_one() == '030_batch01_safety_expand'
+            assert connection.execute(text('SELECT version_num FROM alembic_version')).scalar_one() == '031_pptist_editor_documents'
             assert connection.execute(text('PRAGMA foreign_key_check')).fetchall() == []
 
 

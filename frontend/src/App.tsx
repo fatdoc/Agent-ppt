@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Home } from './pages/Home';
 import { Landing } from './pages/Landing';
@@ -10,6 +10,8 @@ import { SettingsPage } from './pages/Settings';
 import { ApiDocsPage } from './pages/ApiDocs';
 import { useProjectStore } from './store/useProjectStore';
 import { useToast, AccessCodeGuard, AuthGuard } from './components/shared';
+
+const PptistEditor = lazy(() => import('./pages/PptistEditor'));
 
 function App() {
   const { currentProject, syncProject, error, setError } = useProjectStore();
@@ -44,6 +46,7 @@ function App() {
             <Route path="/developer/api-docs" element={<ApiDocsPage />} />
             <Route path="/project/:projectId/outline" element={<OutlineEditor />} />
             <Route path="/project/:projectId/detail" element={<DetailEditor />} />
+            <Route path="/project/:projectId/editor" element={<Suspense fallback={<div>正在加载编辑器…</div>}><PptistEditor /></Suspense>} />
             <Route path="/project/:projectId/preview" element={<SlidePreview />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
