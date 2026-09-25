@@ -115,7 +115,7 @@ function PptistEditorSession() {
     {!fixture&&doc&&<div className="px-5 py-2 bg-amber-50 text-sm text-amber-900">可编辑版本独立于原图片保存。自动识别内容请核对文字、位置和素材；编辑后请在此导出当前版本。</div>}
     {history&&<div className="px-5 py-3 bg-white border-b flex gap-3 flex-wrap"><button onClick={()=>setHistory(null)}>关闭历史</button>{history.map(h=><button key={h.revision} onClick={()=>void restoreVersion(h.revision)} className="border rounded px-2">恢复版本 {h.revision}</button>)}</div>}
     {error&&<div role="alert" className="px-5 py-3 bg-red-50 text-red-800">{error} {dirty.current&&<button onClick={downloadDraft}>下载未保存草稿</button>} {doc&&!dirty.current&&<button onClick={retry}>重新加载编辑器</button>}</div>}
-    {doc?.readonly?<div className="p-8">此语义文档暂为只读：{doc.reason}。原文档保持不变。</div>:doc&&<iframe key={session} ref={frame} title="PPTist 在线编辑器" src={`/editor-app/?session=${session}`} className="w-full flex-1 border-0" />}
+    {doc?.readonly?<div className="p-8">此语义文档暂为只读：{doc.reason}。原文档保持不变。</div>:doc&&<iframe key={session} ref={frame} title="PPTist 在线编辑器" src={`/editor-app/index.html?session=${session}`} className="w-full flex-1 border-0" />}
     {!doc&&error&&<p className="p-8 text-gray-600">请返回图片预览，点击“生成可编辑 PPT”。全部页面转换成功后会自动进入此处；历史图片和原导出不受影响。</p>}
   </main>;
 }

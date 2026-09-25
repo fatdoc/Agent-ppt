@@ -11,6 +11,7 @@ async function mount(){
  vi.mocked(apiClient.get).mockResolvedValue({data:{data:document}});
  render(<MemoryRouter initialEntries={['/project/p/editor']}><Routes><Route path="/project/:projectId/editor" element={<PptistEditor/>}/></Routes></MemoryRouter>);
  const frame=await screen.findByTitle('PPTist 在线编辑器') as HTMLIFrameElement;
+ expect(new URL(frame.src).pathname).toBe('/editor-app/index.html');
  const session=new URL(frame.src).searchParams.get('session')!;
  const send=(type:Parameters<typeof message>[1],payload={})=>act(()=>{window.dispatchEvent(new MessageEvent('message',{origin:location.origin,source:frame.contentWindow,data:message(session,type,payload)}));});
  send('READY');return {send,frame};
