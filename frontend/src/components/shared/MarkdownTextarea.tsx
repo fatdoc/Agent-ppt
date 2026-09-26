@@ -54,6 +54,8 @@ interface MarkdownTextareaProps {
   error?: string;
   className?: string;
   rows?: number;
+  /** Keep the initial row height and scroll long content; users can still resize vertically. */
+  fixedHeight?: boolean;
   /** Show the inline image upload button. Default: true when onFiles is provided */
   showUploadButton?: boolean;
   /** Extra content rendered on the left side of the toolbar (after built-in buttons) */
@@ -264,6 +266,7 @@ export const MarkdownTextarea = forwardRef<MarkdownTextareaRef, MarkdownTextarea
   error,
   className,
   rows = 4,
+  fixedHeight = false,
   showUploadButton,
   toolbarLeft,
   toolbarRight,
@@ -654,7 +657,7 @@ export const MarkdownTextarea = forwardRef<MarkdownTextareaRef, MarkdownTextarea
             onDrop={handleDrop}
             onBlur={onBlur}
             onFocus={onFocus}
-            style={{ minHeight: `${minHeight}px` }}
+            style={{ minHeight: `${minHeight}px`, height: fixedHeight ? `${minHeight}px` : undefined }}
             className="w-full px-4 py-3 outline-none overflow-y-auto resize-y whitespace-pre-wrap break-words text-gray-900 dark:text-foreground-primary"
           />
 

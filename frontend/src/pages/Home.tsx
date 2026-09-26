@@ -1724,7 +1724,8 @@ export const Home: React.FC = () => {
               onFiles={handleImageFiles}
               onDocumentFiles={handleDocumentFiles}
               onSelectFromLibrary={() => setIsMaterialSelectorOpen(true)}
-              rows={8}
+              rows={activeTab === 'outline' ? 6 : 8}
+              fixedHeight={activeTab === 'outline'}
               className="text-sm md:text-base border-2 border-gray-200 dark:border-border-primary dark:bg-background-tertiary dark:text-white focus-within:border-banana-400 dark:focus-within:border-banana transition-colors duration-200"
               toolbarLeft={
                 <div className="flex items-center gap-1">

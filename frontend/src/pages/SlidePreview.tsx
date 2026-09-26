@@ -1676,9 +1676,6 @@ export const SlidePreview: React.FC = () => {
           </div>
         </div>
       </header>
-      <div className="px-4 py-2 text-xs md:text-sm bg-yellow-50 text-gray-700 border-b border-yellow-100 flex-shrink-0">
-        {isEnglishUi ? 'Outline → Page descriptions → Images (ready to export) → Generate editable PPT → Online editor' : '大纲 → 逐页描述 → 图片生成（可直接导出）→ 生成可编辑 PPT → 在线编辑'}
-      </div>
 
       {/* 视频导出设置弹窗 */}
       {showVideoExportDialog && (
