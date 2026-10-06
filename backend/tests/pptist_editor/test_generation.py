@@ -185,3 +185,96 @@ def test_all_pages_publish_atomically_and_retry_reuses_good_page(client,conversi
     state=client.get(c['url'],headers=c['headers']).json['data'];assert state['ready'],state
     assert seen==[c['page'],second_id,second_id]
     assert len(json.loads(EditorRevision.query.one().payload))==2
+
+
+def test_realistic_response_normalizes_without_changing_content(client,conversion,monkeypatch):
+    import services.ai_service_manager as manager
+    c=conversion
+    data=plan(); data['background']='#fff'
+    data['nodes'][0]['shape'].update(geometry='roundedRect',fill='rgb(238, 238, 238)')
+    box=data['nodes'][1]['box'];box['width']=box.pop('w');box['height']=box.pop('h')
+    data['nodes'][1]['text']['paragraphs'][0]['runs'][0].update(fontSize=24,color='#203040')
+    class Vision:
+        def _generate_text_from_image(self,*a):return '\ufeff```JSON\n'+json.dumps(data)+'\n```'
+    monkeypatch.setattr(manager,'create_ai_service',Vision)
+    client.post(c['url'],json={},headers=c['headers']);run(c)
+    state=client.get(c['url'],headers=c['headers']).json['data']
+    assert state['ready'],state
+    payload=json.loads(EditorRevision.query.one().payload)[0]
+    assert payload['nodes'][1]['text']['paragraphs'][0]['runs'][0]['text']=='可编辑原文'
+    assert len(payload['nodes'])==3 and payload['warnings'][-1].startswith('已无损规范化')
+
+
+def test_diagnostics_keep_private_response_but_never_expose_values(client,conversion,monkeypatch):
+    import services.ai_service_manager as manager
+    from services.provider_config import ProviderConfigSnapshot, provider_snapshot_scope
+    c=conversion
+    data=plan();data['nodes'][1]['text']['paragraphs'][0]['runs'][0]['color']='private-business-content'
+    data['nodes'][1]['text']['paragraphs'][0]['runs'][0]['text']='secret-provider-token'
+    class Vision:
+        def _generate_text_from_image(self,*a):return json.dumps(data)
+    monkeypatch.setattr(manager,'create_ai_service',Vision)
+    client.post(c['url'],json={},headers=c['headers']);run(c)
+    task=Task.query.one();state=client.get(c['url'],headers=c['headers']).json['data']
+    assert task.status=='FAILED' and '第 1/1 页' in task.error_message
+    assert 'nodes[1].text.paragraphs[0].runs[0].color' in task.error_message
+    assert 'private-business-content' not in json.dumps(state) and 'secret-provider-token' not in json.dumps(state)
+    assert task.get_progress()['failed_page_id']==c['page']
+    files=list((c['root']/'.editor-generation-diagnostics').glob('*.json'))
+    assert len(files)==1 and files[0].stat().st_mode & 0o777==0o600
+    assert json.loads(files[0].read_text())['response']
+    assert client.get(f'/files/{c["project"]}/.editor-generation-diagnostics/{files[0].name}',headers=c['headers']).status_code==404
+    assert not EditorDocument.query.count()
+    # Active Provider secrets are redacted even inside the private local record.
+    from services.pptist_editor.generation import record_validation_failure, capture_sources
+    with provider_snapshot_scope(ProviderConfigSnapshot(c['owner'],'v',{'OPENAI_API_KEY':'secret-provider-token'},'app')):
+        record_validation_failure(c['root'],capture_sources(c['project'])[0],'secret-provider-token',GenerationError('安全错误'))
+    records=[json.loads(p.read_text()) for p in (c['root']/'.editor-generation-diagnostics').glob('*.json')]
+    assert any(r['response']=='[REDACTED]' for r in records)
+
+
+def test_failed_page_validation_is_scoped_billed_and_never_publishes_partial_deck(client,conversion,monkeypatch):
+    c=conversion
+    second=Page(project_id=c['project'],order_index=1,generated_image_path=f'{c["project"]}/page.png')
+    db.session.add(second);db.session.commit();second_id=second.id
+    import services.pptist_editor.generation as generation
+    original=generation.extract_page;seen=[];fail=[True]
+    def extract(ai,source,**kw):
+        seen.append(source['id'])
+        if source['id']==second_id and fail[0]:raise GenerationError('测试失败')
+        return original(ai,source,**kw)
+    monkeypatch.setattr(generation,'extract_page',extract)
+    assert client.post(c['url'],json={'mode':'validate_failed_page'},headers=c['headers']).status_code==409
+    client.post(c['url'],json={},headers=c['headers']);run(c)
+    state=client.get(c['url'],headers=c['headers']).json['data']
+    assert state['validation_page_number']==2 and state['validation_credit_estimate']['amount']==110
+    assert state['task']['progress']['failed_page_number']==2
+    # Neither cross-user access nor an arbitrary page ID may select another page.
+    assert client.post(c['url'],json={'mode':'validate_failed_page'},headers=c['other']).status_code==404
+    assert client.post(c['url'],json={'mode':'validate_failed_page','page_id':c['page']},headers=c['headers']).status_code==400
+    fail[0]=False
+    r=client.post(c['url'],json={'mode':'validate_failed_page'},headers=c['headers']);assert r.status_code==202
+    assert r.json['data']['credit_estimate']['amount']==110
+    # Repeated clicks reuse the same pending job, independent of submitted mode.
+    before=len(c['calls']); client.post(c['url'],json={'mode':'validate_failed_page'},headers=c['headers']);assert len(c['calls'])==before
+    run(c)
+    state=client.get(c['url'],headers=c['headers']).json['data']
+    assert not state['ready'] and state['task']['progress']['validation_passed']
+    assert seen==[c['page'],second_id,second_id]
+    assert not EditorDocument.query.count() and not EditorRevision.query.count()
+    assert not (c['root']/'exports').exists()
+    assert db.session.get(CreditAccount,c['owner']).lifetime_spent==110
+    # Full conversion reuses both validated pages; only it publishes the full deck.
+    client.post(c['url'],json={},headers=c['headers']);run(c)
+    assert client.get(c['url'],headers=c['headers']).json['data']['ready']
+    assert seen==[c['page'],second_id,second_id]
+    assert len(json.loads(EditorRevision.query.one().payload))==2
+
+
+def test_old_failure_progress_can_select_page_but_packaging_failure_cannot(client,conversion):
+    c=conversion
+    task=Task(project_id=c['project'],user_id=c['owner'],task_type='GENERATE_EDITOR_DOCUMENT',status='FAILED')
+    task.set_progress(dict(total=1,completed=0,current_step='正在转换第 1/1 页'));db.session.add(task);db.session.commit()
+    assert client.get(c['url'],headers=c['headers']).json['data']['validation_page_number']==1
+    task.set_progress(dict(total=1,completed=1,current_step='正在验证并生成可编辑 PPTX'));db.session.commit()
+    assert client.post(c['url'],json={'mode':'validate_failed_page'},headers=c['headers']).status_code==409

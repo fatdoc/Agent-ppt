@@ -7,6 +7,8 @@ import hashlib
 import json
 import os
 import tempfile
+import logging
+import uuid
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
@@ -19,7 +21,8 @@ from services.semantic_export.model import digest
 from services.semantic_export.pipeline import StageCache
 from services.editable_export_checkpoint import EditableExportCheckpoint
 from services.pptist_editor.adapter import PPTistAdapter
-from services.provider_config import active_provider_snapshot
+from services.provider_config import active_provider_snapshot, redact_provider_text
+from services.pptist_editor.recognition import parse_response, normalize_plan, validation_issues, issue_summary
 from services.task_execution import current_task_execution
 from services.credit_service import settle_task_credits
 
@@ -29,6 +32,10 @@ STRATEGY = 'image-semantic-editor-v1'
 
 class GenerationError(ValueError):
     """Safe, user-facing failure; never include raw Provider responses."""
+    def __init__(self, message, *, issues=None, diagnostic_id=None):
+        super().__init__(message)
+        self.issues = issues or []
+        self.diagnostic_id = diagnostic_id
 
 
 def source_path(project_id, relative):
@@ -71,6 +78,9 @@ def reconstruction_prompt(source, width, height):
 软件截图保留完整局部 image（role=screenshot），不得重复提取其内部小字。照片、复杂插画用局部 image；简单图标可保留局部 icon。
 独立业务表格用 table。不得使用整页原图或大幅正文截图当背景；不得用许多碎片拼背景。背景只允许纯色。
 所有主要内容必须保留；坐标为原图像素，不能越界，图片 box 同时是裁切框，保留比例。最多 500 个节点，groups 只允许一层，组内图层连续。
+对象 id/module_id/parent_id 只能使用英文字母、数字、下划线或连字符；中文名称放 name。
+layer 必须全页唯一；每组的成员在全页 layer 排序后必须连续。组合及其成员 module_id 必须相同。
+同一文本框内各段落 line_spacing/space_after 必须相同。保留截图区域内不得再创建原生文字。
 只输出 JSON，不输出 Markdown。结构如下（省略不适用的 payload；color 不带 #）：
 {{"background":"FFFFFF","groups":[{{"id":"card1","name":"卡片一","module_id":"card1"}}],"nodes":[
 {{"id":"frame1","name":"卡片底框","kind":"shape","box":{{"x":40,"y":100,"w":400,"h":300}},"layer":0,"module_id":"card1","parent_id":"card1","shape":{{"geometry":"roundRect","fill":"F2F5F8"}}}},
@@ -97,6 +107,8 @@ def organize_image(plan, image, *, source, project_id, user_id, root):
     asset_dir = root / 'editor-assets'
     asset_dir.mkdir(exist_ok=True)
     for entry in nodes:
+        if not isinstance(entry, dict):
+            raise GenerationError('页面成员必须是对象')
         n = dict(entry)
         confidence = n.pop('confidence', .8)
         # Caller identities and provenance are exclusively server-controlled.
@@ -138,6 +150,50 @@ def organize_image(plan, image, *, source, project_id, user_id, root):
     return page
 
 
+def validate_response(response, image, *, source, project_id, user_id, root):
+    """Offline replay entry. No Provider, database, or task mutation."""
+    try:
+        plan, changes = normalize_plan(parse_response(response))
+        page = organize_image(plan, image, source=source, project_id=project_id, user_id=user_id, root=root)
+        if changes:
+            page.warnings.append('已无损规范化识别格式：' + ', '.join(changes[:20]))
+        return page
+    except GenerationError:
+        raise
+    except (ValueError, TypeError, KeyError, IndexError, AttributeError, RecursionError) as exc:
+        issues = validation_issues(exc)
+        raise GenerationError('页面语义校验失败：' + issue_summary(issues), issues=issues) from exc
+
+
+def record_validation_failure(root, source, response, exc):
+    """Private bounded diagnostic, not a public asset or a successful checkpoint."""
+    identifier = uuid.uuid4().hex
+    directory = root / '.editor-generation-diagnostics'
+    control = current_task_execution()
+    record = dict(version=1, diagnostic_id=identifier, page_id=source['id'],
+                  source_sha256=source['sha256'], task_id=control.task_id if control else None,
+                  issues=exc.issues, message=str(exc), created_at=datetime.utcnow().isoformat())
+    if isinstance(response, str) and len(response.encode('utf-8')) <= 4 * 1024 * 1024:
+        record['response'] = redact_provider_text(response)
+    else:
+        record['response'] = None
+    try:
+        directory.mkdir(mode=0o700, exist_ok=True)
+        # No path or name from the model is ever used here.
+        if directory.is_symlink():
+            raise OSError('diagnostic directory cannot be a symlink')
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=directory, delete=False) as handle:
+            json.dump(record, handle, ensure_ascii=False)
+            handle.flush(); os.fsync(handle.fileno())
+            temporary = handle.name  # tempfile uses mode 0600.
+        os.replace(temporary, directory / (identifier + '.json'))
+        exc.diagnostic_id = identifier
+    except OSError:
+        logging.getLogger(__name__).warning('Editor diagnostic could not be persisted; failure remains visible')
+    # Never log the Provider response, exception repr, or document text.
+    logging.getLogger(__name__).warning('Editor semantic validation failed diagnostic=%s: %s', exc.diagnostic_id, str(exc))
+
+
 def extract_page(ai, source, *, project_id, user_id, root):
     path = source_path(project_id, source['path'])
     raw = path.read_bytes()
@@ -152,18 +208,14 @@ def extract_page(ai, source, *, project_id, user_id, root):
             frozen = Path(temporary) / 'page.png'
             image.convert('RGB').save(frozen)
             response = ai._generate_text_from_image(reconstruction_prompt(source, *image.size), str(frozen))
-        if len(response) > 4*1024*1024:
-            raise GenerationError('识别结果过大')
-        text = response.strip()
-        if text.startswith('```'):
-            text = text.split('\n', 1)[1].rsplit('```', 1)[0].strip()
         try:
-            return organize_image(json.loads(text), image, source=source, project_id=project_id, user_id=user_id, root=root)
-        except (ValueError, TypeError, KeyError, IndexError) as exc:
-            raise GenerationError('页面语义识别未通过校验，请重试；原图未改变') from exc
+            return validate_response(response, image, source=source, project_id=project_id, user_id=user_id, root=root)
+        except GenerationError as exc:
+            record_validation_failure(root, source, response, exc)
+            raise
 
 
-def generate_document(task_id, *, project_id, user_id, sources, app):
+def generate_document(task_id, *, project_id, user_id, sources, app, validation_page_id=None):
     from services.ai_service_manager import create_ai_service
     with app.app_context():
         task = db.session.get(Task, task_id)
@@ -172,10 +224,15 @@ def generate_document(task_id, *, project_id, user_id, sources, app):
         control = current_task_execution()
         def checkpoint():
             if control: control.checkpoint()
+        selected = [s for s in sources if s['id'] == validation_page_id] if validation_page_id else sources
+        current_page_number = None
+        current_page_id = None
         def progress(completed, step):
-            p = task.get_progress(); p.update(completed=completed, total=len(sources), current_step=step)
+            p = task.get_progress(); p.update(completed=completed, total=len(selected), current_step=step)
             task.set_progress(p); db.session.commit()
         try:
+            if validation_page_id and len(selected) != 1:
+                raise GenerationError('失败页已不存在，请刷新项目后重试')
             task.status = 'PROCESSING'; progress(0, '正在识别页面语义对象')
             root = Path(app.config['UPLOAD_FOLDER']).resolve() / project_id
             snapshot = active_provider_snapshot()
@@ -184,8 +241,10 @@ def generate_document(task_id, *, project_id, user_id, sources, app):
             store = AssetStore(root, user_id=user_id, project_id=project_id)
             cache = StageCache(root / '.editor-generation-checkpoints', [user_id, project_id, STRATEGY, snapshot.cache_scope])
             ai, pages = create_ai_service(), []
-            for i, source in enumerate(sources):
-                checkpoint(); progress(i, f'正在转换第 {i+1}/{len(sources)} 页')
+            for i, source in enumerate(selected):
+                current_page_number = next(n+1 for n, s in enumerate(sources) if s['id'] == source['id'])
+                current_page_id = source['id']
+                checkpoint(); progress(i, f'正在{"验证" if validation_page_id else "转换"}第 {current_page_number}/{len(sources)} 页')
                 key = digest(source)
                 def rebuild(s=source):
                     return extract_page(ai, s, project_id=project_id, user_id=user_id, root=root).model_dump(mode='json')
@@ -201,6 +260,17 @@ def generate_document(task_id, *, project_id, user_id, sources, app):
                 if page.id != source['id'] or page.source.sha256 != source['sha256']:
                     raise GenerationError('转换缓存与当前图片不一致')
                 PPTistAdapter().to_editor(page); pages.append(page)
+            if validation_page_id:
+                # Validate only this page all the way through native PPTX audit.
+                # Never publish a partial deck or create an editor document.
+                export_pages(pages, store=store, checkpoint_dir=root/'.editor-generation-validation', mode='semantic', check_cancelled=checkpoint)
+                verify_sources(project_id, sources)
+                p = task.get_progress(); p.update(completed=1, total=1, validation_passed=True,
+                                                 current_step=f'第 {current_page_number} 页验证通过，可继续整套转换')
+                task.set_progress(p); task.status='COMPLETED'; task.completed_at=datetime.utcnow()
+                settle_task_credits(task_id, completed_units=1, total_units=1); db.session.commit()
+                return
+            current_page_number = current_page_id = None
             if len({(p.width,p.height) for p in pages}) != 1:
                 raise GenerationError('页面画布尺寸不一致，请统一图片比例与尺寸后重试')
             checkpoint(); progress(len(pages), '正在验证并生成可编辑 PPTX')
@@ -237,5 +307,11 @@ def generate_document(task_id, *, project_id, user_id, sources, app):
             task=db.session.get(Task, task_id)
             if task:
                 task.status='FAILED'; task.completed_at=datetime.utcnow()
-                task.error_message=str(exc) if isinstance(exc, GenerationError) else '页面转换失败，请检查图片识别 Provider 配置后重试；原图和已完成的转换缓存保留。'
+                reason = str(exc) if isinstance(exc, GenerationError) else '页面转换失败，请检查图片识别 Provider 配置后重试'
+                task.error_message=(f'第 {current_page_number}/{len(sources)} 页：' if current_page_number else '') + reason + '；原图未改变'
+                p = task.get_progress()
+                p.update(failed=1, failed_page_id=current_page_id, failed_page_number=current_page_number)
+                if isinstance(exc, GenerationError):
+                    p.update(validation_errors=exc.issues, diagnostic_id=exc.diagnostic_id)
+                task.set_progress(p)
                 settle_task_credits(task_id, force_release=True); db.session.commit()

@@ -48,3 +48,16 @@ it('late completion after leaving preview does not navigate',async()=>{
  const view=mount();view.unmount();await act(async()=>resolve(response({ready:true})));
  expect(screen.queryByText('编辑页已打开')).toBeNull();
 });
+it('confirms a one-page quote and never navigates or continues after validation',async()=>{
+ vi.mocked(apiClient.get).mockResolvedValueOnce(response({ready:false,validation_page_number:2,validation_credit_estimate:{amount:110},credit_estimate:{amount:2510},task:{status:'FAILED',error_message:'第2页校验失败',progress:{diagnostic_id:'safe-id'}}}))
+ .mockResolvedValue(response({ready:false,task:{status:'COMPLETED',progress:{validation_only:true,validation_passed:true,current_step:'第 2 页验证通过'}}}));
+ vi.mocked(apiClient.post).mockResolvedValue(response({ready:false,task:{status:'PENDING',progress:{validation_only:true,total:1,completed:0}}}));
+ mount();fireEvent.click(await screen.findByText('仅验证第 2 页'));
+ expect(screen.getByRole('dialog')).toHaveTextContent('110');
+ expect(screen.getByRole('dialog')).toHaveTextContent('模型服务商仍可能收费');
+ expect(apiClient.post).not.toHaveBeenCalled();
+ fireEvent.click(screen.getByText('确认仅验证这一页'));
+ await screen.findByText(/尚未生成整套编辑文档/,{}, {timeout:3000});
+ expect(apiClient.post).toHaveBeenCalledWith('/api/projects/p/editable-generation',{mode:'validate_failed_page'});
+ expect(apiClient.post).toHaveBeenCalledTimes(1);expect(screen.queryByText('编辑页已打开')).toBeNull();
+});
