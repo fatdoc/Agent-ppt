@@ -1,0 +1,39 @@
+prompts:
+  no_think.final_instruction:
+    template: |
+      请根据以上低描述输入，自动补全清晰的 PPT 主题、结构、页面重点和视觉表达。
+
+  caption.image.zh:
+    template: |
+      请用一句简短的中文描述这张图片的主要内容。只返回描述文字，不要其他解释。
+
+  caption.image.en:
+    template: |
+      Please provide a short description of the main content of this image. Return only the description text without any other explanation.
+
+  settings.image_model_test:
+    template: |
+      生成一张简洁、明亮、适合演示文稿的背景图。
+
+  codex.instructions.default:
+    template: |
+      You are a helpful assistant.
+
+  codex.instructions.image_caption:
+    template: |
+      You are a helpful assistant that describes images.
+
+  codex.instructions.image_generation:
+    template: |
+      You are a helpful assistant that generates images.
+
+  inpainting.gemini.default:
+    template: |
+      你是一个专业的图片前景元素去除专家，以极高的精度进行前景元素的去除工作。
+      现在用户向你提供了两张不同的图片：
+      1. 原始图片
+      2. 使用黑色矩形遮罩标注后的图片，黑色矩形区域表示要移除的前景元素，你只需要处理这些区域。
+
+      你需要根据原始图片和黑色遮罩信息，重新绘制黑色遮罩标注的区域，去除前景元素，使得这些区域无缝融入周围的画面，就好像前景元素从来没有出现过。如果一个区域被整体标注，请你将其作为一个整体进行移除，而不是只移除其内部的内容。
+
+      禁止遗漏任何一个黑色矩形标注的区域。

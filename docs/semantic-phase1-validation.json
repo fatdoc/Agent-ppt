@@ -1,0 +1,37 @@
+{
+  "test_result": {
+    "passed": 45,
+    "semantic": 34,
+    "legacy_regressions": 11
+  },
+  "input_boundary": "manual fixtures and already structured content; automatic region recognition not validated",
+  "client_operations": {
+    "status": "not_tested",
+    "reason": "WPS active document switched during read-only inspection; no changes made to existing documents"
+  },
+  "structure": "passed",
+  "render": {
+    "status": "passed_after_corrections",
+    "renderer": "Codex bundled LibreOffice; Noto Sans CJK SC",
+    "pages_reviewed": 4,
+    "automated_text_bounds_findings": 0,
+    "corrections": [
+      "font internal family corrected",
+      "reference title width and size corrected with provenance",
+      "removed inherited theme shadow",
+      "whole screenshot aspect ratio preserved"
+    ]
+  },
+  "artifacts": {
+    "reference": {
+      "file": "reference/semantic-phase1.pptx",
+      "sha256": "0cc3e9a862641b1bc6f8b8273451de780b2ac374cd3646f9b976422acf726abf",
+      "slides": 2
+    },
+    "synthetic": {
+      "file": "synthetic/semantic-phase1.pptx",
+      "sha256": "09e155e4c203f3118ae03b62de970a3ef65629fe9ad35066e106ab7b728d3fbc",
+      "slides": 2
+    }
+  }
+}

@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>兰台 Harness PPT 全链路说明</title>
+  <style>
+    :root {
+      --bg: #f6f4ef;
+      --paper: #fffdf9;
+      --ink: #1a1a1a;
+      --muted: #5c5c5c;
+      --accent: #1f4d3a;
+      --accent-soft: #e8f3ec;
+      --blue: #2b5ea8;
+      --blue-soft: #e9f0fa;
+      --orange: #c45d1e;
+      --orange-soft: #fdf0e8;
+      --border: #ddd6c8;
+      --shadow: 0 8px 30px rgba(26, 26, 26, 0.06);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      background: linear-gradient(180deg, #efe9de 0%, var(--bg) 120px);
+      color: var(--ink);
+      line-height: 1.65;
+    }
+    .wrap { max-width: 980px; margin: 0 auto; padding: 48px 24px 96px; }
+    header {
+      background: var(--paper);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 36px 40px;
+      box-shadow: var(--shadow);
+      margin-bottom: 32px;
+    }
+    h1 { margin: 0 0 8px; font-size: 2rem; letter-spacing: -0.02em; }
+    .subtitle { color: var(--muted); font-size: 1.05rem; margin: 0; }
+    .badge-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+    .badge {
+      font-size: 0.78rem;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      border: 1px solid #c8dfd2;
+    }
+    section {
+      background: var(--paper);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 28px 32px;
+      margin-bottom: 24px;
+      box-shadow: var(--shadow);
+    }
+    h2 {
+      margin: 0 0 16px;
+      font-size: 1.35rem;
+      color: var(--accent);
+      border-bottom: 2px solid var(--accent-soft);
+      padding-bottom: 8px;
+    }
+    h3 { margin: 24px 0 10px; font-size: 1.05rem; color: var(--blue); }
+    p { margin: 0 0 12px; }
+    ul, ol { margin: 0 0 16px; padding-left: 1.25rem; }
+    li { margin-bottom: 6px; }
+    .flow {
+      background: #faf8f4;
+      border: 1px dashed var(--border);
+      border-radius: 14px;
+      padding: 20px 24px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.88rem;
+      line-height: 1.55;
+      overflow-x: auto;
+      white-space: pre;
+      margin: 16px 0;
+    }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin: 16px 0; }
+    .card {
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px 18px;
+      background: #fff;
+    }
+    .card strong { display: block; margin-bottom: 6px; }
+    .card span { color: var(--muted); font-size: 0.92rem; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.94rem; margin: 12px 0 16px; }
+    th, td { border: 1px solid var(--border); padding: 10px 12px; text-align: left; vertical-align: top; }
+    th { background: var(--accent-soft); color: var(--accent); }
+    .note {
+      background: var(--blue-soft);
+      border-left: 4px solid var(--blue);
+      padding: 12px 16px;
+      border-radius: 0 10px 10px 0;
+      margin: 16px 0;
+      font-size: 0.95rem;
+    }
+    .warn {
+      background: var(--orange-soft);
+      border-left: 4px solid var(--orange);
+      padding: 12px 16px;
+      border-radius: 0 10px 10px 0;
+      margin: 16px 0;
+      font-size: 0.95rem;
+    }
+    .toc a { color: var(--blue); text-decoration: none; }
+    .toc a:hover { text-decoration: underline; }
+    footer { text-align: center; color: var(--muted); font-size: 0.85rem; margin-top: 32px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>兰台 Harness PPT 全链路说明</h1>
+      <p class="subtitle">从用户输入到成稿导出 — 逻辑视角（不含代码）</p>
+      <div class="badge-row">
+        <span class="badge">Fast / Harness 双模式</span>
+        <span class="badge">4 场景包</span>
+        <span class="badge">Swap Test 质检</span>
+        <span class="badge">Deck 连续性</span>
+        <span class="badge">Agent / 常规 双入口</span>
+      </div>
+    </header>
+
+    <section class="toc">
+      <h2>目录</h2>
+      <ol>
+        <li><a href="#overview">系统总览</a></li>
+        <li><a href="#entry">用户入口与创建方式</a></li>
+        <li><a href="#mode">Fast 模式 vs Harness 模式</a></li>
+        <li><a href="#packs">Harness 场景包</a></li>
+        <li><a href="#quality">Harness 质检层（Phase 1 + 2）</a></li>
+        <li><a href="#text">文本阶段：大纲与描述</a></li>
+        <li><a href="#plan">结构计划阶段</a></li>
+        <li><a href="#image">成图阶段</a></li>
+        <li><a href="#agent">Agent 模式专属流程</a></li>
+        <li><a href="#export">导出阶段</a></li>
+        <li><a href="#artifacts">关键数据产物</a></li>
+        <li><a href="#decisions">决策点速查</a></li>
+      </ol>
+    </section>
+
+    <section id="overview">
+      <h2>1. 系统总览</h2>
+      <p>兰台（Banana Slides）把 PPT 生产拆成可校验的多段链路：<strong>理解材料 → 组织叙事 → 逐页描述 → 结构计划 → 成图 → 导出</strong>。Harness 模式在文本阶段就开始注入「页面角色、关系类型、真实约束」，并在成图前生成可持久化的结构计划，避免只靠一次性 prompt 碰运气。</p>
+      <div class="flow">用户输入（主题 / 大纲 / 材料 / 旧稿）
+        │
+        ▼
+  创建项目 Project
+        │
+        ├─ generation_mode = fast ──► 常规 AI 大纲/描述 ──► 成图（需模板或风格）
+        │
+        └─ generation_mode = harness ──► 场景包增强文本 ──► 结构计划 Deck + PageVisualPlan
+                                              │
+                                              ▼
+                                        成图（可用场景包默认视觉）
+                                              │
+                                              ▼
+                                   预览 / 编辑 / 导出 PPTX·PDF</div>
+      <p>整条链路的「内容真相」始终来自用户材料与 AI 在大纲/描述阶段的输出；Harness 质检层负责检查<strong>是否够具体、是否可迁移到别的话题、数字是否可溯源、整套是否同质化</strong>，而不是替用户编造内容。</p>
+    </section>
+
+    <section id="entry">
+      <h2>2. 用户入口与创建方式</h2>
+      <p>首页（Home）提供多种创建路径，对应不同的起点材料：</p>
+      <table>
+        <thead>
+          <tr><th>入口</th><th>用户给什么</th><th>系统先做什么</th><th>用户接下来去哪</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Harness Agent</strong></td>
+            <td>主题、受众、页数、场景包</td>
+            <td>一次性生成整套 Deck 计划（大纲+描述+视觉计划）</td>
+            <td>留在 Agent 面板编辑 → 风格预览 → 批量成图</td>
+          </tr>
+          <tr>
+            <td><strong>混乱材料 / No-Think</strong></td>
+            <td>一段杂乱想法或材料</td>
+            <td>自动整理成大纲 + 逐页描述</td>
+            <td>详情页 → 成图</td>
+          </tr>
+          <tr>
+            <td><strong>大纲模式</strong></td>
+            <td>结构化大纲（可附带描述）</td>
+            <td>生成或确认大纲；可选再生成描述</td>
+            <td>大纲编辑器 或 详情页</td>
+          </tr>
+          <tr>
+            <td><strong>借鉴生成</strong></td>
+            <td>参考 PPT + 自己的内容</td>
+            <td>分析参考稿结构，按你的内容重写</td>
+            <td>详情页（蓝图优先成图）</td>
+          </tr>
+          <tr>
+            <td><strong>旧稿翻新</strong></td>
+            <td>上传 PDF/PPTX</td>
+            <td>解析旧稿每页 → 提取标题要点与描述</td>
+            <td>详情页（默认 Fast，可再选手动 Harness）</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="note">Agent 入口始终使用 Harness 模式；其他入口可在首页选择 Fast 或 Harness，并挑选场景包（纸片人 / 课程讲义 / 产品发布 / 咨询汇报）。</div>
+    </section>
+
+    <section id="mode">
+      <h2>3. Fast 模式 vs Harness 模式</h2>
+      <div class="grid">
+        <div class="card">
+          <strong>Fast 快速模式</strong>
+          <span>尽快进入大纲、描述、成图。无场景包结构计划。成图前通常需要模板图、风格文字或外部 Skill 之一。</span>
+        </div>
+        <div class="card">
+          <strong>Harness 高质量模式</strong>
+          <span>文本阶段注入场景包叙事规则；描述完成后自动生成 Deck 结构计划与逐页视觉计划；成图时可使用场景包默认视觉。</span>
+        </div>
+      </div>
+      <h3>Harness 的两层解耦（重要）</h3>
+      <ul>
+        <li><strong>结构层</strong>：页面角色、关系类型、构图模式、标签、数据契约、Swap Test — 对任何视觉来源都必须生效（模板图、用户风格、外部 Skill 也不能绕开）。</li>
+        <li><strong>视觉层</strong>：色板、材质、画风 — 仅在用户未指定视觉来源时，使用场景包默认视觉；用户模板/风格优先。</li>
+      </ul>
+    </section>
+
+    <section id="packs">
+      <h2>4. Harness 场景包</h2>
+      <p>每个场景包 = 一种<strong>叙事结构</strong> + 一套<strong>默认视觉</strong>。四包共用同一套 Harness 质检层。</p>
+      <table>
+        <thead>
+          <tr><th>场景包</th><th>叙事侧重</th><th>默认视觉气质</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>纸片人 Paper Operators</td>
+            <td>隐喻执行者：先定关系，再选无脸折纸小人执行核心动作</td>
+            <td>暖白纸模舞台、路径蓝、高空俯视</td>
+          </tr>
+          <tr>
+            <td>课程讲义 Lecture Deck</td>
+            <td>教学闭环：目标 → 概念 → 例题 → 小结</td>
+            <td>讲义板书风、靛蓝主色、可较高信息密度</td>
+          </tr>
+          <tr>
+            <td>产品发布 Product Launch</td>
+            <td>发布会叙事：悬念 → 揭幕 → 特性 → 参数 → 价格 → 行动</td>
+            <td>深色舞台、产品摄影级主视觉</td>
+          </tr>
+          <tr>
+            <td>咨询汇报 Consulting Report</td>
+            <td>金字塔原理：标题即结论句，图表主导，数据可追溯</td>
+            <td>深蓝灰 + 橙色 takeaway 强调</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="quality">
+      <h2>5. Harness 质检层（全场景包共用）</h2>
+      <p>借鉴 paper-operators v2 思路，质检不只为纸片人服务，而是<strong>所有 Harness 项目的统一底座</strong>。</p>
+
+      <h3>Phase 1 — 页级精度</h3>
+      <ul>
+        <li><strong>资产路由（5 种角色）</strong>：内容论证页、故事/案例卡、数据叙事页、封面/章节/收束页、参考型科普页。先定「这页在 Deck 里干什么」，再定怎么画。</li>
+        <li><strong>关系类型（12 种）</strong>：连接、交接、依赖、因果、反馈、对比、权衡、层级、转化、边界、分流/汇聚、张力。关系优先于装饰元素。</li>
+        <li><strong>构图模式</strong>：单节拍、单页多节拍、对照构图、极简封面/收束。</li>
+        <li><strong>纸片人专属</strong>：21 种执行者库 + 关系→执行者映射（关系优先，而非关键词碰运气）。</li>
+        <li><strong>Swap Test（换文测试）</strong>：若这页换到同题材另一篇文章仍成立 → 警告「不够具体」；连续多页 asset/relationship/composition 完全相同 → 警告「模板锁定」。</li>
+      </ul>
+
+      <h3>Phase 2 — Deck 级连续性</h3>
+      <ul>
+        <li><strong>truth_constraints</strong>：标题、要点里出现的数字与专名，写入「不可编造」清单，随成图 prompt 下发。</li>
+        <li><strong>data_contract</strong>：数据叙事页额外约定 exact_values、禁止编造坐标轴/类别；咨询汇报与含数页面自动启用。</li>
+        <li><strong>throughline（母题）</strong>：全稿共享一条视觉母题（如路径蓝丝带、橙色 takeaway、中央产品聚光）。</li>
+        <li><strong>variation_axes（变化轴）</strong>：相邻页至少在 camera / 焦点 / 道具 / 强调色 等轴上分化，避免整套一个模板。</li>
+        <li><strong>Deck 级 QA</strong>：汇总每页 Swap Test + 检查全稿是否过半页面同质化。</li>
+      </ul>
+
+      <div class="warn">Swap Test 与 Deck 连续性检查当前为<strong>软警告</strong>：记录 QA issue，不阻断生成；便于后续在 UI 展示或人工复审。</div>
+    </section>
+
+    <section id="text">
+      <h2>6. 文本阶段：大纲与描述</h2>
+      <div class="flow">Harness 项目创建
+  │
+  ├─► 大纲阶段
+  │     · AI 收到 Harness 核心指令 + 场景包大纲规则
+  │     · 要求：每页 reader takeaway、可命名 asset role、含数页禁止编造
+  │     · 产出：每页 outline（标题 + 要点）
+  │     · 项目状态 → OUTLINE_GENERATED
+  │
+  └─► 描述阶段
+        · AI 收到 Harness 核心指令 + 场景包描述规则
+        · 要求：source anchor、layout_intent、visual_focus、truth_constraints
+        · 产出：每页 description（正文 + 可选 main_message 等）
+        · 项目状态 → DESCRIPTIONS_GENERATED
+        · Harness 副作用 → 触发结构计划生成（见下一节）</div>
+      <p>用户在 OutlineEditor / DetailEditor 中可随时修改大纲与描述；重新生成描述时会<strong>清除旧的 Harness 计划并重建</strong>，保证计划与最新文本一致。</p>
+    </section>
+
+    <section id="plan">
+      <h2>7. 结构计划阶段</h2>
+      <p>Harness 模式在描述就绪后（或 Agent 计划创建时）生成一组持久化结构产物：</p>
+      <div class="flow">DeckVersion（整套 Deck 计划 + QA 结果）
+  │
+  ├── DeckVisualSystem（全稿视觉系统：色板、禁忌、一致性规则、母题）
+  │
+  └── 每一页
+        ├── SlideVersion（该页 slide 计划快照）
+        └── PageVisualPlan（该页结构+视觉指令）
+              · page_role / asset_role
+              · relationship_type / composition_mode
+              · source_anchor / reader_takeaway
+              · truth_constraints / data_contract（如有）
+              · throughline / variation_axes / series_position
+              · structure_prompt + style_prompt + visual_prompt
+              · 单页 QA（含 Swap Test）</div>
+
+      <h3>常规 Harness vs Agent 的差异</h3>
+      <table>
+        <thead>
+          <tr><th></th><th>常规 Harness（Home 创建）</th><th>Agent 模式</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>计划来源</td>
+            <td>从已有 Page 大纲/描述<strong>反推</strong>合成 DeckPlan</td>
+            <td>LLM 一次性生成完整 DeckPlan，再落库</td>
+          </tr>
+          <tr>
+            <td>用户编辑</td>
+            <td>在大纲/详情编辑器改文本 → 重建计划</td>
+            <td>在 Agent 面板改 slide 内容与 visual plan → 可锁定单页</td>
+          </tr>
+          <tr>
+            <td>成图门槛</td>
+            <td>描述完成后直接可成图</td>
+            <td>需先「风格预览」2 页，再批量剩余页</td>
+          </tr>
+          <tr>
+            <td>项目状态</td>
+            <td>OUTLINE / DESCRIPTIONS / GENERATING / COMPLETED</td>
+            <td>AGENT_PLAN_PENDING → STYLE_PREVIEW → GENERATING → COMPLETED</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="image">
+      <h2>8. 成图阶段</h2>
+      <p>成图前系统组装「视觉指导」：决定<strong>听谁的画风</strong>，以及<strong>必须遵守的结构与质量底线</strong>。</p>
+
+      <h3>视觉优先级（从高到低）</h3>
+      <ol>
+        <li>外部风格 Skill（若启用）</li>
+        <li>PPT 蓝图页（借鉴生成场景）</li>
+        <li>用户上传的模板图</li>
+        <li>用户填写的 template_style 文字</li>
+        <li>Harness 场景包默认视觉（无用户视觉时）</li>
+        <li>仅由本页描述决定风格</li>
+      </ol>
+
+      <h3>Harness 成图时永远注入</h3>
+      <ul>
+        <li>当前页 PageVisualPlan 的<strong>结构指令</strong>（与视觉来源无关）</li>
+        <li>场景包默认<strong>视觉指令</strong>（仅当视觉未被模板/蓝图/外部 Skill 覆盖）</li>
+        <li><strong>4K 成图质量硬约束</strong>（文字可读、无畸形、无伪影等）</li>
+        <li><strong>truth_constraints / data_contract</strong>（含数页）</li>
+        <li>产品发布包的素材状态（真实产品图 vs 概念占位）</li>
+      </ul>
+
+      <div class="flow">DetailEditor / SlidePreview 触发成图
+  │
+  ├─ 读取 Page 描述 + 模板/蓝图/Skill
+  ├─ 查找 PageVisualPlan
+  ├─ VisualGuidanceService 合并全局视觉 + 结构计划
+  ├─ AI 生成 image prompt → 图像模型
+  └─ 保存到 Page.generated_image_path（含版本历史）</div>
+
+      <div class="note">Fast 模式成图门槛更严：通常必须有模板图、风格文字或外部 Skill；Harness 模式可用场景包默认视觉直接成图。</div>
+    </section>
+
+    <section id="agent">
+      <h2>9. Agent 模式专属流程</h2>
+      <div class="flow">AgentModePanel 提交
+  → 生成 DeckPlan（AI + 场景包 hint + schema 校验）
+  → 创建 Project + Pages（大纲描述已预填）
+  → 生成 DeckVersion / DeckVisualSystem / 全部 PageVisualPlan
+  → Deck 级 QA（Swap Test + 连续性）
+  → 用户编辑计划 / 锁定页面
+  → 风格预览（默认第 1、2 页成图）
+  → 用户确认后批量生成剩余页
+  → 进入 SlidePreview 导出</div>
+      <p>Agent 的价值是<strong>先计划、再像素</strong>：用户在看到全稿图片之前，就能调整叙事顺序、单页主张和视觉计划，并用 2 页预览校验风格是否跑偏。</p>
+    </section>
+
+    <section id="export">
+      <h2>10. 导出阶段</h2>
+      <table>
+        <thead>
+          <tr><th>格式</th><th>输入</th><th>方式</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>PPTX（图片型）</td>
+            <td>各页已生成的图片</td>
+            <td>同步导出，按页序拼成幻灯片</td>
+          </tr>
+          <tr>
+            <td>PDF</td>
+            <td>各页已生成的图片</td>
+            <td>同步导出</td>
+          </tr>
+          <tr>
+            <td>可编辑 PPTX</td>
+            <td>页面图片 + 布局分析</td>
+            <td>异步任务，尝试还原可编辑元素</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>导出只消费<strong>已经成图</strong>的页面；结构计划与 QA 记录保留在库里，供复盘「当时为什么这样组织这一页」。</p>
+    </section>
+
+    <section id="artifacts">
+      <h2>11. 关键数据产物</h2>
+      <table>
+        <thead>
+          <tr><th>产物</th><th>存什么</th><th>哪一步产生</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Project</td><td>创建方式、Harness 模板、视觉策略、状态</td><td>创建项目</td></tr>
+          <tr><td>Page.outline_content</td><td>标题、要点</td><td>大纲阶段</td></tr>
+          <tr><td>Page.description_content</td><td>逐页描述、main_message 等</td><td>描述阶段</td></tr>
+          <tr><td>DeckVersion</td><td>整套 DeckPlan、Deck 级 QA</td><td>Harness / Agent 计划阶段</td></tr>
+          <tr><td>DeckVisualSystem</td><td>全稿视觉系统、一致性规则</td><td>同上</td></tr>
+          <tr><td>PageVisualPlan</td><td>单页结构/视觉 prompt、质检字段</td><td>同上</td></tr>
+          <tr><td>Page.generated_image_path</td><td>成图文件路径</td><td>成图阶段</td></tr>
+          <tr><td>AgentRun / AgentStep</td><td>Agent 模式步骤日志</td><td>Agent 计划/成图</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="decisions">
+      <h2>12. 决策点速查</h2>
+      <table>
+        <thead>
+          <tr><th>用户选择</th><th>链路影响</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Fast vs Harness</td><td>是否注入场景包、是否生成 PageVisualPlan、成图视觉门槛</td></tr>
+          <tr><td>场景包四选一</td><td>叙事结构 + 默认视觉 + 母题样式</td></tr>
+          <tr><td>模板图 / 风格文字 / 外部 Skill</td><td>覆盖视觉层，不覆盖结构层与质检</td></tr>
+          <tr><td>Agent vs 常规创建</td><td>计划先行 vs 文本先行；是否有风格预览门</td></tr>
+          <tr><td>借鉴生成 / 旧稿翻新</td><td>蓝图优先或解析旧稿，绕开标准大纲入口</td></tr>
+          <tr><td>含数字的页面</td><td>自动 data_contract + truth_constraints + Swap Test 加强</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <footer>
+      兰台 Harness PPT Pipeline · 文档随 Phase 1/2 质检层更新 · 打开方式：浏览器直接打开本 HTML 文件
+    </footer>
+  </div>
+</body>
+</html>

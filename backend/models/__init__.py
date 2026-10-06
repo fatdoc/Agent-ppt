@@ -1,0 +1,53 @@
+"""Database models package"""
+from flask_sqlalchemy import SQLAlchemy
+
+# 创建 SQLAlchemy 实例，配置 SQLite 连接选项
+db = SQLAlchemy(
+    engine_options={
+        'connect_args': {
+            'check_same_thread': False,  # 允许跨线程使用（仅SQLite）
+            'timeout': 30,  # 数据库锁定超时（秒）- SQLite特定
+        },
+        'pool_pre_ping': True,  # 连接前检查，确保连接有效
+        'pool_recycle': 3600,  # 1小时回收连接，释放文件句柄
+        'pool_size': 10,
+        'max_overflow': 50,
+        'pool_timeout': 30,  # 获取连接的超时时间（秒）
+    }
+)
+
+from .user import User
+from .project import Project
+from .page import Page
+from .task import Task
+from .user_template import UserTemplate
+from .page_image_version import PageImageVersion
+from .material import Material
+from .reference_file import ReferenceFile
+from .settings import Settings
+from .user_style_template import UserStyleTemplate
+from .credit import CreditAccount, CreditLedger
+from .api_key import ApiKey
+from .public_ppt_generation import PublicPptGeneration
+from .file_artifact import FileArtifact
+from .project_template_asset import ProjectTemplateAsset
+from .agent_mode import (
+    AgentRun,
+    AgentStep,
+    AgentToolCall,
+    DeckVersion,
+    DeckVisualSystem,
+    GenerationJob,
+    PageVisualPlan,
+    SlideVersion,
+)
+
+__all__ = [
+    'db', 'User', 'Project', 'Page', 'Task', 'UserTemplate', 'PageImageVersion',
+    'Material', 'ReferenceFile', 'Settings', 'UserStyleTemplate', 'CreditAccount',
+    'CreditLedger', 'AgentRun', 'AgentStep', 'AgentToolCall', 'DeckVersion',
+    'DeckVisualSystem', 'GenerationJob', 'PageVisualPlan', 'SlideVersion',
+    'ApiKey', 'PublicPptGeneration', 'FileArtifact', 'ProjectTemplateAsset'
+]
+
+from .editor_document import EditorDocument, EditorRevision

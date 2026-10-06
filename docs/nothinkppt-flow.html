@@ -1,0 +1,823 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NoThinkPPT 功能关系与程序运行链路</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #17202a;
+      --muted: #5f6f7d;
+      --soft: #f4f7f9;
+      --line: #d8e0e6;
+      --green: #14996f;
+      --blue: #2369d1;
+      --amber: #bd7a13;
+      --red: #c64b42;
+      --violet: #7557c8;
+      --panel: #ffffff;
+      --shadow: 0 18px 48px rgba(23, 32, 42, 0.09);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: Inter, "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+      color: var(--ink);
+      background:
+        linear-gradient(90deg, rgba(216, 224, 230, 0.35) 1px, transparent 1px),
+        linear-gradient(0deg, rgba(216, 224, 230, 0.35) 1px, transparent 1px),
+        #fbfcfd;
+      background-size: 32px 32px;
+      letter-spacing: 0;
+    }
+
+    button,
+    input,
+    select {
+      font: inherit;
+    }
+
+    .page {
+      min-height: 100vh;
+    }
+
+    .hero {
+      position: relative;
+      overflow: hidden;
+      padding: 56px clamp(20px, 5vw, 72px) 36px;
+      background: #101820;
+      color: #fff;
+    }
+
+    .hero::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        radial-gradient(circle at 18% 20%, rgba(35, 105, 209, 0.36), transparent 32%),
+        radial-gradient(circle at 78% 24%, rgba(20, 153, 111, 0.28), transparent 30%),
+        linear-gradient(135deg, rgba(255, 255, 255, 0.08), transparent 42%);
+      opacity: 0.95;
+    }
+
+    .hero-inner {
+      position: relative;
+      max-width: 1180px;
+      margin: 0 auto;
+    }
+
+    .eyebrow {
+      margin: 0 0 16px;
+      color: rgba(255, 255, 255, 0.7);
+      font-size: 14px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      max-width: 980px;
+      margin: 0;
+      font-size: clamp(38px, 7vw, 86px);
+      line-height: 0.95;
+      letter-spacing: 0;
+    }
+
+    .hero-copy {
+      max-width: 760px;
+      margin: 24px 0 0;
+      color: rgba(255, 255, 255, 0.78);
+      font-size: clamp(16px, 2vw, 20px);
+      line-height: 1.7;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 28px;
+    }
+
+    .legend span,
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 32px;
+      padding: 7px 12px;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      border-radius: 999px;
+      color: rgba(255, 255, 255, 0.88);
+      background: rgba(255, 255, 255, 0.07);
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    main {
+      width: min(1420px, calc(100% - 40px));
+      margin: 0 auto;
+      padding: 34px 0 64px;
+    }
+
+    .toolbar {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+      padding: 14px 0;
+      backdrop-filter: blur(16px);
+      background: rgba(251, 252, 253, 0.82);
+      border-bottom: 1px solid rgba(216, 224, 230, 0.8);
+    }
+
+    .filter {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 9px 14px;
+      background: #fff;
+      color: var(--muted);
+      cursor: pointer;
+      transition: transform 180ms ease, border-color 180ms ease, color 180ms ease;
+    }
+
+    .filter:hover {
+      transform: translateY(-1px);
+      border-color: #95a6b5;
+      color: var(--ink);
+    }
+
+    .filter.active {
+      background: #101820;
+      color: #fff;
+      border-color: #101820;
+    }
+
+    .section-title {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 18px;
+      margin: 26px 0 16px;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 12px;
+    }
+
+    h2 {
+      margin: 0;
+      font-size: clamp(24px, 3vw, 34px);
+      letter-spacing: 0;
+    }
+
+    .section-title p {
+      max-width: 620px;
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.7;
+    }
+
+    .progress-strip {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 18px;
+    }
+
+    .progress-item {
+      min-height: 120px;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      box-shadow: 0 10px 26px rgba(23, 32, 42, 0.05);
+    }
+
+    .progress-item strong {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 18px;
+    }
+
+    .progress-item p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.55;
+    }
+
+    .status {
+      display: inline-flex;
+      align-items: center;
+      margin-bottom: 12px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 800;
+      color: #fff;
+      background: var(--green);
+    }
+
+    .status.todo {
+      background: var(--amber);
+    }
+
+    .map {
+      display: grid;
+      grid-template-columns: minmax(260px, 0.92fr) minmax(360px, 1.3fr) minmax(280px, 1fr);
+      gap: 18px;
+      align-items: stretch;
+    }
+
+    .lane {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.88);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .lane-header {
+      padding: 18px 18px 14px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(244, 247, 249, 0.8);
+    }
+
+    .lane-header h3 {
+      margin: 0;
+      font-size: 18px;
+    }
+
+    .lane-header p {
+      margin: 7px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .node-list {
+      display: grid;
+      gap: 12px;
+      padding: 16px;
+    }
+
+    .node {
+      position: relative;
+      min-height: 112px;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-left: 5px solid var(--blue);
+      border-radius: 8px;
+      background: #fff;
+      transition: transform 180ms ease, opacity 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+    }
+
+    .node:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 14px 30px rgba(23, 32, 42, 0.1);
+    }
+
+    .node[data-group="no-think"] {
+      border-left-color: var(--green);
+    }
+
+    .node[data-group="description"] {
+      border-left-color: var(--violet);
+    }
+
+    .node[data-group="renovation"] {
+      border-left-color: var(--amber);
+    }
+
+    .node[data-group="export"] {
+      border-left-color: var(--red);
+    }
+
+    .node.dim {
+      opacity: 0.28;
+      transform: none;
+      box-shadow: none;
+    }
+
+    .node h4 {
+      margin: 0 0 8px;
+      font-size: 17px;
+    }
+
+    .node p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.58;
+    }
+
+    code {
+      padding: 2px 5px;
+      border: 1px solid #dce5eb;
+      border-radius: 5px;
+      background: #f7fafc;
+      color: #2a4f6f;
+      font-size: 0.92em;
+    }
+
+    .flow {
+      display: grid;
+      gap: 10px;
+      padding: 16px;
+    }
+
+    .call {
+      position: relative;
+      padding: 14px 14px 14px 42px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    .call::before {
+      content: attr(data-step);
+      position: absolute;
+      left: 12px;
+      top: 14px;
+      display: grid;
+      place-items: center;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: #101820;
+      color: #fff;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .call::after {
+      content: "";
+      position: absolute;
+      left: 22px;
+      top: 42px;
+      bottom: -12px;
+      border-left: 1px dashed #aab8c3;
+    }
+
+    .call:last-child::after {
+      display: none;
+    }
+
+    .call strong {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 15px;
+    }
+
+    .call span {
+      display: block;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .runtime {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 18px;
+    }
+
+    .runtime-step {
+      min-height: 136px;
+      padding: 16px;
+      border-top: 4px solid var(--blue);
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: 0 10px 28px rgba(23, 32, 42, 0.07);
+    }
+
+    .runtime-step:nth-child(2) {
+      border-top-color: var(--green);
+    }
+
+    .runtime-step:nth-child(3) {
+      border-top-color: var(--violet);
+    }
+
+    .runtime-step:nth-child(4) {
+      border-top-color: var(--amber);
+    }
+
+    .runtime-step:nth-child(5) {
+      border-top-color: var(--red);
+    }
+
+    .runtime-step:nth-child(6) {
+      border-top-color: #45515c;
+    }
+
+    .runtime-step b {
+      display: block;
+      margin-bottom: 8px;
+    }
+
+    .runtime-step p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .matrix {
+      width: 100%;
+      border-collapse: collapse;
+      border: 1px solid var(--line);
+      background: #fff;
+      box-shadow: var(--shadow);
+    }
+
+    .matrix th,
+    .matrix td {
+      padding: 13px 14px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .matrix th {
+      background: #eef3f6;
+      color: #33414d;
+      font-size: 13px;
+      text-transform: uppercase;
+    }
+
+    .matrix tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .small {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .footer-note {
+      margin-top: 20px;
+      color: var(--muted);
+      line-height: 1.7;
+    }
+
+    @media (max-width: 1100px) {
+      .map,
+      .progress-strip,
+      .runtime {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .map .lane:nth-child(2) {
+        grid-column: 1 / -1;
+        order: 3;
+      }
+    }
+
+    @media (max-width: 720px) {
+      main {
+        width: min(100% - 28px, 1420px);
+      }
+
+      .hero {
+        padding: 42px 18px 28px;
+      }
+
+      .map,
+      .progress-strip,
+      .runtime {
+        grid-template-columns: 1fr;
+      }
+
+      .section-title {
+        align-items: start;
+        flex-direction: column;
+      }
+
+      .toolbar {
+        position: static;
+      }
+
+      .filter {
+        flex: 1 1 auto;
+      }
+
+      .matrix {
+        display: block;
+        overflow-x: auto;
+        white-space: nowrap;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header class="hero">
+      <div class="hero-inner">
+        <p class="eyebrow">Banana Slides / Generation Architecture Map</p>
+        <h1>NoThinkPPT 到 PPT 输出的关系、函数调用与运行链路</h1>
+        <p class="hero-copy">
+          这张图把“一句话生成 PPT、从大纲生成、从描述生成、PPT 翻新、PPT to PPT”放到同一条生产线上：入口不同，但最终都在页面数据、视觉提示、图片生成和导出层汇合。
+        </p>
+        <div class="legend" aria-label="颜色图例">
+          <span><i class="dot" style="color: var(--green)"></i>NoThink / 低描述</span>
+          <span><i class="dot" style="color: var(--blue)"></i>大纲与一句话</span>
+          <span><i class="dot" style="color: var(--violet)"></i>描述输入</span>
+          <span><i class="dot" style="color: var(--amber)"></i>PPT 翻新</span>
+          <span><i class="dot" style="color: var(--red)"></i>导出 PPT</span>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <nav class="toolbar" aria-label="链路筛选">
+        <button class="filter active" data-filter="all">全部链路</button>
+        <button class="filter" data-filter="no-think">NoThinkPPT</button>
+        <button class="filter" data-filter="idea">一句话生成</button>
+        <button class="filter" data-filter="outline">从大纲生成</button>
+        <button class="filter" data-filter="description">从描述生成</button>
+        <button class="filter" data-filter="renovation">PPT 翻新</button>
+        <button class="filter" data-filter="export">PPT to PPT</button>
+      </nav>
+
+      <section>
+        <div class="section-title">
+          <h2>开发进度</h2>
+          <p>当前后端三期已经完成聚合：统一文本生成、视觉指导层、NoThinkPPT 后端；前端 NoThink 入口也已经完成基础验证。</p>
+        </div>
+        <div class="progress-strip">
+          <article class="progress-item">
+            <span class="status">Done</span>
+            <strong>Phase 1: 统一输入生成</strong>
+            <p><code>InputGenerationService</code> 统一处理 idea、outline、description 的校验、AI 调用和页面保存。</p>
+          </article>
+          <article class="progress-item">
+            <span class="status">Done</span>
+            <strong>Phase 2: 视觉指导层</strong>
+            <p><code>VisualGuidanceService</code> 将模板、页面内容、布局备注和冲突规则分层注入图片提示词。</p>
+          </article>
+          <article class="progress-item">
+            <span class="status">Done</span>
+            <strong>Phase 3: NoThinkPPT</strong>
+            <p><code>NoThinkService</code> 把低描述选项归一化成结构化 prompt，并默认生成大纲与页面描述。</p>
+          </article>
+          <article class="progress-item">
+            <span class="status todo">Partial</span>
+            <strong>前端与浏览器验证</strong>
+            <p>NoThink 首页入口、store 和 API 类型已接入；浏览器截图验证曾因插件连接超时保留待复验。</p>
+          </article>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-title">
+          <h2>功能关系图</h2>
+          <p>入口层负责收集不同形态的用户意图；核心服务层把输入统一成页面结构；运行层把页面变成图片、可编辑 PPT 或翻新结果。</p>
+        </div>
+
+        <div class="map" aria-label="功能关系与调用链">
+          <section class="lane">
+            <div class="lane-header">
+              <h3>入口与输入形态</h3>
+              <p>用户从首页选择一种创建方式，前端组装请求并进入对应接口。</p>
+            </div>
+            <div class="node-list">
+              <article class="node" data-groups="no-think idea">
+                <h4>NoThinkPPT</h4>
+                <p>主题可为空或很短，搭配场景、色调、密度、页数、风格等选项，走 <code>creation_type=no_think</code>。</p>
+              </article>
+              <article class="node" data-groups="idea">
+                <h4>一句话生成 PPT</h4>
+                <p>用户给一句主题或目标，保存为 <code>idea_prompt</code>，先生成大纲，再补页面描述与图片。</p>
+              </article>
+              <article class="node" data-groups="outline">
+                <h4>从大纲生成</h4>
+                <p>用户输入已有大纲，保存为 <code>outline_text</code>，解析成页面标题和要点。</p>
+              </article>
+              <article class="node" data-groups="description">
+                <h4>从描述生成</h4>
+                <p>用户输入页面级描述，保存为 <code>description_text</code>，同时抽取大纲和逐页描述。</p>
+              </article>
+              <article class="node" data-groups="renovation export">
+                <h4>PPT 翻新 / PPT to PPT</h4>
+                <p>上传 PDF、PPTX 或 PPT，必要时先转 PDF，再渲染为页面图片，异步解析并重建内容。</p>
+              </article>
+            </div>
+          </section>
+
+          <section class="lane">
+            <div class="lane-header">
+              <h3>核心方法函数调用</h3>
+              <p>主要调用点来自当前仓库的 controller、service 与 task manager。</p>
+            </div>
+            <div class="flow">
+              <div class="call" data-step="1" data-groups="no-think idea outline description">
+                <strong><code>Home.tsx</code> 提交创建请求</strong>
+                <span><code>createProject()</code> 创建普通项目；NoThink 会携带 <code>no_think_options</code>。</span>
+              </div>
+              <div class="call" data-step="2" data-groups="no-think">
+                <strong><code>NoThinkService.normalize_prompt()</code></strong>
+                <span>把低描述输入补成包含场景、色调、密度、页数和风格模板的结构化需求。</span>
+              </div>
+              <div class="call" data-step="3" data-groups="no-think idea outline description">
+                <strong><code>project_controller.generate_outline()</code></strong>
+                <span>根据 <code>creation_type</code> 选择 <code>input_kind</code>，并创建 <code>ProjectContext</code>。</span>
+              </div>
+              <div class="call" data-step="4" data-groups="no-think idea outline description">
+                <strong><code>InputGenerationService.generate()</code></strong>
+                <span>统一执行 <code>build_outline()</code>、<code>build_descriptions()</code>、<code>save_pages()</code>。</span>
+              </div>
+              <div class="call" data-step="5" data-groups="idea outline description">
+                <strong><code>AIService</code> 文本方法分流</strong>
+                <span><code>generate_outline</code>、<code>parse_outline_text</code>、<code>parse_description_to_outline</code>、<code>generate_page_description</code>。</span>
+              </div>
+              <div class="call" data-step="6" data-groups="renovation">
+                <strong><code>create_ppt_renovation_project()</code></strong>
+                <span>上传文件、PPT 转 PDF、PDF 渲染页面图、创建 <code>PPT_RENOVATION</code> 异步任务。</span>
+              </div>
+              <div class="call" data-step="7" data-groups="renovation">
+                <strong><code>process_ppt_renovation_task()</code></strong>
+                <span>解析每页原始内容，生成或回填 outline 与 description，DetailEditor 轮询任务进度。</span>
+              </div>
+              <div class="call" data-step="8" data-groups="no-think idea outline description renovation">
+                <strong><code>VisualGuidanceService.build_visual_guidance()</code></strong>
+                <span>把模板优先级、页面内容、布局备注和覆盖规则整理成视觉提示块。</span>
+              </div>
+              <div class="call" data-step="9" data-groups="no-think idea outline description renovation">
+                <strong><code>generate_images_task()</code> / <code>AIService.generate_image()</code></strong>
+                <span>逐页生成图片，保存图片版本，并把页面推进到可预览、可导出状态。</span>
+              </div>
+              <div class="call" data-step="10" data-groups="export">
+                <strong><code>ExportService</code> 输出 PPT</strong>
+                <span><code>create_pptx_from_images()</code> 输出图片型 PPT；<code>create_editable_pptx_with_recursive_analysis()</code> 输出可编辑 PPTX。</span>
+              </div>
+            </div>
+          </section>
+
+          <section class="lane">
+            <div class="lane-header">
+              <h3>运行状态与数据产物</h3>
+              <p>每个阶段都会改变项目状态或页面内容，供后续编辑器、预览和导出使用。</p>
+            </div>
+            <div class="node-list">
+              <article class="node" data-groups="no-think idea outline description">
+                <h4><code>DRAFT</code></h4>
+                <p>项目刚创建，原始输入已保存，页面可能还没有生成或只有占位数据。</p>
+              </article>
+              <article class="node" data-groups="idea outline">
+                <h4><code>OUTLINE_GENERATED</code></h4>
+                <p>页面已有 <code>outline_content</code>，用户可进入大纲编辑器检查结构。</p>
+              </article>
+              <article class="node" data-groups="no-think description renovation">
+                <h4><code>DESCRIPTIONS_GENERATED</code></h4>
+                <p>页面已有 <code>description_content</code>，可直接进入详情编辑与图像生成。</p>
+              </article>
+              <article class="node" data-groups="renovation">
+                <h4><code>PROCESSING</code></h4>
+                <p>PPT 翻新异步解析中，前端通过任务进度展示 <code>completed / total</code>。</p>
+              </article>
+              <article class="node" data-groups="export">
+                <h4>导出文件</h4>
+                <p>最终产物包括图片型 <code>.pptx</code>、可编辑 <code>.pptx</code>、PDF、图片包或视频。</p>
+              </article>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-title">
+          <h2>程序运行链路</h2>
+          <p>从输入到 PPT 输出可以理解为六段流水线；不同入口只是在前两段使用不同的解析策略。</p>
+        </div>
+        <div class="runtime">
+          <article class="runtime-step">
+            <b>1. 创建项目</b>
+            <p>前端提交 <code>creation_type</code> 与原始输入，后端创建 <code>Project</code>。</p>
+          </article>
+          <article class="runtime-step">
+            <b>2. 归一化输入</b>
+            <p>NoThink 补全 prompt；大纲和描述入口保留用户结构，减少二次解释。</p>
+          </article>
+          <article class="runtime-step">
+            <b>3. 生成文本骨架</b>
+            <p><code>InputGenerationService</code> 产出 outline，按需要生成 page descriptions。</p>
+          </article>
+          <article class="runtime-step">
+            <b>4. 写入页面</b>
+            <p><code>save_pages()</code> merge 或 replace 页面，更新项目状态。</p>
+          </article>
+          <article class="runtime-step">
+            <b>5. 生成视觉</b>
+            <p>视觉指导层生成 prompt，图片模型逐页生成并保存版本。</p>
+          </article>
+          <article class="runtime-step">
+            <b>6. 输出 PPT</b>
+            <p>预览确认后，导出图片型 PPTX 或递归分析生成可编辑 PPTX。</p>
+          </article>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-title">
+          <h2>入口到方法矩阵</h2>
+          <p>这张表用于快速判断“某个功能入口到底依赖哪些函数”。</p>
+        </div>
+        <table class="matrix">
+          <thead>
+            <tr>
+              <th>入口</th>
+              <th>核心接口</th>
+              <th>关键 service</th>
+              <th>页面产物</th>
+              <th>后续链路</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>NoThinkPPT</td>
+              <td><code>POST /api/projects</code><br><code>POST /generate/outline</code></td>
+              <td><code>NoThinkService</code><br><code>InputGenerationService</code></td>
+              <td>大纲 + 页面描述</td>
+              <td>详情编辑 → 图片生成 → PPT 导出</td>
+            </tr>
+            <tr>
+              <td>一句话生成 PPT</td>
+              <td><code>POST /api/projects</code><br><code>POST /generate/outline</code></td>
+              <td><code>AIService.generate_outline</code><br><code>InputGenerationService</code></td>
+              <td>先大纲，后描述</td>
+              <td>大纲编辑 → 描述生成 → 图片生成</td>
+            </tr>
+            <tr>
+              <td>从大纲生成</td>
+              <td><code>POST /generate/outline</code></td>
+              <td><code>AIService.parse_outline_text</code></td>
+              <td>结构化页面大纲</td>
+              <td>补描述 → 生成图片 → 导出</td>
+            </tr>
+            <tr>
+              <td>从描述生成</td>
+              <td><code>POST /generate/from-description</code></td>
+              <td><code>parse_description_to_outline</code><br><code>parse_description_to_page_descriptions</code></td>
+              <td>大纲 + 页面描述</td>
+              <td>详情编辑 → 图片生成 → 导出</td>
+            </tr>
+            <tr>
+              <td>PPT 翻新</td>
+              <td><code>POST /api/projects/renovation</code></td>
+              <td><code>FileParserService</code><br><code>process_ppt_renovation_task</code></td>
+              <td>原页图 + 重建内容</td>
+              <td>轮询任务 → 单页重解析 → 图片再生成</td>
+            </tr>
+            <tr>
+              <td>PPT to PPT</td>
+              <td><code>GET /export/pptx</code><br><code>POST /export/editable-pptx</code></td>
+              <td><code>ExportService</code></td>
+              <td>图片型 PPTX 或可编辑 PPTX</td>
+              <td>下载文件或进入异步导出任务</td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="footer-note">
+          <span class="small">备注：</span>这里的 “PPT to PPT” 按当前代码理解为“上传已有 PPT/PDF 后翻新并重新导出 PPT”，以及“已生成页面再次导出为 PPTX”的合流链路。
+        </p>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const filters = Array.from(document.querySelectorAll(".filter"));
+    const filterable = Array.from(document.querySelectorAll("[data-groups]"));
+
+    function applyFilter(group) {
+      filters.forEach((button) => {
+        button.classList.toggle("active", button.dataset.filter === group);
+      });
+
+      filterable.forEach((item) => {
+        const groups = item.dataset.groups.split(/\s+/);
+        item.classList.toggle("dim", group !== "all" && !groups.includes(group));
+      });
+    }
+
+    filters.forEach((button) => {
+      button.addEventListener("click", () => applyFilter(button.dataset.filter));
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,800 @@
+{
+  "$defs": {
+    "Asset": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z0-9_-]{1,100}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "uri": {
+          "title": "Uri",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "media_type": {
+          "enum": [
+            "image/png",
+            "image/jpeg",
+            "image/svg+xml"
+          ],
+          "title": "Media Type",
+          "type": "string"
+        },
+        "user_id": {
+          "pattern": "^[A-Za-z0-9_-]{1,100}$",
+          "title": "User Id",
+          "type": "string"
+        },
+        "project_id": {
+          "pattern": "^[A-Za-z0-9_-]{1,100}$",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        }
+      },
+      "required": [
+        "id",
+        "uri",
+        "sha256",
+        "media_type",
+        "user_id",
+        "project_id",
+        "provenance"
+      ],
+      "title": "Asset",
+      "type": "object"
+    },
+    "Box": {
+      "additionalProperties": false,
+      "properties": {
+        "x": {
+          "minimum": 0,
+          "title": "X",
+          "type": "number"
+        },
+        "y": {
+          "minimum": 0,
+          "title": "Y",
+          "type": "number"
+        },
+        "w": {
+          "exclusiveMinimum": 0,
+          "title": "W",
+          "type": "number"
+        },
+        "h": {
+          "exclusiveMinimum": 0,
+          "title": "H",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "y",
+        "w",
+        "h"
+      ],
+      "title": "Box",
+      "type": "object"
+    },
+    "Correction": {
+      "additionalProperties": false,
+      "properties": {
+        "revision": {
+          "pattern": "^[A-Za-z0-9_-]{1,100}$",
+          "title": "Revision",
+          "type": "string"
+        },
+        "object_id": {
+          "pattern": "^[A-Za-z0-9_-]{1,100}$",
+          "title": "Object Id",
+          "type": "string"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "before_sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Before Sha256",
+          "type": "string"
+        },
+        "after_sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "After Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "revision",
+        "object_id",
+        "reason",
+        "before_sha256",
+        "after_sha256"
+      ],
+      "title": "Correction",
+      "type": "object"
+    },
+    "Crop": {
+      "additionalProperties": false,
+      "properties": {
+        "left": {
+          "default": 0,
+          "exclusiveMaximum": 1,
+          "minimum": 0,
+          "title": "Left",
+          "type": "number"
+        },
+        "top": {
+          "default": 0,
+          "exclusiveMaximum": 1,
+          "minimum": 0,
+          "title": "Top",
+          "type": "number"
+        },
+        "right": {
+          "default": 0,
+          "exclusiveMaximum": 1,
+          "minimum": 0,
+          "title": "Right",
+          "type": "number"
+        },
+        "bottom": {
+          "default": 0,
+          "exclusiveMaximum": 1,
+          "minimum": 0,
+          "title": "Bottom",
+          "type": "number"
+        }
+      },
+      "title": "Crop",
+      "type": "object"
+    },
+    "Group": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z0-9_-]{1,100}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "module_id": {
+          "pattern": "^[A-Za-z0-9_-]{1,100}$",
+          "title": "Module Id",
+          "type": "string"
+        },
+        "parent_id": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9_-]{1,100}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Id"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "module_id"
+      ],
+      "title": "Group",
+      "type": "object"
+    },
+    "Node": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z0-9_-]{1,100}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "text",
+            "shape",
+            "image",
+            "svg",
+            "table"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "box": {
+          "$ref": "#/$defs/Box"
+        },
+        "rotation": {
+          "default": 0,
+          "maximum": 360,
+          "minimum": -360,
+          "title": "Rotation",
+          "type": "number"
+        },
+        "layer": {
+          "minimum": 0,
+          "title": "Layer",
+          "type": "integer"
+        },
+        "module_id": {
+          "pattern": "^[A-Za-z0-9_-]{1,100}$",
+          "title": "Module Id",
+          "type": "string"
+        },
+        "column_id": {
+          "default": "main",
+          "pattern": "^[A-Za-z0-9_-]{1,100}$",
+          "title": "Column Id",
+          "type": "string"
+        },
+        "parent_id": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9_-]{1,100}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Id"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "text": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "shape": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Shape"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "picture": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Picture"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "table": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Table"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "kind",
+        "box",
+        "layer",
+        "module_id",
+        "provenance"
+      ],
+      "title": "Node",
+      "type": "object"
+    },
+    "Paragraph": {
+      "additionalProperties": false,
+      "properties": {
+        "runs": {
+          "items": {
+            "$ref": "#/$defs/Run"
+          },
+          "minItems": 1,
+          "title": "Runs",
+          "type": "array"
+        },
+        "align": {
+          "default": "left",
+          "enum": [
+            "left",
+            "center",
+            "right"
+          ],
+          "title": "Align",
+          "type": "string"
+        },
+        "line_spacing": {
+          "default": 1.15,
+          "exclusiveMinimum": 0,
+          "maximum": 5,
+          "title": "Line Spacing",
+          "type": "number"
+        },
+        "space_after": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Space After",
+          "type": "number"
+        }
+      },
+      "required": [
+        "runs"
+      ],
+      "title": "Paragraph",
+      "type": "object"
+    },
+    "Picture": {
+      "additionalProperties": false,
+      "properties": {
+        "asset_id": {
+          "pattern": "^[A-Za-z0-9_-]{1,100}$",
+          "title": "Asset Id",
+          "type": "string"
+        },
+        "fallback_asset_id": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9_-]{1,100}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fallback Asset Id"
+        },
+        "role": {
+          "enum": [
+            "photo",
+            "screenshot",
+            "icon"
+          ],
+          "title": "Role",
+          "type": "string"
+        },
+        "crop": {
+          "$ref": "#/$defs/Crop"
+        },
+        "preserve_whole": {
+          "default": false,
+          "title": "Preserve Whole",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "asset_id",
+        "role"
+      ],
+      "title": "Picture",
+      "type": "object"
+    },
+    "Provenance": {
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "enum": [
+            "manual_fixture",
+            "structured",
+            "ocr",
+            "manual_correction"
+          ],
+          "title": "Method",
+          "type": "string"
+        },
+        "source_ref": {
+          "pattern": "^[A-Za-z0-9_-]{1,100}$",
+          "title": "Source Ref",
+          "type": "string"
+        },
+        "source_box": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Box"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "confidence": {
+          "default": 1,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        },
+        "proposed_text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Proposed Text"
+        },
+        "text_alignment": {
+          "default": "verified",
+          "enum": [
+            "verified",
+            "mismatch",
+            "unverified"
+          ],
+          "title": "Text Alignment",
+          "type": "string"
+        }
+      },
+      "required": [
+        "method",
+        "source_ref"
+      ],
+      "title": "Provenance",
+      "type": "object"
+    },
+    "Run": {
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "size": {
+          "default": 24,
+          "exclusiveMinimum": 0,
+          "maximum": 400,
+          "title": "Size",
+          "type": "number"
+        },
+        "font": {
+          "default": "Noto Sans CJK SC",
+          "title": "Font",
+          "type": "string"
+        },
+        "color": {
+          "default": "203040",
+          "pattern": "^[A-Fa-f0-9]{6}$",
+          "title": "Color",
+          "type": "string"
+        },
+        "bold": {
+          "default": false,
+          "title": "Bold",
+          "type": "boolean"
+        },
+        "italic": {
+          "default": false,
+          "title": "Italic",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "Run",
+      "type": "object"
+    },
+    "Shape": {
+      "additionalProperties": false,
+      "properties": {
+        "geometry": {
+          "default": "rect",
+          "enum": [
+            "rect",
+            "roundRect",
+            "ellipse",
+            "rightArrow"
+          ],
+          "title": "Geometry",
+          "type": "string"
+        },
+        "fill": {
+          "default": "FFFFFF",
+          "pattern": "^[A-Fa-f0-9]{6}$",
+          "title": "Fill",
+          "type": "string"
+        },
+        "stroke": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Fa-f0-9]{6}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stroke"
+        },
+        "stroke_width": {
+          "default": 1,
+          "minimum": 0,
+          "title": "Stroke Width",
+          "type": "number"
+        }
+      },
+      "title": "Shape",
+      "type": "object"
+    },
+    "Source": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z0-9_-]{1,100}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "revision": {
+          "pattern": "^[A-Za-z0-9_-]{1,100}$",
+          "title": "Revision",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "revision",
+        "sha256"
+      ],
+      "title": "Source",
+      "type": "object"
+    },
+    "Table": {
+      "additionalProperties": false,
+      "properties": {
+        "rows": {
+          "items": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "minItems": 1,
+          "title": "Rows",
+          "type": "array"
+        },
+        "column_weights": {
+          "items": {
+            "type": "number"
+          },
+          "minItems": 1,
+          "title": "Column Weights",
+          "type": "array"
+        },
+        "font": {
+          "default": "Noto Sans CJK SC",
+          "title": "Font",
+          "type": "string"
+        },
+        "size": {
+          "default": 22,
+          "exclusiveMinimum": 0,
+          "maximum": 100,
+          "title": "Size",
+          "type": "number"
+        },
+        "header_fill": {
+          "default": "203040",
+          "pattern": "^[A-Fa-f0-9]{6}$",
+          "title": "Header Fill",
+          "type": "string"
+        },
+        "body_fill": {
+          "default": "F2F5F8",
+          "pattern": "^[A-Fa-f0-9]{6}$",
+          "title": "Body Fill",
+          "type": "string"
+        },
+        "text_color": {
+          "default": "203040",
+          "pattern": "^[A-Fa-f0-9]{6}$",
+          "title": "Text Color",
+          "type": "string"
+        },
+        "header_color": {
+          "default": "FFFFFF",
+          "pattern": "^[A-Fa-f0-9]{6}$",
+          "title": "Header Color",
+          "type": "string"
+        }
+      },
+      "required": [
+        "rows",
+        "column_weights"
+      ],
+      "title": "Table",
+      "type": "object"
+    },
+    "Text": {
+      "additionalProperties": false,
+      "properties": {
+        "paragraphs": {
+          "items": {
+            "$ref": "#/$defs/Paragraph"
+          },
+          "minItems": 1,
+          "title": "Paragraphs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "paragraphs"
+      ],
+      "title": "Text",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "id": {
+      "pattern": "^[A-Za-z0-9_-]{1,100}$",
+      "title": "Id",
+      "type": "string"
+    },
+    "revision": {
+      "pattern": "^[A-Za-z0-9_-]{1,100}$",
+      "title": "Revision",
+      "type": "string"
+    },
+    "source": {
+      "$ref": "#/$defs/Source"
+    },
+    "user_id": {
+      "pattern": "^[A-Za-z0-9_-]{1,100}$",
+      "title": "User Id",
+      "type": "string"
+    },
+    "project_id": {
+      "pattern": "^[A-Za-z0-9_-]{1,100}$",
+      "title": "Project Id",
+      "type": "string"
+    },
+    "width": {
+      "exclusiveMinimum": 0,
+      "maximum": 5376,
+      "title": "Width",
+      "type": "number"
+    },
+    "height": {
+      "exclusiveMinimum": 0,
+      "maximum": 5376,
+      "title": "Height",
+      "type": "number"
+    },
+    "unit": {
+      "const": "px",
+      "default": "px",
+      "title": "Unit",
+      "type": "string"
+    },
+    "dpi": {
+      "const": 96,
+      "default": 96,
+      "title": "Dpi",
+      "type": "integer"
+    },
+    "background": {
+      "default": "FFFFFF",
+      "pattern": "^[A-Fa-f0-9]{6}$",
+      "title": "Background",
+      "type": "string"
+    },
+    "assets": {
+      "items": {
+        "$ref": "#/$defs/Asset"
+      },
+      "title": "Assets",
+      "type": "array"
+    },
+    "nodes": {
+      "items": {
+        "$ref": "#/$defs/Node"
+      },
+      "minItems": 1,
+      "title": "Nodes",
+      "type": "array"
+    },
+    "groups": {
+      "items": {
+        "$ref": "#/$defs/Group"
+      },
+      "title": "Groups",
+      "type": "array"
+    },
+    "corrections": {
+      "items": {
+        "$ref": "#/$defs/Correction"
+      },
+      "title": "Corrections",
+      "type": "array"
+    },
+    "warnings": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Warnings",
+      "type": "array"
+    },
+    "status": {
+      "default": "ready",
+      "enum": [
+        "ready",
+        "needs_correction"
+      ],
+      "title": "Status",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "revision",
+    "source",
+    "user_id",
+    "project_id",
+    "width",
+    "height",
+    "nodes"
+  ],
+  "title": "Page",
+  "type": "object"
+}

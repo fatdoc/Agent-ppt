@@ -1,0 +1,1274 @@
+"""Settings Controller - handles application settings endpoints"""
+
+import json
+import logging
+import os
+import shutil
+import tempfile
+from pathlib import Path
+from datetime import datetime, timezone
+from contextlib import contextmanager
+from flask import Blueprint, request, current_app
+from PIL import Image
+from models import db, Settings, Task, User
+from utils import success_response, error_response, bad_request, not_found
+from utils.auth import (
+    ai_config_editable_for_user,
+    ai_config_self_service_enabled,
+    current_user,
+    current_user_id,
+    is_admin_user,
+    require_admin_user,
+)
+from config import Config, PROJECT_ROOT
+from services.ai_service import AIService
+from services.file_parser_service import FileParserService
+from services.ai_providers.ocr.baidu_accurate_ocr_provider import create_baidu_accurate_ocr_provider
+from services.ai_providers.image.baidu_inpainting_provider import create_baidu_inpainting_provider
+from services.ai_providers import LAZYLLM_VENDORS
+from services.prompt_registry import prompt_registry
+from services.task_manager import task_manager
+
+logger = logging.getLogger(__name__)
+ALLOWED_PROVIDER_FORMATS = {"openai", "gemini", "lazyllm", "codex"} | LAZYLLM_VENDORS
+
+# 大模型相关字段：当 AI_CONFIG_SELF_SERVICE 关闭时，这些字段只能由管理员在数据库中维护
+# （每个用户在 settings 表中有一行，见 scripts/set_user_ai_config.py）
+AI_CONFIG_FIELDS = frozenset({
+    "ai_provider_format",
+    "api_base_url",
+    "api_key",
+    "text_model",
+    "image_model",
+    "image_caption_model",
+    "text_model_source",
+    "image_model_source",
+    "image_caption_model_source",
+    "text_api_key",
+    "text_api_base_url",
+    "image_api_key",
+    "image_api_base_url",
+    "image_caption_api_key",
+    "image_caption_api_base_url",
+    "lazyllm_api_keys",
+    "openai_image_api_protocol",
+})
+
+settings_bp = Blueprint(
+    "settings", __name__, url_prefix="/api/settings"
+)
+
+
+@contextmanager
+def temporary_settings_override(settings_override: dict):
+    from services.provider_config import capture_provider_snapshot, provider_snapshot_scope
+    with provider_snapshot_scope(capture_provider_snapshot(overrides=settings_override)):
+        try:
+            yield
+        except Exception as exc:
+            from services.provider_config import redact_provider_text
+            message = redact_provider_text(str(exc))
+            if message != str(exc):
+                raise RuntimeError(message) from None
+            raise
+
+
+@settings_bp.route("/", methods=["GET"], strict_slashes=False)
+def get_settings():
+    """
+    GET /api/settings - Get application settings
+    """
+    try:
+        settings = Settings.get_settings()
+        data = settings.to_dict()
+        data['ai_config_editable'] = ai_config_editable_for_user(current_user())
+        data['current_user_is_admin'] = is_admin_user(current_user())
+        return success_response(data)
+    except Exception as e:
+        logger.error(f"Error getting settings: {str(e)}")
+        return error_response(
+            "GET_SETTINGS_ERROR",
+            f"Failed to get settings: {str(e)}",
+            500,
+        )
+
+
+@settings_bp.route("/", methods=["PUT"], strict_slashes=False)
+def update_settings():
+    """
+    PUT /api/settings - Update application settings
+
+    Request Body:
+        {
+            "api_base_url": "https://api.example.com",
+            "api_key": "your-api-key",
+            "image_resolution": "2K",
+            "image_aspect_ratio": "16:9"
+        }
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return bad_request("Request body is required")
+
+        if not ai_config_editable_for_user(current_user()):
+            locked = sorted(set(data) & AI_CONFIG_FIELDS)
+            if locked:
+                return error_response(
+                    "AI_CONFIG_LOCKED",
+                    f"模型配置由管理员统一管理，无法在前端修改: {', '.join(locked)}",
+                    403,
+                )
+
+        settings = Settings.get_settings()
+
+        # Update AI provider format configuration
+        if "ai_provider_format" in data:
+            provider_format = data["ai_provider_format"]
+            if provider_format not in ALLOWED_PROVIDER_FORMATS:
+                allowed_values = "', '".join(sorted(ALLOWED_PROVIDER_FORMATS))
+                return bad_request(f"AI provider format must be one of '{allowed_values}'")
+            settings.ai_provider_format = provider_format
+
+        # Update API configuration
+        if "api_base_url" in data:
+            raw_base_url = data["api_base_url"]
+            # Empty string from frontend means "clear override, fall back to env/default"
+            if raw_base_url is None:
+                settings.api_base_url = None
+            else:
+                value = str(raw_base_url).strip()
+                settings.api_base_url = value if value != "" else None
+
+        if "api_key" in data:
+            settings.api_key = data["api_key"]
+
+        # Update image generation configuration
+        if "image_resolution" in data:
+            resolution = data["image_resolution"]
+            if resolution not in ["1K", "2K", "4K"]:
+                return bad_request("Resolution must be 1K, 2K, or 4K")
+            settings.image_resolution = resolution
+
+        if "image_aspect_ratio" in data:
+            aspect_ratio = data["image_aspect_ratio"]
+            settings.image_aspect_ratio = aspect_ratio
+
+        # Update worker configuration
+        if "max_description_workers" in data:
+            workers = int(data["max_description_workers"])
+            if workers < 1 or workers > 20:
+                return bad_request(
+                    "Max description workers must be between 1 and 20"
+                )
+            settings.max_description_workers = workers
+
+        if "max_image_workers" in data:
+            workers = int(data["max_image_workers"])
+            if workers < 1 or workers > 20:
+                return bad_request(
+                    "Max image workers must be between 1 and 20"
+                )
+            settings.max_image_workers = workers
+
+        # Update model & MinerU configuration (optional, empty values fall back to Config)
+        if "text_model" in data:
+            settings.text_model = (data["text_model"] or "").strip() or None
+
+        if "image_model" in data:
+            settings.image_model = (data["image_model"] or "").strip() or None
+
+        if "mineru_api_base" in data:
+            settings.mineru_api_base = (data["mineru_api_base"] or "").strip() or None
+
+        if "mineru_provider" in data:
+            mineru_provider = (data["mineru_provider"] or "").strip().lower()
+            if mineru_provider and mineru_provider not in ("cloud", "local"):
+                return bad_request("MinerU provider must be 'cloud' or 'local'")
+            settings.mineru_provider = mineru_provider or None
+
+        if "mineru_token" in data:
+            settings.mineru_token = data["mineru_token"]
+
+        if "image_caption_model" in data:
+            settings.image_caption_model = (data["image_caption_model"] or "").strip() or None
+
+        if "output_language" in data:
+            language = data["output_language"]
+            if language in ["zh", "en", "ja", "auto"]:
+                settings.output_language = language
+            else:
+                return bad_request("Output language must be 'zh', 'en', 'ja', or 'auto'")
+
+        # Update description generation mode
+        if "description_generation_mode" in data:
+            mode = data["description_generation_mode"]
+            if mode not in ("streaming", "parallel"):
+                return bad_request("description_generation_mode must be 'streaming' or 'parallel'")
+            settings.description_generation_mode = mode
+
+        # Update description extra fields
+        if "description_extra_fields" in data:
+            fields = data["description_extra_fields"]
+            if not isinstance(fields, list) or not fields:
+                return bad_request("description_extra_fields must be a non-empty array of strings")
+            if len(fields) > 10:
+                return bad_request("description_extra_fields allows at most 10 items")
+            if not all(isinstance(f, str) and f.strip() for f in fields):
+                return bad_request("Each extra field must be a non-empty string")
+            settings.description_extra_fields = json.dumps([f.strip() for f in fields], ensure_ascii=False)
+
+        if "image_prompt_extra_fields" in data:
+            fields = data["image_prompt_extra_fields"]
+            if not isinstance(fields, list):
+                return bad_request("image_prompt_extra_fields must be an array of strings")
+            # 空数组表示不传任何额外字段给图片生成
+            settings.image_prompt_extra_fields = json.dumps([f.strip() for f in fields if isinstance(f, str) and f.strip()], ensure_ascii=False)
+
+        # Update reasoning mode configuration (separate for text and image)
+        if "enable_text_reasoning" in data:
+            settings.enable_text_reasoning = bool(data["enable_text_reasoning"])
+        
+        if "text_thinking_budget" in data:
+            budget = int(data["text_thinking_budget"])
+            if budget < 1 or budget > 8192:
+                return bad_request("Text thinking budget must be between 1 and 8192")
+            settings.text_thinking_budget = budget
+        
+        if "enable_image_reasoning" in data:
+            settings.enable_image_reasoning = bool(data["enable_image_reasoning"])
+        
+        if "image_thinking_budget" in data:
+            budget = int(data["image_thinking_budget"])
+            if budget < 1 or budget > 8192:
+                return bad_request("Image thinking budget must be between 1 and 8192")
+            settings.image_thinking_budget = budget
+
+        # Update Baidu OCR configuration
+        if "baidu_api_key" in data:
+            settings.baidu_api_key = data["baidu_api_key"] or None
+
+        # Update ElevenLabs TTS configuration
+        if "elevenlabs_enabled" in data:
+            settings.elevenlabs_enabled = bool(data["elevenlabs_enabled"])
+        if "elevenlabs_api_key" in data:
+            settings.elevenlabs_api_key = data["elevenlabs_api_key"] or None
+        if "elevenlabs_voice_id" in data:
+            settings.elevenlabs_voice_id = (data["elevenlabs_voice_id"] or "").strip() or None
+
+        # Update per-model provider source configuration
+        if "text_model_source" in data:
+            settings.text_model_source = (data["text_model_source"] or "").strip() or None
+
+        if "image_model_source" in data:
+            settings.image_model_source = (data["image_model_source"] or "").strip() or None
+
+        if "openai_image_api_protocol" in data:
+            protocol = data["openai_image_api_protocol"]
+            if protocol not in ("auto", "images", "chat"):
+                return bad_request("openai_image_api_protocol must be 'auto', 'images', or 'chat'")
+            settings.openai_image_api_protocol = protocol if protocol != "auto" else None
+
+        if "image_caption_model_source" in data:
+            settings.image_caption_model_source = (data["image_caption_model_source"] or "").strip() or None
+
+        # Update per-model API credentials (for gemini/openai per-model overrides)
+        for model_type in ('text', 'image', 'image_caption'):
+            key_field = f'{model_type}_api_key'
+            base_field = f'{model_type}_api_base_url'
+
+            if key_field in data:
+                setattr(settings, key_field, data[key_field] or None)
+
+            if base_field in data:
+                setattr(settings, base_field, (data[base_field] or "").strip() or None)
+
+        if "lazyllm_api_keys" in data:
+            keys_data = data["lazyllm_api_keys"]
+            if isinstance(keys_data, dict):
+                # Merge with existing keys (only update non-empty values)
+                existing = settings.get_lazyllm_api_keys_dict()
+                for vendor, key in keys_data.items():
+                    if key:  # Only update if a new value is provided
+                        existing[vendor] = key
+                settings.lazyllm_api_keys = json.dumps(existing) if existing else None
+            elif keys_data is None:
+                settings.lazyllm_api_keys = None
+
+        settings.updated_at = datetime.now(timezone.utc)
+        db.session.commit()
+
+        # Sync to app.config
+        _sync_settings_to_config(settings)
+
+        logger.info("Settings updated successfully")
+        return success_response(
+            settings.to_dict(), "Settings updated successfully"
+        )
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error updating settings: {str(e)}")
+        return error_response(
+            "UPDATE_SETTINGS_ERROR",
+            f"Failed to update settings: {str(e)}",
+            500,
+        )
+
+
+@settings_bp.route("/reset", methods=["POST"], strict_slashes=False)
+def reset_settings():
+    """
+    POST /api/settings/reset - Reset settings to default values
+    """
+    try:
+        settings = Settings.get_settings()
+        preserve_ai_config = not ai_config_self_service_enabled()
+
+        # Reset all fields to NULL so .env defaults take over via to_dict()
+        # 模型配置字段仅在允许自助配置时重置，否则保留管理员在数据库中维护的值
+        if not preserve_ai_config:
+            settings.ai_provider_format = None
+            settings.api_base_url = None
+            settings.api_key = None
+            settings.text_model = None
+            settings.image_model = None
+        settings.mineru_api_base = None
+        settings.mineru_provider = None
+        settings.mineru_token = None
+        if not preserve_ai_config:
+            settings.image_caption_model = None
+        settings.output_language = None
+        settings.enable_text_reasoning = False
+        settings.text_thinking_budget = 1024
+        settings.enable_image_reasoning = False
+        settings.image_thinking_budget = 1024
+        settings.description_generation_mode = None
+        settings.description_extra_fields = None
+        settings.image_prompt_extra_fields = None
+        settings.baidu_api_key = None
+        settings.elevenlabs_enabled = False
+        settings.elevenlabs_api_key = None
+        settings.elevenlabs_voice_id = None
+        if not preserve_ai_config:
+            settings.text_model_source = None
+            settings.image_model_source = None
+            settings.image_caption_model_source = None
+            settings.openai_image_api_protocol = None
+            settings.lazyllm_api_keys = None
+            for model_type in ('text', 'image', 'image_caption'):
+                setattr(settings, f'{model_type}_api_key', None)
+                setattr(settings, f'{model_type}_api_base_url', None)
+        settings.image_resolution = None
+        settings.image_aspect_ratio = None
+        settings.max_description_workers = None
+        settings.max_image_workers = None
+        settings.updated_at = datetime.now(timezone.utc)
+
+        db.session.commit()
+
+        # Sync to app.config
+        _sync_settings_to_config(settings)
+
+        logger.info("Settings reset to defaults")
+        return success_response(
+            settings.to_dict(), "Settings reset to defaults"
+        )
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error resetting settings: {str(e)}")
+        return error_response(
+            "RESET_SETTINGS_ERROR",
+            f"Failed to reset settings: {str(e)}",
+            500,
+        )
+
+
+@settings_bp.route("/elevenlabs-voices", methods=["GET"], strict_slashes=False)
+def get_elevenlabs_voices():
+    """GET /api/settings/elevenlabs-voices - 用存储的 API Key 拉取可用声音列表"""
+    from models import Settings
+    db.session.expire_all()
+    settings = Settings.get_settings()
+    api_key = settings.elevenlabs_api_key
+    if not api_key:
+        return error_response("ELEVENLABS_KEY_MISSING", "ElevenLabs API Key 未配置", 400)
+    try:
+        from elevenlabs.client import ElevenLabs
+        from elevenlabs.core import ApiError as ElevenLabsApiError
+        client = ElevenLabs(api_key=api_key)
+        try:
+            voices_response = client.voices.get_all()
+        except ElevenLabsApiError as e:
+            body = getattr(e, 'body', None) or {}
+            detail = body.get('detail', {}) if isinstance(body, dict) else {}
+            status = detail.get('status', '') if isinstance(detail, dict) else ''
+            msg = (detail.get('message') if isinstance(detail, dict) else None) or str(e)
+            if status == 'missing_permissions':
+                return error_response(
+                    "ELEVENLABS_KEY_MISSING_PERMISSION",
+                    "ElevenLabs API Key 缺少 voices_read 权限。请到 ElevenLabs Dashboard 编辑该 Key 并勾选 Voices: Read，或创建 'Has access to all' 的 Key 后重新保存。",
+                    400,
+                )
+            if status == 'invalid_api_key' or e.status_code == 401:
+                return error_response("ELEVENLABS_KEY_INVALID", f"ElevenLabs API Key 无效：{msg}", 400)
+            return error_response("ELEVENLABS_VOICES_ERROR", f"ElevenLabs 错误 (HTTP {e.status_code})：{msg}", 500)
+        voices = []
+        for v in voices_response.voices:
+            labels = getattr(v, "labels", None) or {}
+            verified = getattr(v, "verified_languages", None) or []
+            languages = []
+            seen = set()
+            primary = labels.get("language") if isinstance(labels, dict) else None
+            if primary and primary not in seen:
+                languages.append(primary)
+                seen.add(primary)
+            for entry in verified:
+                lang = entry.get("language") if isinstance(entry, dict) else getattr(entry, "language", None)
+                if lang and lang not in seen:
+                    languages.append(lang)
+                    seen.add(lang)
+            voices.append({
+                "id": v.voice_id,
+                "name": v.name,
+                "category": getattr(v, "category", "premade"),
+                "languages": languages,
+                "accent": labels.get("accent") if isinstance(labels, dict) else None,
+            })
+        voices.sort(key=lambda v: v["name"])
+        return success_response({"voices": voices})
+    except Exception as e:
+        logger.exception("[elevenlabs-voices] 获取声音列表失败")
+        return error_response("ELEVENLABS_VOICES_ERROR", f"获取 ElevenLabs 声音列表失败: {e}", 500)
+
+
+@settings_bp.route("/active-config", methods=["GET"], strict_slashes=False)
+def get_active_config():
+    """
+    GET /api/settings/active-config - Return current app.config values for AI settings.
+    Useful for verifying that _sync_settings_to_config correctly restored .env defaults.
+    """
+    return success_response({
+        "ai_provider_format": current_app.config.get("AI_PROVIDER_FORMAT"),
+        "text_model": current_app.config.get("TEXT_MODEL"),
+        "image_model": current_app.config.get("IMAGE_MODEL"),
+        "output_language": current_app.config.get("OUTPUT_LANGUAGE"),
+        "image_caption_model": current_app.config.get("IMAGE_CAPTION_MODEL"),
+        "mineru_provider": current_app.config.get("MINERU_PROVIDER"),
+        "mineru_api_base": current_app.config.get("MINERU_API_BASE"),
+        "mineru_local_api_base": current_app.config.get("MINERU_LOCAL_API_BASE"),
+    })
+
+
+def _settings_payload(settings: Settings, *, managed_user: User | None = None) -> dict:
+    data = settings.to_dict()
+    data['ai_config_editable'] = ai_config_editable_for_user(current_user())
+    data['current_user_is_admin'] = is_admin_user(current_user())
+    if managed_user is not None:
+        data['managed_user'] = {
+            'id': managed_user.id,
+            'username': managed_user.username,
+            'email': managed_user.email,
+        }
+    return data
+
+
+def _get_user_settings_or_404(user_id: str) -> tuple[Settings | None, User | None, tuple | None]:
+    user = User.query.filter_by(id=user_id, is_active=True).first()
+    if not user:
+        return None, None, not_found('User')
+    settings = Settings.query.filter_by(user_id=user.id).first()
+    if settings is None:
+        settings = Settings(user_id=user.id)
+        db.session.add(settings)
+        db.session.flush()
+    return settings, user, None
+
+
+def _apply_ai_config_fields(settings: Settings, data: dict) -> tuple | None:
+    """Apply only AI model configuration fields. Returns an error response tuple on failure."""
+    if "ai_provider_format" in data:
+        provider_format = data["ai_provider_format"]
+        if provider_format not in ALLOWED_PROVIDER_FORMATS:
+            allowed_values = "', '".join(sorted(ALLOWED_PROVIDER_FORMATS))
+            return bad_request(f"AI provider format must be one of '{allowed_values}'")
+        settings.ai_provider_format = provider_format
+
+    if "api_base_url" in data:
+        raw_base_url = data["api_base_url"]
+        if raw_base_url is None:
+            settings.api_base_url = None
+        else:
+            value = str(raw_base_url).strip()
+            settings.api_base_url = value if value != "" else None
+
+    if "api_key" in data:
+        settings.api_key = data["api_key"]
+
+    if "text_model" in data:
+        settings.text_model = (data["text_model"] or "").strip() or None
+
+    if "image_model" in data:
+        settings.image_model = (data["image_model"] or "").strip() or None
+
+    if "image_caption_model" in data:
+        settings.image_caption_model = (data["image_caption_model"] or "").strip() or None
+
+    if "text_model_source" in data:
+        settings.text_model_source = (data["text_model_source"] or "").strip() or None
+
+    if "image_model_source" in data:
+        settings.image_model_source = (data["image_model_source"] or "").strip() or None
+
+    if "openai_image_api_protocol" in data:
+        protocol = data["openai_image_api_protocol"]
+        if protocol not in ("auto", "images", "chat"):
+            return bad_request("openai_image_api_protocol must be 'auto', 'images', or 'chat'")
+        settings.openai_image_api_protocol = protocol if protocol != "auto" else None
+
+    if "image_caption_model_source" in data:
+        settings.image_caption_model_source = (data["image_caption_model_source"] or "").strip() or None
+
+    for model_type in ('text', 'image', 'image_caption'):
+        key_field = f'{model_type}_api_key'
+        base_field = f'{model_type}_api_base_url'
+        if key_field in data:
+            setattr(settings, key_field, data[key_field] or None)
+        if base_field in data:
+            setattr(settings, base_field, (data[base_field] or "").strip() or None)
+
+    if "lazyllm_api_keys" in data:
+        keys_data = data["lazyllm_api_keys"]
+        if isinstance(keys_data, dict):
+            existing = settings.get_lazyllm_api_keys_dict()
+            for vendor, key in keys_data.items():
+                if key:
+                    existing[vendor] = key
+            settings.lazyllm_api_keys = json.dumps(existing) if existing else None
+        elif keys_data is None:
+            settings.lazyllm_api_keys = None
+
+    return None
+
+
+def _reset_ai_config_fields(settings: Settings) -> None:
+    settings.ai_provider_format = None
+    settings.api_base_url = None
+    settings.api_key = None
+    settings.text_model = None
+    settings.image_model = None
+    settings.image_caption_model = None
+    settings.text_model_source = None
+    settings.image_model_source = None
+    settings.image_caption_model_source = None
+    settings.openai_image_api_protocol = None
+    settings.lazyllm_api_keys = None
+    for model_type in ('text', 'image', 'image_caption'):
+        setattr(settings, f'{model_type}_api_key', None)
+        setattr(settings, f'{model_type}_api_base_url', None)
+
+
+@settings_bp.route("/admin/users", methods=["GET"], strict_slashes=False)
+def list_admin_managed_users():
+    """GET /api/settings/admin/users - List users for admin model-config management."""
+    auth_error = require_admin_user()
+    if auth_error:
+        return auth_error
+
+    users = User.query.filter_by(is_active=True).order_by(User.username).all()
+    return success_response({
+        'users': [
+            {
+                'id': user.id,
+                'username': user.username,
+                'email': user.email,
+                'is_admin': bool(user.is_admin),
+            }
+            for user in users
+        ],
+    })
+
+
+@settings_bp.route("/admin/users/<user_id>", methods=["GET"], strict_slashes=False)
+def get_admin_user_settings(user_id):
+    """GET /api/settings/admin/users/<user_id> - View another user's model settings."""
+    auth_error = require_admin_user()
+    if auth_error:
+        return auth_error
+
+    settings, user, error = _get_user_settings_or_404(user_id)
+    if error:
+        return error
+    return success_response(_settings_payload(settings, managed_user=user))
+
+
+@settings_bp.route("/admin/users/<user_id>", methods=["PUT"], strict_slashes=False)
+def update_admin_user_settings(user_id):
+    """PUT /api/settings/admin/users/<user_id> - Update another user's AI model config."""
+    auth_error = require_admin_user()
+    if auth_error:
+        return auth_error
+
+    data = request.get_json()
+    if not data:
+        return bad_request("Request body is required")
+
+    disallowed = sorted(set(data) - AI_CONFIG_FIELDS)
+    if disallowed:
+        return bad_request(f"Only AI model config fields are allowed: {', '.join(sorted(AI_CONFIG_FIELDS))}")
+
+    settings, user, error = _get_user_settings_or_404(user_id)
+    if error:
+        return error
+
+    try:
+        field_error = _apply_ai_config_fields(settings, data)
+        if field_error:
+            return field_error
+
+        settings.updated_at = datetime.now(timezone.utc)
+        db.session.commit()
+
+        if user.id == current_user_id():
+            _sync_settings_to_config(settings)
+
+        logger.info("Admin updated AI config for user %s (%s)", user.username, user.id)
+        return success_response(_settings_payload(settings, managed_user=user), "User AI settings updated successfully")
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error updating admin user settings: {str(e)}")
+        return error_response(
+            "UPDATE_ADMIN_USER_SETTINGS_ERROR",
+            f"Failed to update user AI settings: {str(e)}",
+            500,
+        )
+
+
+@settings_bp.route("/admin/users/<user_id>/reset-ai-config", methods=["POST"], strict_slashes=False)
+def reset_admin_user_ai_config(user_id):
+    """POST /api/settings/admin/users/<user_id>/reset-ai-config - Reset another user's AI model config."""
+    auth_error = require_admin_user()
+    if auth_error:
+        return auth_error
+
+    settings, user, error = _get_user_settings_or_404(user_id)
+    if error:
+        return error
+
+    try:
+        _reset_ai_config_fields(settings)
+        settings.updated_at = datetime.now(timezone.utc)
+        db.session.commit()
+
+        if user.id == current_user_id():
+            _sync_settings_to_config(settings)
+
+        logger.info("Admin reset AI config for user %s (%s)", user.username, user.id)
+        return success_response(_settings_payload(settings, managed_user=user), "User AI settings reset successfully")
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error resetting admin user AI config: {str(e)}")
+        return error_response(
+            "RESET_ADMIN_USER_SETTINGS_ERROR",
+            f"Failed to reset user AI settings: {str(e)}",
+            500,
+        )
+
+
+@settings_bp.route("/verify", methods=["POST"], strict_slashes=False)
+def verify_api_key():
+    """
+    POST /api/settings/verify - 验证模型配置是否可用
+    通过调用一个轻量测试请求（thinking_budget=0）来判断
+
+    Returns:
+        {
+            "data": {
+                "available": true/false,
+                "message": "提示信息"
+            }
+        }
+    """
+    try:
+        # 获取当前设置
+        settings = Settings.get_settings()
+        if not settings:
+            return success_response({
+                "available": False,
+                "message": "用户设置未找到"
+            })
+
+        # 准备设置覆盖字典
+        settings_override = {}
+        if settings.api_key:
+            settings_override["api_key"] = settings.api_key
+        if settings.api_base_url:
+            settings_override["api_base_url"] = settings.api_base_url
+        if settings.ai_provider_format:
+            settings_override["ai_provider_format"] = settings.ai_provider_format
+        if settings.text_model:
+            settings_override["text_model"] = settings.text_model
+
+        # 使用上下文管理器临时应用用户配置进行验证
+        with temporary_settings_override(settings_override):
+            from services.ai_providers import get_text_provider
+
+            verification_model = (
+                settings.text_model
+                or current_app.config.get("TEXT_MODEL")
+                or Config.TEXT_MODEL
+                or "gemini-3-flash-preview"
+            )
+
+            # 尝试创建provider并调用一个简单的测试请求
+            try:
+                provider = get_text_provider(model=verification_model)
+                # 调用一个简单的测试请求（思考budget=0，最小开销）
+                provider.generate_text("Hello", thinking_budget=0)
+
+                logger.info("API key verification successful")
+                return success_response({
+                    "available": True,
+                    "message": "API key 可用"
+                })
+
+            except ValueError as ve:
+                # API key未配置
+                logger.warning(f"API key not configured: {str(ve)}")
+                provider_format = (settings.ai_provider_format or "").lower()
+                if provider_format == "lazyllm" or provider_format in LAZYLLM_VENDORS:
+                    source = (provider_format if provider_format in LAZYLLM_VENDORS
+                              else current_app.config.get("TEXT_MODEL_SOURCE") or Config.TEXT_MODEL_SOURCE or "unknown").upper()
+                    message = f"LazyLLM API key 未配置，请设置 {source}_API_KEY"
+                else:
+                    message = "API key 未配置，请在设置中配置 API key 和 API Base URL"
+                return success_response({
+                    "available": False,
+                    "message": message
+                })
+            except Exception as e:
+                # API调用失败（可能是key无效、余额不足等）
+                error_msg = str(e)
+                logger.warning(f"API key verification failed: {error_msg}")
+
+                # 根据错误信息判断具体原因
+                if "401" in error_msg or "unauthorized" in error_msg.lower() or "invalid" in error_msg.lower():
+                    message = "API key 无效或已过期，请在设置中检查 API key 配置"
+                elif "429" in error_msg or "quota" in error_msg.lower() or "limit" in error_msg.lower():
+                    message = "API 调用超限或余额不足，请在设置中检查配置"
+                elif "403" in error_msg or "forbidden" in error_msg.lower():
+                    message = "API 访问被拒绝，请在设置中检查 API key 权限"
+                elif "timeout" in error_msg.lower():
+                    message = "API 调用超时，请在设置中检查网络连接和 API Base URL"
+                else:
+                    message = f"API 调用失败，请在设置中检查配置: {error_msg}"
+
+                return success_response({
+                    "available": False,
+                    "message": message
+                })
+
+    except Exception as e:
+        logger.error(f"Error verifying API key: {str(e)}")
+        return error_response(
+            "VERIFY_API_KEY_ERROR",
+            f"验证 API key 时出错: {str(e)}",
+            500,
+        )
+
+
+def _sync_settings_to_config(settings: Settings):
+    # Persisted settings affect the next capture only. Running jobs retain their
+    # credentials; digest/versioned cache keys invalidate new requests naturally.
+    return None
+
+
+def _get_test_image_path() -> Path:
+    test_image = Path(PROJECT_ROOT) / "assets" / "test_img.png"
+    if not test_image.exists():
+        raise FileNotFoundError("未找到 test_img.png，请确认已放在项目根目录 assets 下")
+    return test_image
+
+
+def _get_baidu_credentials():
+    """获取百度 API 凭证"""
+    api_key = current_app.config.get("BAIDU_API_KEY") or Config.BAIDU_API_KEY
+    if not api_key:
+        raise ValueError("未配置 BAIDU_API_KEY")
+    return api_key
+
+
+def _create_file_parser():
+    """创建 FileParserService 实例，根据 per-model caption 配置解析正确的凭证"""
+    from services.ai_providers import LAZYLLM_VENDORS
+
+    caption_source = current_app.config.get("IMAGE_CAPTION_MODEL_SOURCE")
+    global_format = current_app.config.get("AI_PROVIDER_FORMAT", "gemini")
+
+    # Determine effective caption provider format
+    if caption_source:
+        source_lower = caption_source.lower()
+        if source_lower == 'gemini':
+            caption_format = 'gemini'
+        elif source_lower == 'openai':
+            caption_format = 'openai'
+        elif source_lower == 'codex':
+            caption_format = 'codex'
+        elif source_lower in LAZYLLM_VENDORS:
+            caption_format = 'lazyllm'
+        else:
+            caption_format = global_format
+    else:
+        caption_format = global_format
+
+    # Resolve API credentials based on caption format
+    if caption_format == 'gemini':
+        google_key = current_app.config.get("IMAGE_CAPTION_API_KEY") or current_app.config.get("GOOGLE_API_KEY", "")
+        google_base = current_app.config.get("IMAGE_CAPTION_API_BASE") or current_app.config.get("GOOGLE_API_BASE", "")
+        openai_key = ""
+        openai_base = ""
+    elif caption_format == 'openai':
+        google_key = ""
+        google_base = ""
+        openai_key = current_app.config.get("IMAGE_CAPTION_API_KEY") or current_app.config.get("OPENAI_API_KEY", "")
+        openai_base = current_app.config.get("IMAGE_CAPTION_API_BASE") or current_app.config.get("OPENAI_API_BASE", "")
+    elif caption_format == 'codex':
+        google_key = ""
+        google_base = ""
+        openai_key = ""
+        openai_base = ""
+    else:
+        # lazyllm or global fallback
+        google_key = current_app.config.get("GOOGLE_API_KEY", "")
+        google_base = current_app.config.get("GOOGLE_API_BASE", "")
+        openai_key = current_app.config.get("OPENAI_API_KEY", "")
+        openai_base = current_app.config.get("OPENAI_API_BASE", "")
+
+    return FileParserService(
+        mineru_token=current_app.config.get("MINERU_TOKEN", ""),
+        mineru_api_base=current_app.config.get("MINERU_API_BASE", ""),
+        google_api_key=google_key,
+        google_api_base=google_base,
+        openai_api_key=openai_key,
+        openai_api_base=openai_base,
+        image_caption_model=current_app.config.get("IMAGE_CAPTION_MODEL", Config.IMAGE_CAPTION_MODEL),
+        lazyllm_image_caption_source=caption_source or getattr(
+            Config, 'IMAGE_CAPTION_MODEL_SOURCE', None
+        ),
+        provider_format=caption_format,
+        mineru_provider=current_app.config.get("MINERU_PROVIDER", Config.MINERU_PROVIDER),
+        local_api_base=current_app.config.get("MINERU_LOCAL_API_BASE", Config.MINERU_LOCAL_API_BASE),
+        local_backend=current_app.config.get("MINERU_LOCAL_BACKEND", Config.MINERU_LOCAL_BACKEND),
+        local_parse_method=current_app.config.get("MINERU_LOCAL_PARSE_METHOD", Config.MINERU_LOCAL_PARSE_METHOD),
+        local_return_images=current_app.config.get("MINERU_LOCAL_RETURN_IMAGES", Config.MINERU_LOCAL_RETURN_IMAGES),
+        local_response_format_zip=current_app.config.get("MINERU_LOCAL_RESPONSE_FORMAT_ZIP", Config.MINERU_LOCAL_RESPONSE_FORMAT_ZIP),
+        local_return_original_file=current_app.config.get("MINERU_LOCAL_RETURN_ORIGINAL_FILE", Config.MINERU_LOCAL_RETURN_ORIGINAL_FILE),
+    )
+
+
+# 测试函数 - 每个测试一个独立函数
+def _test_baidu_ocr():
+    """测试百度 OCR 服务"""
+    api_key = _get_baidu_credentials()
+    provider = create_baidu_accurate_ocr_provider(api_key)
+    if not provider:
+        raise ValueError("百度 OCR Provider 初始化失败")
+
+    test_image_path = _get_test_image_path()
+    result = provider.recognize(str(test_image_path), language_type="CHN_ENG")
+    recognized_text = provider.get_full_text(result, separator=" ")
+
+    return {
+        "recognized_text": recognized_text,
+        "words_result_num": result.get("words_result_num", 0),
+    }, "百度 OCR 测试成功"
+
+
+def _test_text_model():
+    """测试文本生成模型"""
+    ai_service = AIService()
+    reply = ai_service.text_provider.generate_text("请只回复 OK。", thinking_budget=64)
+    return {"reply": reply.strip()}, "文本模型测试成功"
+
+
+def _test_caption_model():
+    """测试图片识别模型"""
+    upload_folder = Path(current_app.config.get("UPLOAD_FOLDER", Config.UPLOAD_FOLDER))
+    mineru_root = upload_folder / "mineru_files"
+    mineru_root.mkdir(parents=True, exist_ok=True)
+    extract_id = datetime.now(timezone.utc).strftime("test-%Y%m%d%H%M%S")
+    image_dir = mineru_root / extract_id
+    image_dir.mkdir(parents=True, exist_ok=True)
+    image_path = image_dir / "caption_test.png"
+
+    try:
+        test_image_path = _get_test_image_path()
+        shutil.copyfile(test_image_path, image_path)
+
+        parser = _create_file_parser()
+        image_url = f"/files/mineru/{extract_id}/{image_path.name}"
+        caption = parser._generate_single_caption(image_url, raise_on_error=True).strip()
+
+        if not caption:
+            raise ValueError("图片识别模型返回空结果")
+
+        return {"caption": caption}, "图片识别模型测试成功"
+    finally:
+        if image_path.exists():
+            image_path.unlink()
+        if image_dir.exists():
+            try:
+                image_dir.rmdir()
+            except OSError:
+                pass
+
+
+def _test_baidu_inpaint():
+    """测试百度图像修复"""
+    api_key = _get_baidu_credentials()
+    provider = create_baidu_inpainting_provider(api_key)
+    if not provider:
+        raise ValueError("百度图像修复 Provider 初始化失败")
+
+    test_image_path = _get_test_image_path()
+    with Image.open(test_image_path) as image:
+        width, height = image.size
+        rect_width = max(1, int(width * 0.3))
+        rect_height = max(1, int(height * 0.3))
+        left = max(0, int(width * 0.35))
+        top = max(0, int(height * 0.35))
+        rectangles = [{
+            "left": left,
+            "top": top,
+            "width": min(rect_width, width - left),
+            "height": min(rect_height, height - top),
+        }]
+        result = provider.inpaint(image, rectangles)
+
+    if result is None:
+        raise ValueError("百度图像修复返回空结果")
+
+    return {"image_size": result.size}, "百度图像修复测试成功"
+
+
+def _test_image_model():
+    """测试图像生成模型"""
+    ai_service = AIService()
+    test_image_path = _get_test_image_path()
+    prompt = prompt_registry.render("settings.image_model_test").strip()
+    settings = Settings.get_settings()
+    result = ai_service.generate_image(
+        prompt=prompt,
+        ref_image_path=str(test_image_path),
+        aspect_ratio=settings.image_aspect_ratio or "16:9",
+        resolution=settings.image_resolution or "2K"
+    )
+
+    if result is None:
+        raise ValueError("图像生成模型返回空结果")
+
+    return {"image_size": result.size}, "图像生成模型测试成功"
+
+
+def _test_mineru_pdf():
+    """测试 MinerU PDF 解析"""
+    parser = _create_file_parser()
+    tmp_file = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            tmp_file = Path(tmp.name)
+        test_image_path = _get_test_image_path()
+        with Image.open(test_image_path) as image:
+            if image.mode != "RGB":
+                image = image.convert("RGB")
+            image.save(tmp_file, format="PDF")
+
+        if parser.mineru_provider == "local":
+            _batch_id, markdown_content, extract_id, error, _failed = parser.parse_file(str(tmp_file), "mineru-test.pdf")
+            if error:
+                raise ValueError(error)
+            return {
+                "provider": "local",
+                "extract_id": extract_id,
+                "content_preview": (markdown_content or "").strip()[:120],
+            }, "本地 MinerU 解析测试成功"
+    finally:
+        if tmp_file and tmp_file.exists():
+            tmp_file.unlink()
+
+    mineru_token = current_app.config.get("MINERU_TOKEN", "")
+    if not mineru_token:
+        raise ValueError("未配置 MINERU_TOKEN")
+
+    tmp_file = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            tmp_file = Path(tmp.name)
+        test_image_path = _get_test_image_path()
+        with Image.open(test_image_path) as image:
+            if image.mode != "RGB":
+                image = image.convert("RGB")
+            image.save(tmp_file, format="PDF")
+
+        batch_id, upload_url, error = parser._get_upload_url("mineru-test.pdf")
+        if error:
+            raise ValueError(error)
+
+        upload_error = parser._upload_file(str(tmp_file), upload_url)
+        if upload_error:
+            raise ValueError(upload_error)
+
+        markdown_content, extract_id, poll_error = parser._poll_result(batch_id, max_wait_time=30)
+        if poll_error:
+            if "timeout" in poll_error.lower():
+                return {
+                    "batch_id": batch_id,
+                    "status": "processing",
+                    "message": "服务正常，文件正在处理中"
+                }, "MinerU 服务可用（处理中）"
+            else:
+                raise ValueError(poll_error)
+        else:
+            content_preview = (markdown_content or "").strip()[:120]
+            return {
+                "batch_id": batch_id,
+                "extract_id": extract_id,
+                "content_preview": content_preview,
+            }, "MinerU 解析测试成功"
+    finally:
+        if tmp_file and tmp_file.exists():
+            tmp_file.unlink()
+
+
+# 测试函数映射
+TEST_FUNCTIONS = {
+    "baidu-ocr": _test_baidu_ocr,
+    "text-model": _test_text_model,
+    "caption-model": _test_caption_model,
+    "baidu-inpaint": _test_baidu_inpaint,
+    "image-model": _test_image_model,
+    "mineru-pdf": _test_mineru_pdf,
+}
+
+
+def _run_test_async(task_id: str, test_name: str, test_settings: dict, app):
+    """
+    在后台异步执行测试任务
+
+    Args:
+        task_id: 任务ID
+        test_name: 测试名称
+        test_settings: 测试设置
+        app: Flask app 实例
+    """
+    with app.app_context():
+        try:
+            # 更新状态为运行中
+            task = Task.query.get(task_id)
+            if not task:
+                logger.error(f"Task {task_id} not found")
+                return
+
+            task.status = 'PROCESSING'
+            db.session.commit()
+
+            # 应用测试设置并执行测试
+            with temporary_settings_override(test_settings):
+                # 查找并执行对应的测试函数
+                test_func = TEST_FUNCTIONS.get(test_name)
+                if not test_func:
+                    raise ValueError(f"未知测试类型: {test_name}")
+
+                result_data, message = test_func()
+
+                # 更新任务状态为完成
+                task = Task.query.get(task_id)
+                if task:
+                    task.status = 'COMPLETED'
+                    task.completed_at = datetime.now(timezone.utc)
+                    task.set_progress({
+                        'result': result_data,
+                        'message': message
+                    })
+                    db.session.commit()
+                    logger.info(f"Test task {task_id} completed successfully")
+
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"Test task {task_id} failed: {error_msg}", exc_info=True)
+            task = Task.query.get(task_id)
+            if task:
+                task.status = 'FAILED'
+                task.error_message = error_msg
+                task.completed_at = datetime.now(timezone.utc)
+                db.session.commit()
+
+
+
+@settings_bp.route("/tests/<test_name>", methods=["POST"], strict_slashes=False)
+def run_settings_test(test_name: str):
+    """
+    POST /api/settings/tests/<test_name> - 启动异步服务测试
+
+    Request Body (optional):
+        可选的设置覆盖参数，用于测试未保存的配置
+        {
+            "api_key": "test-key",
+            "api_base_url": "https://test.api.com",
+            "text_model": "test-model",
+            ...
+        }
+
+    Returns:
+        {
+            "data": {
+                "task_id": "uuid",
+                "status": "PENDING"
+            }
+        }
+    """
+    try:
+        # 从数据库加载已保存的全局设置作为基础
+        global_settings = Settings.get_settings()
+
+        # 构建基础测试设置（使用数据库中已保存的值）
+        test_settings = {}
+        if global_settings.api_key:
+            test_settings["api_key"] = global_settings.api_key
+        if global_settings.api_base_url:
+            test_settings["api_base_url"] = global_settings.api_base_url
+        if global_settings.ai_provider_format:
+            test_settings["ai_provider_format"] = global_settings.ai_provider_format
+        if global_settings.text_model:
+            test_settings["text_model"] = global_settings.text_model
+        if global_settings.image_model:
+            test_settings["image_model"] = global_settings.image_model
+        if global_settings.image_caption_model:
+            test_settings["image_caption_model"] = global_settings.image_caption_model
+        if current_app.config.get("IMAGE_CAPTION_MODEL_SOURCE"):
+            test_settings["image_caption_model_source"] = current_app.config.get("IMAGE_CAPTION_MODEL_SOURCE")
+        # Per-model provider sources and credentials
+        for model_type in ('text', 'image', 'image_caption'):
+            for suffix in ('model_source', 'api_key', 'api_base_url'):
+                attr = f'{model_type}_{suffix}'
+                val = getattr(global_settings, attr, None)
+                if val:
+                    test_settings[attr] = val
+        if global_settings.mineru_api_base:
+            test_settings["mineru_api_base"] = global_settings.mineru_api_base
+        if global_settings.mineru_provider:
+            test_settings["mineru_provider"] = global_settings.mineru_provider
+        if global_settings.mineru_token:
+            test_settings["mineru_token"] = global_settings.mineru_token
+        if global_settings.baidu_api_key:
+            test_settings["baidu_api_key"] = global_settings.baidu_api_key
+        if global_settings.image_resolution:
+            test_settings["image_resolution"] = global_settings.image_resolution
+        # 推理模式设置
+        test_settings["enable_text_reasoning"] = global_settings.enable_text_reasoning
+        test_settings["text_thinking_budget"] = global_settings.text_thinking_budget
+        test_settings["enable_image_reasoning"] = global_settings.enable_image_reasoning
+        test_settings["image_thinking_budget"] = global_settings.image_thinking_budget
+        test_settings["openai_image_api_protocol"] = global_settings.openai_image_api_protocol or current_app.config.get('OPENAI_IMAGE_API_PROTOCOL') or 'auto'
+
+        # 应用前端发送的覆盖参数（如果有的话，用于测试未保存的配置）
+        override_settings = request.get_json() or {}
+        if override_settings and not ai_config_editable_for_user(current_user()):
+            # 模型配置锁定时，忽略前端传来的模型相关覆盖，只允许测试数据库中已保存的配置
+            dropped = sorted(set(override_settings) & AI_CONFIG_FIELDS)
+            if dropped:
+                logger.info(f"AI config locked, dropping test overrides: {dropped}")
+            override_settings = {k: v for k, v in override_settings.items() if k not in AI_CONFIG_FIELDS}
+        if override_settings:
+            logger.info(f"Applying test setting overrides: {list(override_settings.keys())}")
+            test_settings.update(override_settings)
+
+        # 设置测试不属于项目；project_id 外键只能引用真实项目。
+        task = Task(
+            user_id=current_user_id(),
+            project_id=None,
+            task_type=f'TEST_{test_name.upper().replace("-", "_")}',
+            status='PENDING'
+        )
+        db.session.add(task)
+        db.session.commit()
+
+        task_id = task.id
+
+        # 使用 TaskManager 提交后台任务
+        task_manager.submit_task(
+            task_id,
+            _run_test_async,
+            test_name,
+            test_settings,
+            current_app._get_current_object()
+        )
+
+        logger.info(f"Started test task {task_id} for {test_name}")
+
+        return success_response({
+            'task_id': task_id,
+            'status': 'PENDING'
+        }, '测试任务已启动')
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Failed to start test: {str(e)}", exc_info=True)
+        return error_response(
+            "SETTINGS_TEST_ERROR",
+            f"启动测试失败: {str(e)}",
+            500
+        )
+
+
+@settings_bp.route("/tests/<task_id>/status", methods=["GET"], strict_slashes=False)
+def get_test_status(task_id: str):
+    """
+    GET /api/settings/tests/<task_id>/status - 查询测试任务状态
+
+    Returns:
+        {
+            "data": {
+                "status": "PENDING|PROCESSING|COMPLETED|FAILED",
+                "result": {...},  # 仅当 status=COMPLETED 时存在
+                "error": "...",   # 仅当 status=FAILED 时存在
+                "message": "..."
+            }
+        }
+    """
+    try:
+        task = Task.query.get(task_id)
+        if not task:
+            return error_response("TASK_NOT_FOUND", "测试任务不存在", 404)
+        user_id = current_user_id()
+        if task.user_id and user_id and task.user_id != user_id:
+            return error_response("TASK_NOT_FOUND", "测试任务不存在", 404)
+
+        # 构建响应数据
+        response_data = {
+            'status': task.status,
+            'task_type': task.task_type,
+            'created_at': task.created_at.isoformat() if task.created_at else None,
+            'completed_at': task.completed_at.isoformat() if task.completed_at else None,
+        }
+
+        # 如果任务完成，包含结果和消息
+        if task.status == 'COMPLETED':
+            progress = task.get_progress()
+            response_data['result'] = progress.get('result', {})
+            response_data['message'] = progress.get('message', '测试完成')
+
+        # 如果任务失败，包含错误信息
+        elif task.status == 'FAILED':
+            response_data['error'] = task.error_message
+
+        return success_response(response_data)
+
+    except Exception as e:
+        logger.error(f"Failed to get test status: {str(e)}", exc_info=True)
+        return error_response(
+            "GET_TEST_STATUS_ERROR",
+            f"获取测试状态失败: {str(e)}",
+            500
+        )

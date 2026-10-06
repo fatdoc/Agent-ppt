@@ -1,0 +1,170 @@
+prompts:
+  description.page:
+    template: |
+      我们正在为PPT的每一页生成内容描述。
+      用户的原始需求是：
+      {{ original_input }}
+
+      我们已经有了完整的大纲：
+      {{ outline }}
+      {{ part_info }}
+      {{ requirements }}现在请为第 {{ page_index }} 页生成描述：
+      {{ page_outline }}
+      {{ first_page_note }}
+      ## 重要提示
+      生成的"页面文字"部分会直接渲染到PPT页面上，因此请务必不要包含任何额外的说明性文字或注释，也不要把用户的设计意图显式地放在页面文字中。
+
+      {{ description_style_boundary }}
+
+      ## 输出格式
+
+      --- 页面文字 ---
+
+      [此处使用markdown直接放置正文文字, 细致程度要求：{{ detail_level_spec }}
+
+      , 可包含latex公式、表格等内容, 不要重复添加]
+
+      --- 页面文字结束 ---
+
+      图片素材:
+      [如果文件中存在图片请积极添加； 否则忽略图片素材字段]
+      {{ extra_field_instructions }}
+
+      ## 关于图片
+      如果参考文件中包含以 /files/ 开头的本地文件URL图片（例如 /files/mineru/xxx/image.png），请将这些图片以markdown格式输出，例如：![图片描述](/files/mineru/xxx/image.png)。这些图片会被包含在PPT页面中。
+      {{ language_instruction }}
+
+  description.all_stream:
+    template: |
+      我们正在为PPT的每一页生成内容描述。
+      用户的原始需求是：
+      {{ original_input }}
+
+      完整大纲如下：
+      {{ pages_outline_text }}
+
+      {{ requirements }}请为每一页依次生成描述。先输出 `<!-- BEGIN -->` 标记开始，然后逐页输出内容，每页用 `<!-- PAGE_END -->` 结束，全部完成后输出 `<!-- END -->`。
+
+      ## 重要提示
+      - 生成的页面文字会直接渲染到PPT页面上，请务必不要包含任何额外的说明性文字或注释。
+      - **第一页（封面页）保持极简**，只放标题、副标题、演讲人等信息，不添加任何素材。
+      - 细致程度要求：{{ detail_level_spec }}
+
+      {{ description_style_boundary }}
+
+      ## 输出格式
+      每页默认包含"页面文字"和"图片素材"两个部分。图片素材用于引用参考文件中的图片（以 /files/ 开头的本地路径），如果参考文件中没有相关图片则省略该部分。
+      ```
+      <!-- BEGIN -->
+
+      --- 页面文字 ---
+      [第1页文字内容，可包含标题、副标题、要点、latex公式、表格等，根据实际需求选择，避免堆砌和重复. 不要把用户的设计意图显式地放在页面文字中。]
+
+      --- 页面文字结束 ---
+
+      图片素材：
+      [如果参考文件中存在相关图片，以markdown格式引用，如 ![描述](/files/xxx/image.png)；否则省略此部分。如果用户上传了图片素材请积极地添加]
+      {{ extra_field_instructions }}
+      <!-- PAGE_END -->
+
+      --- 页面文字 ---
+      [第2页文字内容]
+
+      --- 页面文字结束 ---
+
+      图片素材：
+      [同上]
+      {{ extra_field_instructions }}
+      <!-- PAGE_END -->
+      ...
+      <!-- END -->
+      ```
+
+      现在请开始生成，严格按照上述格式输出。
+      {{ language_instruction }}
+
+  description.split:
+    template: |
+      You are a helpful assistant that splits a complete PPT description text into individual page descriptions.
+
+      The user has provided a complete description text:
+
+      {{ description_text }}
+
+      We have already extracted the outline structure:
+
+      {{ outline_json }}
+
+      Your task is to split the description text into individual page descriptions based on the outline structure.
+      For each page in the outline, extract the corresponding description from the original text.
+
+      Return a JSON array where each element corresponds to a page in the outline (in the same order).
+      Each element should be a string containing the page description in the following format:
+
+      页面标题：[页面标题]
+
+      页面文字：
+      - [要点1]
+      - [要点2]
+      ...
+
+      其他页面素材（如果有排版、风格、素材等细节）
+
+      Example output format:
+      [
+          "页面标题：人工智能的诞生\n页面文字：\n- 1950 年，图灵提出\"图灵测试\"\n- 奠定了AI的理论基础\n\n其他页面素材：\n排版：标题居中，大字号\n风格：科技感蓝色背景",
+          "页面标题：AI 的发展历程\n页面文字：\n- 1950年代：符号主义...",
+          ...
+      ]
+
+      Important rules:
+      - Split the description text according to the outline structure
+      - Each page description should match the corresponding page in the outline
+      - Preserve all important content from the original text, including layout details (排版细节), style requirements (风格要求), material specifications (素材说明), and any other design requirements
+      - If the user described layout, style, or materials for a page, include them in the "其他页面素材" section
+      - Keep the format consistent with the example above
+      - If a page in the outline doesn't have a clear description in the text, create a reasonable description based on the outline
+
+      Now split the description text into individual page descriptions. Return only the JSON array, don't include any other text.
+      {{ language_instruction }}
+
+  description.refinement:
+    template: |
+      You are a helpful assistant that modifies PPT page descriptions based on user requirements.
+      {{ original_input_labeled }}{{ outline_text }}
+      {{ all_descriptions_text }}
+      {{ previous_requirements }}
+      **用户现在提出新的要求：{{ user_requirement }}**
+
+      请根据用户的要求修改和调整所有页面的描述。你可以：
+      - 修改页面标题和内容
+      - 调整页面文字的详细程度
+      - 添加或删除要点
+      - 调整描述的结构和表达
+      - 确保所有页面描述都符合用户的要求
+      - 如果当前没有内容，请根据大纲和用户要求创建新的描述
+
+      请为每个页面生成修改后的描述，格式如下：
+
+      页面标题：[页面标题]
+
+      页面文字：
+      - [要点1]
+      - [要点2]
+      ...
+      其他页面素材（如果有请加上，包括markdown图片链接等）
+
+      提示：如果参考文件中包含以 /files/ 开头的本地文件URL图片（例如 /files/mineru/xxx/image.png），请将这些图片以markdown格式输出，例如：![图片描述](/files/mineru/xxx/image.png)，而不是作为普通文本。
+
+      请返回一个 JSON 数组，每个元素是一个字符串，对应每个页面的修改后描述（按页面顺序）。
+
+      示例输出格式：
+      [
+          "页面标题：人工智能的诞生\n页面文字：\n- 1950 年，图灵提出\"图灵测试\"...",
+          "页面标题：AI 的发展历程\n页面文字：\n- 1950年代：符号主义...",
+          ...
+      ]
+
+      现在请根据用户要求修改所有页面描述，只输出 JSON 数组，不要包含其他文字。
+      {{ language_instruction }}
+

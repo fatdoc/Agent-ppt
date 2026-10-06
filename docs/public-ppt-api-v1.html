@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PPT Generation API v1</title>
+  <style>
+    body { max-width: 920px; margin: 40px auto; padding: 0 24px 64px; color: #172033; font: 16px/1.7 system-ui, sans-serif; }
+    h1, h2 { line-height: 1.25; }
+    h2 { margin-top: 36px; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px; }
+    code { background: #f3f4f6; border-radius: 4px; padding: 2px 5px; }
+    pre { overflow-x: auto; padding: 16px; background: #111827; color: #e5e7eb; border-radius: 8px; line-height: 1.5; }
+    pre code { padding: 0; background: transparent; }
+    .note { padding: 12px 16px; border-left: 4px solid #2563eb; background: #eff6ff; }
+  </style>
+</head>
+<body>
+  <h1>PPT Generation API v1</h1>
+  <p>第一版公共 API 只开放：<strong>已有结构化大纲 → 逐页描述 → 逐页图片</strong>。</p>
+  <p>公共接口使用 API Key，不接受网页端登录 Token。API Key 归属于现有用户，因此项目隔离、用户模板和积分账户沿用现有系统。</p>
+
+  <h2>1. 数据库迁移</h2>
+  <pre><code>cd backend
+alembic -c alembic.ini upgrade head</code></pre>
+  <p>迁移 <code>027_public_ppt_api</code> 会新增 <code>api_keys</code> 和 <code>public_ppt_generations</code>。</p>
+
+  <h2>2. 创建 API Key</h2>
+  <p>用户登录网页 API 后创建密钥：</p>
+  <pre><code>curl -X POST http://localhost:5000/api/api-keys \
+  -H "Authorization: Bearer &lt;login-token&gt;" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"my-integration","expires_in_days":365}'</code></pre>
+  <p>响应中的 <code>data.key</code> 只返回一次。公共 API 请求头：</p>
+  <pre><code>Authorization: Bearer lt_live_xxxxxxxx.xxxxxxxxxxxxx</code></pre>
+  <pre><code>POST   /api/api-keys
+GET    /api/api-keys
+DELETE /api/api-keys/{api_key_id}</code></pre>
+
+  <h2>3. 提交 PPT 生成</h2>
+  <pre><code>curl -X POST http://localhost:5000/v1/ppt-generations \
+  -H "Authorization: Bearer &lt;api-key&gt;" \
+  -H "Idempotency-Key: order-20260723-001" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "智慧农业项目汇报",
+    "outline": [
+      {
+        "part": "项目认知",
+        "title": "行业正在进入智能种植阶段",
+        "points": ["传统生产依赖经验", "环境参数缺少闭环"]
+      },
+      {
+        "part": "解决方案",
+        "title": "构建水肥环境协同控制系统",
+        "points": ["多传感器采集", "智能策略控制", "异常闭环处置"]
+      }
+    ],
+    "visual": {
+      "template_id": null,
+      "style": "绿色农业科技感，专业，简洁",
+      "aspect_ratio": "16:9"
+    },
+    "options": {
+      "language": "zh",
+      "detail_level": "default",
+      "harness_template": null,
+      "description_requirements": "每页突出一个明确结论",
+      "extra_requirements": "图片中的中文文字必须清晰可读"
+    }
+  }'</code></pre>
+  <ul>
+    <li><code>outline</code> 必填，默认最多 30 页，可通过 <code>PUBLIC_API_MAX_PAGES</code> 调整。</li>
+    <li><code>outline[].title</code> 必填，<code>points</code> 必须为字符串数组。</li>
+    <li><code>visual.template_id</code> 引用当前账户已经上传的用户模板。</li>
+    <li>没有模板、风格或 Harness 场景包时，系统使用默认专业商务风格。</li>
+    <li><code>Idempotency-Key</code> 可选；相同键与相同内容返回原任务，不同内容返回 <code>409</code>。</li>
+    <li>提交时分别预占逐页描述和图片生成积分。</li>
+  </ul>
+
+  <h2>4. 提交响应</h2>
+  <p>成功提交返回 HTTP <code>202</code>：</p>
+  <pre><code>{
+  "success": true,
+  "data": {
+    "generation_id": "...",
+    "status": "QUEUED",
+    "current_stage": "descriptions",
+    "progress": {
+      "stage": "descriptions",
+      "total": 2,
+      "completed": 0,
+      "failed": 0
+    },
+    "links": {
+      "self": "/v1/ppt-generations/...",
+      "pages": "/v1/ppt-generations/.../pages"
+    }
+  }
+}</code></pre>
+
+  <h2>5. 查询状态和结果</h2>
+  <pre><code>GET /v1/ppt-generations/{generation_id}
+GET /v1/ppt-generations/{generation_id}/pages
+GET /v1/ppt-generations/{generation_id}/pages/{page_id}/image
+GET /v1/templates</code></pre>
+  <p>任务状态：<code>QUEUED</code>、<code>PROCESSING</code>、<code>COMPLETED</code>、<code>PARTIAL</code>、<code>FAILED</code>。</p>
+  <p>阶段状态：<code>descriptions</code>、<code>images</code>、<code>completed</code>、<code>failed</code>。</p>
+  <p><code>PARTIAL</code> 表示逐页描述完成但部分图片失败，页面结果中的 <code>status</code> 可定位失败页。</p>
+
+  <h2>6. 第一版边界</h2>
+  <div class="note">
+    当前公共任务仍运行在现有进程内线程池中；服务进程重启不会自动恢复正在执行的任务。第一版不包含 webhook、单页重试和任务取消。生产部署前建议迁移到 Redis + Celery/RQ 等可恢复队列。
+  </div>
+</body>
+</html>

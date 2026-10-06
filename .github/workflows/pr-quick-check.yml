@@ -1,0 +1,133 @@
+name: PR Quick Check
+
+on:
+  pull_request:
+    branches: [ main, develop ]
+
+# Quick check: lint + unit tests + build + smoke
+env:
+  UV_INDEX_URL: https://pypi.org/simple
+
+jobs:
+  quick-check:
+    name: Quick Check (Lint + Unit Tests + Build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Backend checks
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install uv package manager
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Install backend dependencies
+        run: uv sync --extra test
+
+      - name: Backend syntax check
+        run: |
+          cd backend
+          uv run flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics || true
+        continue-on-error: true
+
+      - name: Backend unit tests
+        run: uv run pytest backend/tests/unit -v
+
+      # Frontend checks
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: cd frontend && npm ci
+
+      - name: Frontend lint check
+        run: cd frontend && npm run lint
+
+      - name: Frontend unit tests
+        run: cd frontend && npm test -- --run
+
+      - name: Frontend build check
+        run: cd frontend && npm run build
+
+  docs-check:
+    name: Docs Link Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check docs links
+        run: cd docs && npx mintlify@latest broken-links
+
+  # Simple API smoke test
+  smoke-test:
+    name: Smoke Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    needs: quick-check
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      
+      - name: Install uv package manager
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+      
+      - name: Install dependencies
+        run: |
+          uv sync
+      
+      - name: Start backend and test
+        run: |
+          cp .env.example .env
+          cd backend
+          # Start in background
+          uv run python app.py &
+          SERVER_PID=$!
+          
+          # Poll until backend is ready (up to 30s)
+          echo "Waiting for backend to start..."
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:5000/health; then
+              echo ""
+              echo "Backend smoke test passed (ready after ${i}s)"
+              kill $SERVER_PID
+              exit 0
+            fi
+            if ! kill -0 $SERVER_PID 2>/dev/null; then
+              echo "Backend process exited unexpectedly"
+              cat ../instance/app.log 2>/dev/null || echo "No log file found"
+              exit 1
+            fi
+            sleep 1
+          done
+
+          echo "Backend failed to start within 30s"
+          cat ../instance/app.log 2>/dev/null || echo "No log file found"
+          kill $SERVER_PID 2>/dev/null
+          exit 1
+        env:
+          GOOGLE_API_KEY: mock-key-for-testing
+          TESTING: true
+

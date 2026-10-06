@@ -1,0 +1,75 @@
+name: CI Tests
+
+# Push to main/develop (excluding docs-only changes) or manual trigger
+on:
+  push:
+    branches: [ main, develop ]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_INDEX_URL: https://pypi.org/simple
+
+jobs:
+  backend-test:
+    name: Backend Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Install dependencies
+        run: uv sync --extra test
+
+      - name: Unit tests
+        run: uv run pytest backend/tests/unit -v --cov=backend --cov-report=xml
+
+      - name: Integration tests
+        run: uv run pytest backend/tests/integration -v -m "not requires_service"
+        env:
+          TESTING: true
+          GOOGLE_API_KEY: mock-api-key-for-testing
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./backend/coverage.xml
+          flags: backend
+
+  frontend-test:
+    name: Frontend Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: cd frontend && npm ci
+      - name: Lint
+        run: cd frontend && npm run lint
+      - name: Unit tests
+        run: cd frontend && npm test -- --run --coverage
+      - name: Build check
+        run: cd frontend && npm run build
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./frontend/coverage/coverage-final.json
+          flags: frontend

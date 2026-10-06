@@ -1,0 +1,67 @@
+prompts:
+  language.instruction.zh:
+    template: |
+      请使用全中文输出。
+
+  language.instruction.ja:
+    template: |
+      すべて日本語で出力してください。
+
+  language.instruction.en:
+    template: |
+      Please output all in English.
+
+  language.ppt_text.zh:
+    template: |
+      PPT文字请使用全中文。
+
+  language.ppt_text.ja:
+    template: |
+      PPTのテキストは全て日本語で出力してください。
+
+  language.ppt_text.en:
+    template: |
+      Use English for PPT text.
+
+  detail.concise:
+    template: |
+      文字极致地压缩和精简，每条要点用一个核心词语或数据代替，例如效率↑80%
+
+  detail.default:
+    template: |
+      清晰明了，每条要点控制在15-20字以内，优先使用短语而非完整句子；落地到页面的文字建议在2-6句之内，避免冗长和复杂表述，为演示服务，而不是代替演讲人叙述。
+
+  detail.detailed:
+    template: |
+      忠于原文的基础上做到内容详实，逻辑清晰。
+
+  outline.json_format:
+    template: |
+      1. Simple format (for short PPTs without major sections):
+      [{"title": "title1", "points": ["point1", "point2"]}, {"title": "title2", "points": ["point1", "point2"]}]
+
+      2. Part-based format (for longer PPTs with major sections):
+      [
+          {
+          "part": "Part 1: Introduction",
+          "pages": [
+              {"title": "Welcome", "points": ["point1", "point2"]},
+              {"title": "Overview", "points": ["point1", "point2"]}
+          ]
+          },
+          {
+          "part": "Part 2: Main Content",
+          "pages": [
+              {"title": "Topic 1", "points": ["point1", "point2"]},
+              {"title": "Topic 2", "points": ["point1", "point2"]}
+          ]
+          }
+      ]
+
+  description.style_boundary:
+    template: |
+      ## 风格边界
+      - 页面描述只负责本页的内容、信息层级、布局、图表、素材说明。
+      - 如果项目已选择风格模板或全局风格描述，不要在页面描述中重新指定整体配色、视觉风格、材质风格。
+      - 只有用户明确要求“单页特殊风格 / 覆盖全局风格 / 不沿用模板”时，才在该页描述中写出对应的单页特殊风格要求。
+
