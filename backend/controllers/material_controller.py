@@ -173,7 +173,8 @@ def _generate_image_caption(filepath: str) -> str:
 
 def _build_material_query(filter_project_id: str):
     """Build common material query with project validation."""
-    query = Material.query
+    from services.competition.space import visible_query
+    query = visible_query(Material.query, Material, 'material')
     user_id = current_user_id()
     if user_id:
         query = query.filter(Material.user_id == user_id)
@@ -265,6 +266,10 @@ def _save_material_file(file, target_project_id: Optional[str]):
         return None, bad_request("file is required")
 
     filename = secure_filename(file.filename)
+    if current_app.config.get('APP_EDITION') == 'education':
+        # secure_filename('团队照片.png') becomes 'png' and loses the extension.
+        original = Path(file.filename)
+        filename = (secure_filename(original.stem) or 'material') + original.suffix.lower()
     file_ext = Path(filename).suffix.lower()
     if file_ext not in ALLOWED_MATERIAL_EXTENSIONS:
         return None, bad_request(f"Unsupported file type. Allowed: {', '.join(sorted(ALLOWED_MATERIAL_EXTENSIONS))}")
@@ -279,6 +284,9 @@ def _save_material_file(file, target_project_id: Optional[str]):
     timestamp = int(time.time() * 1000)
     base_name = Path(filename).stem
     unique_filename = f"{base_name}_{timestamp}{file_ext}"
+    if current_app.config.get('APP_EDITION') == 'education':
+        from uuid import uuid4
+        unique_filename = f"{base_name}_{uuid4().hex}{file_ext}"
 
     filepath = materials_dir / unique_filename
     file.save(str(filepath))
@@ -295,7 +303,7 @@ def _save_material_file(file, target_project_id: Optional[str]):
         filename=unique_filename,
         relative_path=relative_path,
         url=image_url,
-        original_filename=filename
+        original_filename=file.filename if current_app.config.get("APP_EDITION") == "education" else filename
     )
 
     try:
@@ -809,7 +817,8 @@ def associate_materials_to_project():
         user_id = current_user_id()
         if user_id:
             materials_to_update = materials_to_update.filter(Material.user_id == user_id)
-        materials_to_update = materials_to_update.all()
+        from services.competition.space import visible_query
+        materials_to_update = visible_query(materials_to_update, Material, 'material').all()
         for material in materials_to_update:
             material.project_id = project_id
             updated_ids.append(material.id)

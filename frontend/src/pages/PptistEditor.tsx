@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useExportTasksStore } from '../store/useExportTasksStore';
+import { useEdition } from '../education/Edition';
 import { apiClient } from '../api/client';
 import { message, receive } from '../../../shared/pptistProtocol';
 type Doc = { revision: number; slides: unknown[]; width: number; height: number; readonly?: boolean; reason?: string };
@@ -11,6 +12,7 @@ export default function PptistEditor() {
   return <PptistEditorSession key={`${projectId}:${params.get('fixture')==='1'}`} />;
 }
 function PptistEditorSession() {
+  const edition=useEdition();
   const { projectId }=useParams(); const navigate=useNavigate();const [params]=useSearchParams();
   const fixture=import.meta.env.DEV && params.get('fixture')==='1';
   const frame=useRef<HTMLIFrameElement>(null);
@@ -104,7 +106,7 @@ function PptistEditorSession() {
   function retry(){ready.current=false;loaded.current=false;sequence.current=0;setError('');setSession(crypto.randomUUID());}
   return <main className="h-screen flex flex-col bg-gray-50">
     <header className="h-14 px-5 flex items-center gap-5 border-b bg-white">
-      <button onClick={()=>{if(!dirty.current||window.confirm('有未保存修改，确认离开？'))navigate(`/project/${projectId}/preview`);}}>返回预览</button>
+      <button onClick={()=>{if(!dirty.current||window.confirm('有未保存修改，确认离开？'))navigate(edition==='education'?`/education/project/${projectId}`:`/project/${projectId}/preview`);}}>{edition==='education'?'返回竞赛工作台':'返回预览'}</button>
       <strong>在线编辑</strong><span role="status" className="text-sm text-gray-500 flex-1">{status}</span>
       <button onClick={()=>void save()} disabled={fixture} className="px-4 py-2 bg-yellow-400 rounded">保存</button>
       <button disabled={fixture||!doc} onClick={()=>void apiClient.get(`/api/projects/${projectId}/editor-document/revisions`).then(r=>setHistory(r.data.data)).catch(()=>setError('历史版本读取失败'))}>历史版本</button>

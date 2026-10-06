@@ -392,6 +392,12 @@ class FileService:
             if template_path.exists() and template_path.is_file():
                 return str(template_path)
         
+        # Education templates have an explicit pointer; clearing it must not
+        # resurrect a previous template from the legacy directory fallback.
+        from flask import current_app
+        if current_app.config.get('APP_EDITION') == 'education':
+            return None
+
         # 如果数据库中没有，回退到目录查找（兼容旧数据）
         template_dir = self._get_template_dir(project_id)
         if template_dir.exists():

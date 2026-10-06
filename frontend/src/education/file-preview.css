@@ -1,0 +1,168 @@
+.file-preview-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 110;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: #20223880;
+}
+.file-preview-modal {
+  display: flex;
+  flex-direction: column;
+  width: min(1100px, 100%);
+  height: min(850px, 90dvh);
+  min-height: 0;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 20px 80px #171a3433;
+  overflow: hidden;
+}
+.file-preview-modal > header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  padding: 18px 22px;
+  border-bottom: 1px solid #eceef4;
+  flex-shrink: 0;
+}
+.file-preview-modal > header > div {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  color: #6774c5;
+}
+.file-preview-modal > header > div > div {
+  min-width: 0;
+}
+.file-preview-modal h2 {
+  font-size: 16px;
+  font-weight: 600;
+  color: #303444;
+  margin: 0 0 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-preview-modal header span {
+  font-size: 12px;
+  color: #929baa;
+}
+.edu-app .file-preview-modal button {
+  font-size: 12px;
+  border: 1px solid #e1e5f0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: white;
+  color: #5a66bb;
+  cursor: pointer;
+}
+.file-preview-actions {
+  flex-shrink: 0;
+}
+.file-preview-note {
+  background: #f4f6fd;
+  color: #7e879e;
+  font-size: 12px;
+  line-height: 1.8;
+  padding: 9px 20px;
+  margin: 0;
+  overflow-wrap: anywhere;
+  flex-shrink: 0;
+}
+.file-preview-image {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: #f0f2f7;
+  overflow: auto;
+}
+.file-preview-image img {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+}
+.file-preview-image.pdf {
+  display: block;
+  text-align: center;
+}
+.file-preview-image.pdf img {
+  max-height: none;
+  width: 100%;
+  height: auto;
+  margin: 0 auto;
+  box-shadow: 0 2px 12px #24294518;
+}
+.file-preview-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  padding: 10px;
+  border-bottom: 1px solid #edf0f5;
+  font-size: 13px;
+  color: #7b8495;
+}
+.file-preview-text {
+  flex: 1;
+  overflow: auto;
+  padding: 28px 32px;
+  min-height: 0;
+}
+.file-preview-text pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 0;
+  font:
+    14px/1.95 -apple-system,
+    BlinkMacSystemFont,
+    "PingFang SC",
+    "Microsoft YaHei",
+    sans-serif;
+  color: #353c4e;
+}
+.file-preview-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+  justify-content: center;
+  padding: 30px;
+  color: #9099ad;
+  text-align: center;
+  font-size: 14px;
+}
+@media (max-width: 650px) {
+  .file-preview-backdrop {
+    padding: 12px;
+  }
+  .file-preview-modal {
+    height: 92dvh;
+  }
+  .file-preview-modal > header {
+    padding: 14px 12px;
+    gap: 10px;
+  }
+  .file-preview-actions {
+    gap: 5px !important;
+  }
+  .file-preview-modal h2 {
+    max-width: 180px;
+    font-size: 14px;
+  }
+  .file-preview-text {
+    padding: 18px;
+  }
+  .file-preview-image {
+    padding: 12px;
+  }
+}

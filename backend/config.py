@@ -14,11 +14,12 @@ PROJECT_ROOT = os.path.dirname(BASE_DIR)
 # Flask配置
 class Config:
     """Base configuration"""
+    APP_EDITION = os.getenv('APP_EDITION', 'general')
     SECRET_KEY = os.getenv('SECRET_KEY', 'your-secret-key-change-this')
     
     # 数据库配置
     # Use absolute path to avoid WSL path issues
-    db_path = os.path.join(BASE_DIR, 'instance', 'database.db')
+    db_path = os.path.join(BASE_DIR, 'instance', 'education.db' if APP_EDITION == 'education' else 'database.db')
     SQLALCHEMY_DATABASE_URI = os.getenv(
         'DATABASE_URL', 
         f'sqlite:///{db_path}'
@@ -36,7 +37,7 @@ class Config:
     }
     
     # 文件存储配置
-    UPLOAD_FOLDER = os.path.join(PROJECT_ROOT, 'uploads')
+    UPLOAD_FOLDER = os.path.join(PROJECT_ROOT, 'uploads-education' if APP_EDITION == 'education' else 'uploads')
     MAX_CONTENT_LENGTH = 200 * 1024 * 1024  # 200MB max file size
     ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
     ALLOWED_REFERENCE_FILE_EXTENSIONS = {'pdf', 'docx', 'pptx', 'doc', 'ppt', 'xlsx', 'xls', 'csv', 'txt', 'md'}

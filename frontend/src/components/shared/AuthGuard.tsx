@@ -14,6 +14,7 @@ import {
 import { useLocation } from 'react-router-dom';
 import { getAuthConfig, getCurrentUser, getSettings, login, logout, register, type AuthUser } from '@/api/endpoints';
 import { useProjectStore } from '@/store/useProjectStore';
+import { useEdition } from '../../education/Edition';
 import type { Settings } from '@/types';
 import { Button } from './Button';
 
@@ -23,6 +24,7 @@ type AuthMethod = 'account' | 'code';
 
 export function AuthGuard({ children }: { children: ReactNode }) {
   const location = useLocation();
+  const education = useEdition() === 'education';
   const [status, setStatus] = useState<Status>('loading');
   const [mode, setMode] = useState<Mode>('login');
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -41,8 +43,8 @@ export function AuthGuard({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [settingsLoading, setSettingsLoading] = useState(false);
   const setCurrentProject = useProjectStore((state) => state.setCurrentProject);
-  const isPublicRoute = location.pathname === '/' || location.pathname === '/landing';
-  const shouldShowUserMenu = location.pathname === '/' || location.pathname === '/app';
+  const isPublicRoute = !education && (location.pathname === '/' || location.pathname === '/landing');
+  const shouldShowUserMenu = education || location.pathname === '/' || location.pathname === '/app';
 
   const loadAuth = async () => {
     setStatus('loading');
@@ -136,19 +138,21 @@ export function AuthGuard({ children }: { children: ReactNode }) {
       <>
         {children}
         {user && shouldShowUserMenu && (
-          <div className="fixed right-4 top-4 z-[100]">
+          <div className={education ? "fixed left-3 bottom-3 z-[100]" : "fixed right-4 top-4 z-[100]"}>
             <button
               type="button"
               onClick={handleToggleMenu}
+              aria-label={education ? `账号：${user.username}` : undefined}
+              title={education ? user.username : undefined}
               className="flex h-10 items-center gap-2 rounded-full border border-[#121212]/10 bg-white/95 px-3 text-sm font-semibold text-[#121212] shadow-lg backdrop-blur transition hover:bg-white dark:border-white/10 dark:bg-background-secondary/95 dark:text-foreground-primary"
             >
               <User className="h-4 w-4" />
-              <span className="max-w-32 truncate">{user.username}</span>
-              <ChevronDown className={`h-4 w-4 transition-transform ${menuOpen ? 'rotate-180' : ''}`} />
+              <span className={education ? "sr-only" : "max-w-32 truncate"}>{user.username}</span>
+              {!education && <ChevronDown className={`h-4 w-4 transition-transform ${menuOpen ? 'rotate-180' : ''}`} />}
             </button>
 
             {menuOpen && (
-              <div className="mt-2 w-80 rounded-xl border border-[#121212]/10 bg-white p-4 text-sm shadow-2xl dark:border-white/10 dark:bg-background-secondary">
+              <div className={`${education ? "absolute bottom-12" : "mt-2"} w-80 rounded-xl border border-[#121212]/10 bg-white p-4 text-sm shadow-2xl dark:border-white/10 dark:bg-background-secondary`}>
                 <div className="mb-3 flex items-center justify-between gap-3 border-b border-[#121212]/10 pb-3 dark:border-white/10">
                   <div className="min-w-0">
                     <p className="truncate font-bold text-gray-900 dark:text-foreground-primary">{user.username}</p>
@@ -203,6 +207,16 @@ export function AuthGuard({ children }: { children: ReactNode }) {
       </div>
     );
   }
+
+  if (education) return <main style={{minHeight:'100vh',display:'grid',placeItems:'center',background:'#f3f6fa',color:'#20364b',padding:24}}><section style={{width:'100%',maxWidth:410,background:'white',border:'1px solid #dae2ea',padding:36,borderRadius:16}}>
+    <p style={{fontSize:13,letterSpacing:2,marginBottom:24}}>兰台 · 竞赛教育版</p><h1 style={{fontSize:26,fontWeight:600,marginBottom:8}}>{mode==='login'?'登录竞赛工作台':'创建教育版账号'}</h1><p style={{color:'#63788c',marginBottom:28}}>资料、内容与成稿保存在当前教育版账号下。</p>
+    <form onSubmit={e=>{e.preventDefault();void handleSubmit();}} style={{display:'grid',gap:16}}>
+      <AuthInput aria-label="教育版账号" placeholder="账号" value={mode==='login'?identifier:username} onChange={e=>mode==='login'?setIdentifier(e.target.value):setUsername(e.target.value)}/>
+      <AuthInput aria-label="教育版密码" placeholder="密码" type="password" value={password} onChange={e=>setPassword(e.target.value)}/>
+      {error&&<p role="alert" style={{color:'#b33434'}}>{error}</p>}
+      <button disabled={submitting} style={{padding:12,background:'#2459aa',color:'white',borderRadius:8}}>{submitting?'处理中…':mode==='login'?'登录':'注册并登录'}</button>
+    </form><button style={{marginTop:20,color:'#2459aa'}} onClick={()=>{setMode(mode==='login'?'register':'login');setError('');}}>{mode==='login'?'创建教育版账号':'已有账号，去登录'}</button>
+  </section></main>;
 
   return (
     <div className="flex min-h-screen w-full flex-col bg-gradient-to-br from-[#e8f8ee] via-[#f2faf2] to-[#d4f0e0] text-[#121212]">

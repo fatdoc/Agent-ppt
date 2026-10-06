@@ -2,13 +2,14 @@
 import os
 import secrets
 
-from flask import Blueprint, request
+from flask import Blueprint, request, current_app
 from sqlalchemy import or_
 
 from models import Settings, User, db
 from utils import bad_request, error_response, success_response
 from utils.auth import (
     auth_required_enabled,
+    auth_cookie_name,
     create_auth_token,
     current_user,
     single_user_mode_allows,
@@ -35,7 +36,7 @@ def _with_auth_cookie(response_tuple, token: str):
     )
     max_age = int(os.getenv('AUTH_TOKEN_MAX_AGE_SECONDS', str(30 * 24 * 60 * 60)))
     response.set_cookie(
-        'banana_auth_token',
+        auth_cookie_name(),
         token,
         max_age=max_age,
         httponly=True,
@@ -43,7 +44,7 @@ def _with_auth_cookie(response_tuple, token: str):
         samesite='Lax',
     )
     response.set_cookie(
-        'banana_csrf_token',
+        auth_cookie_name('csrf'),
         secrets.token_urlsafe(32),
         max_age=max_age,
         httponly=False,
@@ -55,7 +56,7 @@ def _with_auth_cookie(response_tuple, token: str):
 
 @auth_bp.route('/config', methods=['GET'])
 def auth_config():
-    return success_response({'enabled': auth_required_enabled()})
+    return success_response({'enabled': auth_required_enabled(), 'edition': current_app.config.get('APP_EDITION', 'general')})
 
 
 @auth_bp.route('/register', methods=['POST'])
@@ -134,6 +135,6 @@ def logout():
         user.auth_version = int(user.auth_version or 0) + 1
         db.session.commit()
     response, status = success_response(message='Logged out')
-    response.delete_cookie('banana_auth_token')
-    response.delete_cookie('banana_csrf_token')
+    response.delete_cookie(auth_cookie_name())
+    response.delete_cookie(auth_cookie_name('csrf'))
     return response, status

@@ -720,7 +720,7 @@ def generate_images_task(task_id: str, project_id: str, ai_service, file_service
                 futures = [
                     executor.submit(
                         generate_single_image, page.id,
-                        pages_data_by_index.get(page.order_index, {}), i
+                        pages_data_by_index.get(page.order_index, {}), page.order_index + 1
                     )
                     for i, page in enumerate(pages, 1)
                 ]

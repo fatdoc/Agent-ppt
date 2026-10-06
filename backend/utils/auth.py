@@ -13,6 +13,11 @@ from utils.response import error_response, not_found
 
 TOKEN_SALT = 'banana-slides-auth'
 DEFAULT_USERNAME = 'admin'
+
+def auth_cookie_name(kind='auth'):
+    prefix = 'banana_education' if current_app.config.get('APP_EDITION') == 'education' else 'banana'
+    return f'{prefix}_{kind}_token'
+
 SINGLE_USER_MODE_ERROR_CODE = 'SERVICE_MAINTENANCE'
 SINGLE_USER_MODE_ERROR_MESSAGE = 'Service is temporarily limited to the designated account'
 
@@ -178,7 +183,7 @@ def current_user_id() -> Optional[str]:
 def authenticate_request():
     """Populate g.current_user or return an auth error response."""
     bearer_token = get_bearer_token()
-    cookie_token = request.cookies.get('banana_auth_token', '')
+    cookie_token = request.cookies.get(auth_cookie_name(), '')
     token = bearer_token or cookie_token
     user = load_user_from_token(token) if token else None
 
@@ -214,7 +219,7 @@ def validate_csrf_request():
         return None
     if getattr(g, 'auth_transport', None) != 'cookie':
         return None
-    cookie_token = request.cookies.get('banana_csrf_token', '')
+    cookie_token = request.cookies.get(auth_cookie_name('csrf'), '')
     header_token = request.headers.get('X-CSRF-Token', '')
     if not cookie_token or not header_token or not secrets.compare_digest(cookie_token, header_token):
         return error_response('CSRF_FAILED', 'CSRF token is missing or invalid', 403)
@@ -222,6 +227,9 @@ def validate_csrf_request():
 
 
 def owned_project_or_404(project_id: str) -> Optional[Project]:
+    from services.competition.space import is_trashed
+    if is_trashed('project', project_id):
+        return None
     user_id = current_user_id()
     if not user_id:
         return None
@@ -233,6 +241,8 @@ def owned_project_or_404(project_id: str) -> Optional[Project]:
 
 def owned_page_or_404(project_id: str, page_id: str) -> Optional[Page]:
     """Resolve a page only when its complete parent chain belongs to the user."""
+    if not owned_project_or_404(project_id):
+        return None
     user_id = current_user_id()
     if not user_id:
         return None

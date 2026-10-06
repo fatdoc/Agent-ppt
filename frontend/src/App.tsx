@@ -1,5 +1,7 @@
 import { useEffect, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { EditionProvider, useEdition } from './education/Edition';
+const EducationWorkspace = lazy(() => import('./education/Workspace'));
 import { Home } from './pages/Home';
 import { Landing } from './pages/Landing';
 import { History } from './pages/History';
@@ -13,6 +15,13 @@ import { useToast, AccessCodeGuard, AuthGuard } from './components/shared';
 
 const PptistEditor = lazy(() => import('./pages/PptistEditor'));
 
+function EditionEntry({landing=false}:{landing?:boolean}) {
+  return useEdition()==='education' ? <Suspense fallback={<div>正在打开竞赛工作台…</div>}><EducationWorkspace /></Suspense> : landing ? <Landing /> : <Home />;
+}
+function EducationRoute(){
+  return useEdition()==='education' ? <Suspense fallback={<div>正在打开竞赛工作台…</div>}><EducationWorkspace /></Suspense> : <Navigate to='/app' replace/>;
+}
+function EditionHistory() { return useEdition() === 'education' ? <Navigate to="/education/projects" replace /> : <History />; }
 function App() {
   const { currentProject, syncProject, error, setError } = useProjectStore();
   const { show, ToastContainer } = useToast();
@@ -34,14 +43,17 @@ function App() {
   }, [error, setError, show]);
 
   return (
-    <BrowserRouter>
+    <EditionProvider><BrowserRouter>
       <AccessCodeGuard>
         <AuthGuard>
           <Routes>
-            <Route path="/" element={<Landing />} />
-            <Route path="/app" element={<Home />} />
+            <Route path="/" element={<EditionEntry landing />} />
+            <Route path="/app" element={<EditionEntry />} />
             <Route path="/landing" element={<Navigate to="/" replace />} />
-            <Route path="/history" element={<History />} />
+            <Route path="/education" element={<EducationRoute />} />
+            <Route path="/education/:section" element={<EducationRoute />} />
+            <Route path="/education/project/:projectId" element={<EducationRoute />} />
+            <Route path="/history" element={<EditionHistory />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/developer/api-docs" element={<ApiDocsPage />} />
             <Route path="/project/:projectId/outline" element={<OutlineEditor />} />
@@ -53,7 +65,7 @@ function App() {
           <ToastContainer />
         </AuthGuard>
       </AccessCodeGuard>
-    </BrowserRouter>
+    </BrowserRouter></EditionProvider>
   );
 }
 

@@ -185,3 +185,48 @@ def test_all_pages_publish_atomically_and_retry_reuses_good_page(client,conversi
     state=client.get(c['url'],headers=c['headers']).json['data'];assert state['ready'],state
     assert seen==[c['page'],second_id,second_id]
     assert len(json.loads(EditorRevision.query.one().payload))==2
+
+
+def test_education_regeneration_keeps_old_revision_and_detects_stale(client,conversion,app,monkeypatch):
+    monkeypatch.setitem(app.config,'APP_EDITION','education')
+    c=conversion
+    client.post(c['url'],json={},headers=c['headers']);run(c)
+    state=client.get(c['url'],headers=c['headers']).json['data']
+    assert state['ready'] and not state['stale'] and state['revision']==1
+    Image.new('RGB',(800,450),'navy').save(c['root']/'page.png')
+    state=client.get(c['url'],headers=c['headers']).json['data']
+    assert state['stale']
+    assert client.post(c['url'],json={'regenerate':True,'base_revision':0},headers=c['headers']).status_code==409
+    response=client.post(c['url'],json={'regenerate':True,'base_revision':1},headers=c['headers'])
+    assert response.status_code==202,response.json
+    run(c)
+    state=client.get(c['url'],headers=c['headers']).json['data']
+    assert state['revision']==2 and not state['stale'],state
+    assert EditorRevision.query.count()==2
+    assert db.session.get(CreditAccount,c['owner']).lifetime_spent==220
+
+
+def test_education_parallel_conversion_preserves_order_and_provider_scope(client, conversion, app, monkeypatch):
+    from threading import Barrier
+    from services.provider_config import active_provider_snapshot
+    from services.task_execution import current_task_execution
+    import services.pptist_editor.generation as generation
+    monkeypatch.setitem(app.config, 'APP_EDITION', 'education')
+    c = conversion
+    second = Page(project_id=c['project'], order_index=1, generated_image_path=f'{c["project"]}/page.png')
+    db.session.add(second); db.session.commit(); second_id = second.id
+    barrier = Barrier(2, timeout=5)
+    original = generation.extract_page
+    def extract(ai, source, **kw):
+        assert active_provider_snapshot().user_id == c['owner']
+        assert current_task_execution().project_id == c['project']
+        barrier.wait()
+        return original(ai, source, **kw)
+    monkeypatch.setattr(generation, 'extract_page', extract)
+    response = client.post(c['url'], json={}, headers=c['headers'])
+    assert response.status_code == 202
+    run(c)
+    task = db.session.get(Task, response.json['data']['task']['task_id'])
+    assert task.status == 'COMPLETED', task.error_message
+    payload = json.loads(EditorRevision.query.one().payload)
+    assert [p['id'] for p in payload] == [c['page'], second_id]

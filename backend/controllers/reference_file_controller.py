@@ -343,6 +343,8 @@ def list_project_reference_files(project_id):
             reference_files = query.all()
         
         # 列表查询时不包含 markdown_content 和失败计数，加快响应速度
+        from services.competition.space import is_trashed
+        reference_files = [f for f in reference_files if not is_trashed('reference', f.id)]
         return success_response({
             'files': [f.to_dict(include_content=False) for f in reference_files]
         })

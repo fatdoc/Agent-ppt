@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Home, Key, Image, Zap, Save, RotateCcw, Globe, FileText, Brain, ArrowUp, Link2, ChevronDown, Volume2 } from 'lucide-react';
+import { useEdition } from '@/education/Edition';
+import { EducationNavigation } from '@/education/Navigation';
 import { useT } from '@/hooks/useT';
 
 // 组件内翻译
@@ -607,6 +609,7 @@ const formDataFromSettings = (data: SettingsType): typeof initialFormData => ({
 
 // Settings 组件 - 纯嵌入模式（可复用）
 export const Settings: React.FC = () => {
+  const education = useEdition() === "education";
   const t = useT(settingsI18n);
   const { show, ToastContainer } = useToast();
   const { confirm, ConfirmDialog } = useConfirm();
@@ -810,7 +813,7 @@ export const Settings: React.FC = () => {
           label: t('settings.fields.defaultOutputLanguage'),
           type: 'buttons',
           description: t('settings.fields.defaultOutputLanguageDesc'),
-          options: OUTPUT_LANGUAGE_OPTIONS,
+          options: education ? [{ value: 'zh', label: '中文' }] : OUTPUT_LANGUAGE_OPTIONS,
         },
       ],
     },
@@ -909,7 +912,7 @@ export const Settings: React.FC = () => {
         : await api.getSettings();
       if (response.data) {
         setSettings(response.data);
-        setFormData(formDataFromSettings(response.data));
+        setFormData({ ...formDataFromSettings(response.data), ...(education ? { output_language: 'zh' as const } : {}) });
         if (!isOtherUser) {
           setSelfUserId(response.data.user_id || null);
           sessionStorage.setItem('banana-settings', JSON.stringify(response.data));
@@ -944,7 +947,7 @@ export const Settings: React.FC = () => {
       const response = await api.getSettings();
       if (response.data) {
         setSettings(response.data);
-        setFormData(formDataFromSettings(response.data));
+        setFormData({ ...formDataFromSettings(response.data), ...(education ? { output_language: 'zh' as const } : {}) });
         const currentUserId = response.data.user_id || null;
         setSelfUserId(currentUserId);
         setSelectedUserId(currentUserId);
@@ -1054,7 +1057,7 @@ export const Settings: React.FC = () => {
         }
       }
 
-      const response = await api.updateSettings(payload);
+      const response = await api.updateSettings(education ? { ...payload, output_language: 'zh' } : payload);
       if (response.data) {
         setSettings(response.data);
         sessionStorage.setItem('banana-settings', JSON.stringify(response.data));
@@ -1096,7 +1099,7 @@ export const Settings: React.FC = () => {
             const response = await api.resetAdminUserAiConfig(selectedUserId);
             if (response.data) {
               setSettings(response.data);
-              setFormData(formDataFromSettings(response.data));
+              setFormData({ ...formDataFromSettings(response.data), ...(education ? { output_language: 'zh' as const } : {}) });
               show({ message: t('settings.messages.adminResetAiSuccess'), type: 'success' });
             }
             return;
@@ -1105,7 +1108,7 @@ export const Settings: React.FC = () => {
           const response = await api.resetSettings();
           if (response.data) {
             setSettings(response.data);
-            setFormData(formDataFromSettings(response.data));
+            setFormData({ ...formDataFromSettings(response.data), ...(education ? { output_language: 'zh' as const } : {}) });
             show({ message: t('settings.messages.resetSuccess'), type: 'success' });
           }
         } catch (error: any) {
@@ -1988,6 +1991,7 @@ export const Settings: React.FC = () => {
 const SCROLL_SHOW_THRESHOLD = 300;
 
 export const SettingsPage: React.FC = () => {
+  const education = useEdition() === "education";
   const navigate = useNavigate();
   const location = useLocation();
   const t = useT(settingsI18n);
@@ -1998,6 +2002,7 @@ export const SettingsPage: React.FC = () => {
   const canNavigateBack = hasInAppBackHistory || Boolean((location.state as { from?: string } | null)?.from);
 
   const handleBack = () => {
+    if (education) { navigate("/education"); return; }
     if (canNavigateBack) {
       navigate(-1);
       return;
@@ -2012,6 +2017,8 @@ export const SettingsPage: React.FC = () => {
   }, []);
 
   return (
+    <div className={education ? "education-settings-shell" : undefined}>
+    {education && <EducationNavigation />}
     <div className="app-surface min-h-screen dark:bg-background-primary">
       <div className="container mx-auto px-4 py-8 max-w-4xl">
         <Card className="p-6 md:p-8">
@@ -2044,14 +2051,15 @@ export const SettingsPage: React.FC = () => {
       {showTop && (
         <button
           data-testid="back-to-top-button"
-          aria-label="Back to top"
-          title="Back to top"
+          aria-label={education ? "返回顶部" : "Back to top"}
+          title={education ? "返回顶部" : "Back to top"}
           onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
           className="fixed bottom-6 right-6 p-3 rounded-full bg-banana-500 text-white shadow-lg hover:bg-banana-600 transition-all z-50"
         >
           <ArrowUp size={20} />
         </button>
       )}
+    </div>
     </div>
   );
 };

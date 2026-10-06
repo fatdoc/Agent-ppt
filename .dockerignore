@@ -1,0 +1,15 @@
+.git
+.env
+.env.*
+.education-runtime
+.venv
+**/node_modules
+**/__pycache__
+**/.pytest_cache
+**/dist
+frontend/public/editor-app
+backend/instance
+uploads
+uploads-education
+outputs
+*.log

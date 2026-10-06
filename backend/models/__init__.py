@@ -51,3 +51,6 @@ __all__ = [
 ]
 
 from .editor_document import EditorDocument, EditorRevision
+
+from .competition import CompetitionDocument, CompetitionRevision, CompetitionOperation
+from .education_space import EducationSpaceEntry

@@ -87,3 +87,15 @@ frontend/public/editor-fixture/
 !PPTIST_INTEGRATION_CONTRACT.md
 outputs/pptist-qa/
 !PPTIST_DEPENDENCY_AUDIT.md
+
+# Education instance data and versioned content resources
+uploads-education/
+.education-runtime/
+!backend/services/competition/resources/*.md
+!docs/education-v1.md
+!docs/education-v2.md
+!AGENTS.md
+!docs/education-scope.md
+!docs/education-status.md
+.env.education
+outputs/education-v1/

@@ -79,6 +79,8 @@ def create_app(config_overrides=None):
     app.config.from_object(Config)
     if config_overrides:
         app.config.update(config_overrides)
+    if app.config.get('APP_EDITION') not in {'general', 'education'}:
+        raise ValueError('APP_EDITION must be general or education')
     _validate_security_configuration(app)
 
     # Allow DATABASE_URL env var to override config at runtime (supports test isolation)
@@ -154,6 +156,10 @@ def create_app(config_overrides=None):
     app.register_blueprint(style_bp)
     app.register_blueprint(api_key_bp)
     app.register_blueprint(public_ppt_bp)
+    from controllers.competition_controller import competition_bp
+    app.register_blueprint(competition_bp)
+    from controllers.education_space_controller import space_bp
+    app.register_blueprint(space_bp)
 
 
     @app.before_request
@@ -179,7 +185,8 @@ def create_app(config_overrides=None):
             # Deterministic editor requests must not refresh OAuth or load keys.
             from services.provider_config import ProviderConfigSnapshot
             snapshot = (ProviderConfigSnapshot(user.id, 'local-editor-v1', {}, id(app.config))
-                        if request.blueprint == 'editor' or (request.blueprint == 'editor_generation' and request.method == 'GET')
+                        if request.blueprint in {'editor', 'education_space'} or (request.blueprint == 'editor_generation' and request.method == 'GET')
+                        or (request.blueprint == 'competition' and request.endpoint != 'competition.launch')
                         else capture_provider_snapshot(user_id=user.id))
             scope = provider_snapshot_scope(snapshot)
             scope.__enter__()
@@ -209,6 +216,11 @@ def create_app(config_overrides=None):
         if hmac.compare_digest(code, expected):
             return
         return jsonify({'error': 'Access code required'}), 403
+
+    from controllers.competition_controller import protect_education_content
+    app.before_request(protect_education_content)
+    from controllers.education_space_controller import protect_recycled_resources
+    app.before_request(protect_recycled_resources)
 
     # Health check endpoint
     @app.route('/health')

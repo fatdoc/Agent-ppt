@@ -16,8 +16,11 @@ const readCookie = (name: string): string => {
   return match ? decodeURIComponent(match.slice(prefix.length)) : '';
 };
 
+let csrfCookieName = 'banana_csrf_token';
+export const setAuthEdition = (edition: string) => { csrfCookieName = edition === 'education' ? 'banana_education_csrf_token' : 'banana_csrf_token'; };
+
 export const getCsrfHeaders = (): Record<string, string> => {
-  const token = readCookie('banana_csrf_token');
+  const token = readCookie(csrfCookieName);
   return token ? { 'X-CSRF-Token': token } : {};
 };
 

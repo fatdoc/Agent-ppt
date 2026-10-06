@@ -1,0 +1,32 @@
+# Separate Compose project/network/volumes; never reuse general-edition storage.
+name: banana-education
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file: .env.education
+    environment:
+      APP_EDITION: education
+      LOAD_DOTENV: 'false'
+      DATABASE_URL: sqlite:////app/backend/instance/education.db
+      UPLOAD_FOLDER: /app/uploads
+      AUTH_REQUIRED: 'true'
+      IN_DOCKER: '1'
+    volumes:
+      - education-database:/app/backend/instance
+      - education-uploads:/app/uploads
+    restart: unless-stopped
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    ports:
+      - '127.0.0.1:3190:80'
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+volumes:
+  education-database:
+  education-uploads:

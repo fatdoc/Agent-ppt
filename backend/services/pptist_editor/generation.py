@@ -163,7 +163,7 @@ def extract_page(ai, source, *, project_id, user_id, root):
             raise GenerationError('页面语义识别未通过校验，请重试；原图未改变') from exc
 
 
-def generate_document(task_id, *, project_id, user_id, sources, app):
+def generate_document(task_id, *, project_id, user_id, sources, app, base_editor_revision=0):
     from services.ai_service_manager import create_ai_service
     with app.app_context():
         task = db.session.get(Task, task_id)
@@ -184,11 +184,11 @@ def generate_document(task_id, *, project_id, user_id, sources, app):
             store = AssetStore(root, user_id=user_id, project_id=project_id)
             cache = StageCache(root / '.editor-generation-checkpoints', [user_id, project_id, STRATEGY, snapshot.cache_scope])
             ai, pages = create_ai_service(), []
-            for i, source in enumerate(sources):
-                checkpoint(); progress(i, f'正在转换第 {i+1}/{len(sources)} 页')
+            def convert_one(source, service):
+                checkpoint()
                 key = digest(source)
                 def rebuild(s=source):
-                    return extract_page(ai, s, project_id=project_id, user_id=user_id, root=root).model_dump(mode='json')
+                    return extract_page(service, s, project_id=project_id, user_id=user_id, root=root).model_dump(mode='json')
                 raw, hit = cache.run(key, rebuild)
                 try:
                     page = load_page(raw); store.verify(page)
@@ -200,7 +200,35 @@ def generate_document(task_id, *, project_id, user_id, sources, app):
                     EditableExportCheckpoint._publish(cache.root/(key+'.json'), {'payload':raw, 'sha256':digest(raw)})
                 if page.id != source['id'] or page.source.sha256 != source['sha256']:
                     raise GenerationError('转换缓存与当前图片不一致')
-                PPTistAdapter().to_editor(page); pages.append(page)
+                PPTistAdapter().to_editor(page)
+                return page
+            if app.config.get('APP_EDITION') == 'education' and len(sources) > 1:
+                # Worker-local Provider/app contexts; only the coordinator writes task state.
+                from concurrent.futures import ThreadPoolExecutor, as_completed
+                from services.provider_config import provider_snapshot_scope
+                from services.task_execution import task_execution_scope
+                def worker(source):
+                    with app.app_context(), provider_snapshot_scope(snapshot), task_execution_scope(control):
+                        return convert_one(source, create_ai_service())
+                completed, failures = {}, []
+                with ThreadPoolExecutor(max_workers=min(4, len(sources))) as pool:
+                    futures = {pool.submit(worker, source): i for i, source in enumerate(sources)}
+                    for future in as_completed(futures):
+                        checkpoint()
+                        index = futures[future]
+                        try:
+                            completed[index] = future.result()
+                        except Exception:
+                            failures.append(index + 1)
+                        progress(len(completed), f'正在转换页面；{len(failures)} 页待重试')
+                if failures:
+                    failed_pages = '、'.join(map(str, sorted(failures)))
+                    raise GenerationError(f'第 {failed_pages} 页转换未完成；重试会复用已成功转换的页面，原图保持不变')
+                pages = [completed[i] for i in range(len(sources))]
+            else:
+                for i, source in enumerate(sources):
+                    checkpoint(); progress(i, f'正在转换第 {i+1}/{len(sources)} 页')
+                    pages.append(convert_one(source, ai))
             if len({(p.width,p.height) for p in pages}) != 1:
                 raise GenerationError('页面画布尺寸不一致，请统一图片比例与尺寸后重试')
             checkpoint(); progress(len(pages), '正在验证并生成可编辑 PPTX')
@@ -216,17 +244,21 @@ def generate_document(task_id, *, project_id, user_id, sources, app):
             project = db.session.get(Project, project_id)
             if not project or project.user_id != user_id: raise GenerationError('项目不存在')
             verify_sources(project_id, sources)
-            if db.session.get(EditorDocument, project_id): raise GenerationError('项目已有在线编辑版本，未覆盖现有修改')
+            existing_doc=db.session.get(EditorDocument, project_id)
+            if (existing_doc.revision if existing_doc else 0) != base_editor_revision:
+                raise GenerationError('在线编辑版本已变化，未覆盖现有修改')
+            next_revision=base_editor_revision+1
             checkpoint()
             staging = root/'.editor-staging'; staging.mkdir(exist_ok=True)
             exports = root/'exports'; exports.mkdir(exist_ok=True)
-            name = f'editor-r1-{task_id}.pptx'
+            name = f'editor-r{next_revision}-{task_id}.pptx'
             with tempfile.NamedTemporaryFile(dir=staging, delete=False) as f:
                 f.write(raw); f.flush(); os.fsync(f.fileno()); temporary=f.name
             os.replace(temporary, exports/name)
-            db.session.add(EditorDocument(project_id=project_id, revision=1))
-            db.session.add(EditorRevision(project_id=project_id, revision=1, actor_user_id=user_id, payload=payload))
-            p=task.get_progress(); p.update(completed=len(pages), total=len(pages), current_step='转换完成，进入在线编辑', revision=1,
+            if existing_doc: existing_doc.revision=next_revision
+            else: db.session.add(EditorDocument(project_id=project_id, revision=next_revision))
+            db.session.add(EditorRevision(project_id=project_id, revision=next_revision, actor_user_id=user_id, payload=payload))
+            p=task.get_progress(); p.update(completed=len(pages), total=len(pages), current_step='转换完成，进入在线编辑', revision=next_revision,
                                            editor_url=f'/project/{project_id}/editor', filename=name,
                                            download_url=f'/api/projects/{project_id}/editor-document/exports/{task_id}', structure=report)
             task.set_progress(p); task.status='COMPLETED'; task.completed_at=datetime.utcnow()

@@ -1,8 +1,9 @@
 """Explicit billable conversion; intentionally NOT on Provider-free editor_bp."""
 from flask import Blueprint, current_app, request
 from time import monotonic
+import json
 from models import db, Project, Page, Task
-from models.editor_document import EditorDocument
+from models.editor_document import EditorDocument, EditorRevision
 from services.pptist_editor.generation import TASK_TYPE, GenerationError, capture_sources, generate_document
 from services.credit_service import InsufficientCredits, estimate_operation, reserve_credits, attach_task_credit_progress, settle_task_credits
 from services.provider_config import active_provider_snapshot
@@ -19,17 +20,34 @@ editor_generation_bp = Blueprint('editor_generation', __name__, url_prefix='/api
 def editable_generation(project_id):
     if not owned_project_or_404(project_id): return not_found('Project')
     try:
+        body=request.get_json(silent=True) or {}
+        regenerate = current_app.config.get('APP_EDITION') == 'education' and body.get('regenerate') is True
+        if regenerate and (set(body) != {'regenerate', 'base_revision'} or type(body.get('base_revision')) is not int):
+            raise GenerationError('重新转换必须提供在线编辑版本')
         if request.method == 'POST':
             body=request.get_json(silent=True)
-            if body not in ({}, None): return error_response('INVALID_REQUEST', '转换范围为整个项目，不接受客户端文件路径或用户 ID', 400)
+            if body not in ({}, None) and not regenerate: return error_response('INVALID_REQUEST', '转换范围为整个项目，不接受客户端文件路径或用户 ID', 400)
             # DB write lock makes duplicate submit / reservation atomic across
             # workers, not just within this Python process.
             db.session.execute(db.update(Project).where(Project.id==project_id).values(updated_at=Project.updated_at))
         doc=db.session.get(EditorDocument, project_id)
         task=Task.query.filter_by(project_id=project_id, user_id=current_user_id(), task_type=TASK_TYPE).order_by(Task.created_at.desc()).first()
-        if doc:
+        if doc and not regenerate:
+            stale = False
+            if current_app.config.get('APP_EDITION') == 'education':
+                try:
+                    sources = capture_sources(project_id)
+                    row = EditorRevision.query.filter_by(project_id=project_id, revision=doc.revision).one()
+                    semantic = json.loads(row.payload)
+                    stale = [(p['id'], p['source']['sha256']) for p in semantic] != [(p['id'], p['sha256']) for p in sources]
+                except (GenerationError, OSError):
+                    stale = True
+            result=dict(ready=True, stale=stale, revision=doc.revision, editor_url=f'/project/{project_id}/editor', task=task.to_dict() if task else None)
             db.session.rollback()
-            return success_response(dict(ready=True, editor_url=f'/project/{project_id}/editor', task=task.to_dict() if task else None))
+            return success_response(result)
+        if regenerate and (not doc or doc.revision != body['base_revision']):
+            db.session.rollback(); return error_response('EDITOR_REVISION_CONFLICT', '在线编辑版本已变化，请刷新后重新转换', 409)
+        base_editor_revision=doc.revision if regenerate else 0
         if request.method == 'GET' or (task and task.status in ('PENDING', 'PROCESSING')):
             result=dict(ready=False, task=task.to_dict() if task else None,
                         credit_estimate=estimate_operation('editable_export', page_count=Page.query.filter_by(project_id=project_id).count()).to_dict())
@@ -45,7 +63,7 @@ def editable_generation(project_id):
         task.set_progress(p); db.session.commit()
         try:
             task_manager.submit_task(task.id, generate_document, project_id=project_id, user_id=current_user_id(), sources=sources,
-                                     app=current_app._get_current_object(), provider_snapshot=active_provider_snapshot(),
+                                     app=current_app._get_current_object(), base_editor_revision=base_editor_revision, provider_snapshot=active_provider_snapshot(),
                                      execution_context=TaskExecutionContext(task.id, current_user_id(), project_id, deadline=monotonic()+max(900, 300*len(sources))))
         except Exception:
             task.status='FAILED'; task.error_message='转换任务提交失败，请重试'
